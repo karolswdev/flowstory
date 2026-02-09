@@ -1,7 +1,7 @@
 import { Handle, Position } from '@xyflow/react';
 import { motion, AnimatePresence } from 'motion/react';
 import type { EventNodeProps } from './types';
-import { nodeVariants, flashVariants, getNodeAnimationState } from './animations';
+import { nodeVariants, flashVariants, getNodeAnimationState } from '../../animations/nodeVariants';
 import './nodes.css';
 
 /**

@@ -1,8 +1,6 @@
-export { useAnimationController, ANIMATION_TIMING } from './useAnimationController';
-export type { default as AnimationController } from './useAnimationController';
+/**
+ * FlowStory Hooks
+ */
 
-export { useReadingTimer, calculateReadingTime } from './useReadingTimer';
-export { useNarrationController } from './useNarrationController';
-export type { NarrationState, NarrationStep } from './useNarrationController';
-
-export { useArchitecturalLayout } from './useArchitecturalLayout';
+export { useCameraController, useAutoFocus } from './useCameraController';
+export { useNarrativeMode, type NarrativeConfig, type NarrativeStep } from './useNarrativeMode';

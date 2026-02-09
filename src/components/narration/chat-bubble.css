@@ -1,0 +1,315 @@
+/* ============================================
+   Chat Bubble Styles
+   ============================================ */
+
+.chat-bubble {
+  position: fixed;
+  max-width: 360px;
+  background: rgba(255, 255, 255, 0.98);
+  border-radius: 16px;
+  padding: 16px 20px;
+  box-shadow: 
+    0 8px 32px rgba(0, 0, 0, 0.12),
+    0 2px 8px rgba(0, 0, 0, 0.08);
+  font-family: 'Inter', system-ui, sans-serif;
+  z-index: 1002;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.chat-bubble:hover {
+  transform: translateY(-2px);
+}
+
+/* Position variants */
+.chat-bubble--left {
+  left: 40px;
+  bottom: 120px;
+}
+
+.chat-bubble--right {
+  right: 40px;
+  bottom: 120px;
+}
+
+.chat-bubble--center {
+  left: 50%;
+  bottom: 120px;
+  transform: translateX(-50%);
+}
+
+.chat-bubble--center:hover {
+  transform: translateX(-50%) translateY(-2px);
+}
+
+/* ============================================
+   Tail (pointer to element)
+   ============================================ */
+
+.chat-bubble-tail {
+  position: absolute;
+  width: 0;
+  height: 0;
+}
+
+.chat-bubble-tail--top {
+  top: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-left: 12px solid transparent;
+  border-right: 12px solid transparent;
+  border-bottom: 12px solid rgba(255, 255, 255, 0.98);
+}
+
+.chat-bubble-tail--bottom {
+  bottom: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-left: 12px solid transparent;
+  border-right: 12px solid transparent;
+  border-top: 12px solid rgba(255, 255, 255, 0.98);
+}
+
+.chat-bubble-tail--left {
+  left: -10px;
+  top: 24px;
+  border-top: 12px solid transparent;
+  border-bottom: 12px solid transparent;
+  border-right: 12px solid rgba(255, 255, 255, 0.98);
+}
+
+.chat-bubble-tail--right {
+  right: -10px;
+  top: 24px;
+  border-top: 12px solid transparent;
+  border-bottom: 12px solid transparent;
+  border-left: 12px solid rgba(255, 255, 255, 0.98);
+}
+
+/* ============================================
+   Header
+   ============================================ */
+
+.chat-bubble-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.chat-bubble-avatar {
+  font-size: 28px;
+  line-height: 1;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
+}
+
+.chat-bubble-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1a1a1a;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-bubble-narrator-badge {
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #6366f1;
+  background: #eef2ff;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+/* ============================================
+   Content
+   ============================================ */
+
+.chat-bubble-content {
+  min-height: 40px;
+}
+
+.chat-bubble-text {
+  font-size: 15px;
+  line-height: 1.6;
+  color: #374151;
+  margin: 0;
+}
+
+.typing-cursor {
+  display: inline-block;
+  animation: blink 0.8s infinite;
+  color: #6366f1;
+  font-weight: 300;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* ============================================
+   Typing Animation
+   ============================================ */
+
+.chat-bubble-typing {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 0;
+}
+
+.typing-dot {
+  width: 8px;
+  height: 8px;
+  background: #9ca3af;
+  border-radius: 50%;
+  animation: typing-bounce 1.4s ease-in-out infinite;
+}
+
+.typing-dot:nth-child(1) {
+  animation-delay: 0s;
+}
+
+.typing-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.typing-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes typing-bounce {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    background: #9ca3af;
+  }
+  30% {
+    transform: translateY(-6px);
+    background: #6366f1;
+  }
+}
+
+/* ============================================
+   Hint
+   ============================================ */
+
+.chat-bubble-hint {
+  margin-top: 12px;
+  text-align: center;
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+.chat-bubble-hint kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  background: #f3f4f6;
+  border-radius: 3px;
+  font-family: 'SF Mono', Monaco, monospace;
+  font-size: 10px;
+  color: #6b7280;
+}
+
+/* ============================================
+   Dark Mode
+   ============================================ */
+
+[data-theme="dark"] .chat-bubble {
+  background: rgba(30, 30, 30, 0.98);
+  box-shadow: 
+    0 8px 32px rgba(0, 0, 0, 0.4),
+    0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+[data-theme="dark"] .chat-bubble-header {
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="dark"] .chat-bubble-name {
+  color: #f3f4f6;
+}
+
+[data-theme="dark"] .chat-bubble-narrator-badge {
+  background: rgba(99, 102, 241, 0.2);
+  color: #a5b4fc;
+}
+
+[data-theme="dark"] .chat-bubble-text {
+  color: #d1d5db;
+}
+
+[data-theme="dark"] .chat-bubble-tail--top {
+  border-bottom-color: rgba(30, 30, 30, 0.98);
+}
+
+[data-theme="dark"] .chat-bubble-tail--bottom {
+  border-top-color: rgba(30, 30, 30, 0.98);
+}
+
+[data-theme="dark"] .chat-bubble-tail--left {
+  border-right-color: rgba(30, 30, 30, 0.98);
+}
+
+[data-theme="dark"] .chat-bubble-tail--right {
+  border-left-color: rgba(30, 30, 30, 0.98);
+}
+
+[data-theme="dark"] .typing-dot {
+  background: #6b7280;
+}
+
+[data-theme="dark"] .chat-bubble-hint {
+  color: #6b7280;
+}
+
+[data-theme="dark"] .chat-bubble-hint kbd {
+  background: #374151;
+  color: #9ca3af;
+}
+
+/* ============================================
+   Responsive
+   ============================================ */
+
+@media (max-width: 600px) {
+  .chat-bubble {
+    max-width: calc(100vw - 32px);
+    left: 16px !important;
+    right: 16px !important;
+    transform: none !important;
+  }
+  
+  .chat-bubble:hover {
+    transform: none !important;
+  }
+  
+  .chat-bubble-hint {
+    display: none;
+  }
+}
+
+/* ============================================
+   Reduced Motion
+   ============================================ */
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-bubble,
+  .chat-bubble * {
+    animation: none !important;
+    transition: none !important;
+  }
+  
+  .typing-cursor {
+    animation: none;
+    opacity: 1;
+  }
+  
+  .typing-dot {
+    animation: none;
+  }
+}

@@ -25,7 +25,7 @@ export const ANIMATION_TIMING = {
   particleDelay: 100, // After edge draws
   
   // Glow
-  glowPulseDuration: 2000,
+  glowPulseDuration: 1500,
   
   // Dim
   dimTransitionDuration: 300,

@@ -5,9 +5,10 @@ export type { AnimationPhase } from './AnimatedEventEdge';
 export { ErrorEdge } from './ErrorEdge';
 export { AsyncEdge } from './AsyncEdge';
 export { EdgeMarkers } from './EdgeMarkers';
+export { EdgeParticle, SvgEdgeParticle } from './EdgeParticle';
 
 export * from './types';
-export * from './animations';
+export * from '../../animations/edgeVariants';
 
 import type { EdgeTypes } from '@xyflow/react';
 import { FlowEdge } from './FlowEdge';

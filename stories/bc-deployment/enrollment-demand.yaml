@@ -1,0 +1,234 @@
+title: "Enrollment & Demand BC - Deployment Overview"
+version: 2
+type: bc-deployment
+
+bc:
+  id: enrollment-demand
+  type: bc-core
+  name: "Enrollment & Demand"
+  icon: "🎓"
+  description: "Handles student enrollment, transportation requests, and demand forecasting"
+  color: "#4CAF50"
+  publishes:
+    - TrfSubmittedEvent
+    - StudentEnrolledEvent
+    - DemandForecastUpdatedEvent
+  subscribes:
+    - RouteAssignedEvent
+    - DistrictConfigChangedEvent
+
+artifacts:
+  - id: helm-chart
+    type: artifact
+    artifactType: helm-chart
+    name: "enrollment-demand"
+    path: "charts/enrollment-demand"
+    description: "Base Helm chart for the Enrollment & Demand service"
+    
+  - id: values-prod
+    type: artifact
+    artifactType: values-yaml
+    name: "values-prod.yaml"
+    path: "environments/prod/values.yaml"
+    description: "Production environment overrides"
+    highlights:
+      - key: replicas
+        value: "3"
+      - key: resources.limits.memory
+        value: "2Gi"
+        
+  - id: values-staging
+    type: artifact
+    artifactType: values-yaml
+    name: "values-staging.yaml"
+    path: "environments/staging/values.yaml"
+    description: "Staging environment overrides"
+    highlights:
+      - key: replicas
+        value: "1"
+      - key: resources.limits.memory
+        value: "512Mi"
+
+  - id: deployment
+    type: artifact
+    artifactType: deployment
+    name: "enrollment-demand"
+    description: "Main application deployment with 3 replicas in production"
+    
+  - id: event-processor
+    type: artifact
+    artifactType: deployment
+    name: "enrollment-demand-processor"
+    description: "Event processor for handling domain events from Service Bus"
+    
+  - id: service
+    type: artifact
+    artifactType: service
+    name: "enrollment-demand-svc"
+    description: "ClusterIP service exposing gRPC and HTTP ports"
+    
+  - id: ingress
+    type: artifact
+    artifactType: ingress
+    name: "enrollment-demand-ingress"
+    description: "Ingress for external API access via APIM"
+    
+  - id: configmap
+    type: artifact
+    artifactType: configmap
+    name: "enrollment-demand-config"
+    description: "Application configuration (feature flags, endpoints)"
+    highlights:
+      - key: CONDUCTOR_URL
+        value: "http://orkes-conductor:8080"
+      - key: FEATURE_NEW_TRF_FLOW
+        value: "true"
+        
+  - id: secrets
+    type: artifact
+    artifactType: secret
+    name: "enrollment-demand-secrets"
+    description: "Sealed secrets for database and service bus connections"
+    
+  - id: hpa
+    type: artifact
+    artifactType: hpa
+    name: "enrollment-demand-hpa"
+    description: "Horizontal Pod Autoscaler (3-10 replicas based on CPU)"
+    highlights:
+      - key: minReplicas
+        value: "3"
+      - key: maxReplicas
+        value: "10"
+      - key: targetCPU
+        value: "70%"
+        
+  - id: pdb
+    type: artifact
+    artifactType: pdb
+    name: "enrollment-demand-pdb"
+    description: "Pod Disruption Budget ensuring 2 pods always available"
+    
+  - id: servicebus
+    type: artifact
+    artifactType: external
+    name: "Azure Service Bus"
+    description: "Domain event transport for pub/sub messaging"
+
+edges:
+  - id: bc-to-helm
+    source: enrollment-demand
+    target: helm-chart
+    type: contains
+    
+  - id: helm-to-values-prod
+    source: helm-chart
+    target: values-prod
+    type: overrides
+    label: "prod"
+    
+  - id: helm-to-values-staging
+    source: helm-chart
+    target: values-staging
+    type: overrides
+    label: "staging"
+    
+  - id: helm-to-deployment
+    source: helm-chart
+    target: deployment
+    type: contains
+    
+  - id: helm-to-processor
+    source: helm-chart
+    target: event-processor
+    type: contains
+    
+  - id: helm-to-service
+    source: helm-chart
+    target: service
+    type: contains
+    
+  - id: service-to-ingress
+    source: service
+    target: ingress
+    type: exposes
+    
+  - id: deployment-to-config
+    source: deployment
+    target: configmap
+    type: mounts
+    
+  - id: deployment-to-secrets
+    source: deployment
+    target: secrets
+    type: mounts
+    
+  - id: hpa-to-deployment
+    source: hpa
+    target: deployment
+    type: scales
+    
+  - id: pdb-to-deployment
+    source: pdb
+    target: deployment
+    type: configures
+    
+  - id: processor-to-servicebus
+    source: event-processor
+    target: servicebus
+    type: depends
+
+steps:
+  - order: 1
+    title: "The Bounded Context"
+    description: "Enrollment & Demand handles student enrollment, transportation requests (TRFs), and demand forecasting. It publishes domain events like TrfSubmittedEvent."
+    focusNodes: [enrollment-demand]
+    zoomLevel: 0.8
+    duration: 6000
+    
+  - order: 2
+    title: "Helm Chart Foundation"
+    description: "The base Helm chart defines all Kubernetes resources. Environment-specific values files override defaults for staging and production."
+    focusNodes: [helm-chart, values-prod, values-staging]
+    activeEdges: [bc-to-helm, helm-to-values-prod, helm-to-values-staging]
+    zoomLevel: 1.2
+    duration: 7000
+    
+  - order: 3
+    title: "Core Deployments"
+    description: "Two deployments: the main API service and an event processor that handles domain events from Azure Service Bus."
+    focusNodes: [deployment, event-processor, servicebus]
+    activeEdges: [helm-to-deployment, helm-to-processor, processor-to-servicebus]
+    zoomLevel: 1.2
+    duration: 6000
+    
+  - order: 4
+    title: "Configuration & Secrets"
+    description: "ConfigMaps hold application config like Conductor URL and feature flags. Secrets contain encrypted database and Service Bus credentials."
+    focusNodes: [configmap, secrets]
+    activeEdges: [deployment-to-config, deployment-to-secrets]
+    zoomLevel: 1.4
+    duration: 6000
+    
+  - order: 5
+    title: "Scaling & Resilience"
+    description: "HPA scales pods from 3-10 based on CPU. PDB ensures at least 2 pods survive node disruptions."
+    focusNodes: [hpa, pdb, deployment]
+    activeEdges: [hpa-to-deployment, pdb-to-deployment]
+    zoomLevel: 1.3
+    duration: 6000
+    
+  - order: 6
+    title: "External Access"
+    description: "Service exposes the deployment internally. Ingress connects to Azure API Management for external access."
+    focusNodes: [service, ingress]
+    activeEdges: [helm-to-service, service-to-ingress]
+    zoomLevel: 1.2
+    duration: 5000
+    
+  - order: 7
+    title: "Complete Picture"
+    description: "Together, these artifacts form the complete deployment footprint of the Enrollment & Demand bounded context."
+    focusNodes: [enrollment-demand]
+    zoomLevel: 0.6
+    duration: 5000

@@ -6,7 +6,7 @@ export { EventNode } from './EventNode';
 export { StateNode } from './StateNode';
 
 export * from './types';
-export * from './animations';
+export * from '../../animations/nodeVariants';
 
 import type { NodeTypes } from '@xyflow/react';
 import { ActorNode } from './ActorNode';

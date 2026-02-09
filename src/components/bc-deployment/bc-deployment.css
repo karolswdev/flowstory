@@ -1,0 +1,402 @@
+/* ============================================
+   BC Deployment Renderer Styles
+   ============================================ */
+
+/* ============================================
+   BC Core Node - Central Hub
+   ============================================ */
+.bc-core-node {
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #ffffff 0%, #f5f5f5 100%);
+  border: 4px solid var(--bc-color, #4CAF50);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  position: relative;
+  font-family: 'Inter', system-ui, sans-serif;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  transition: transform 0.2s ease;
+}
+
+.bc-core-node:hover {
+  transform: scale(1.02);
+}
+
+.bc-core-node.node-active {
+  border-width: 5px;
+  background: linear-gradient(135deg, #ffffff 0%, #e8f5e9 100%);
+}
+
+.bc-core-pulse {
+  position: absolute;
+  inset: -10px;
+  border-radius: 50%;
+  border: 3px solid var(--bc-color, #4CAF50);
+  pointer-events: none;
+}
+
+.bc-core-icon {
+  font-size: 48px;
+  line-height: 1;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
+}
+
+.bc-core-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1a1a1a;
+  text-align: center;
+  line-height: 1.2;
+  max-width: 120px;
+}
+
+.bc-core-events {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.bc-event-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 10px;
+  cursor: help;
+}
+
+.bc-event-publishes {
+  background: #E8F5E9;
+  color: #2E7D32;
+}
+
+.bc-event-subscribes {
+  background: #E3F2FD;
+  color: #1565C0;
+}
+
+.bc-handle {
+  width: 8px;
+  height: 8px;
+  background: var(--bc-color, #4CAF50);
+  border: 2px solid white;
+  opacity: 0;
+}
+
+.bc-core-node:hover .bc-handle {
+  opacity: 1;
+}
+
+/* ============================================
+   Artifact Node
+   ============================================ */
+.artifact-node {
+  min-width: 100px;
+  max-width: 160px;
+  padding: 12px 16px;
+  background: white;
+  border: 2px solid var(--artifact-color, #78909C);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  position: relative;
+  font-family: 'Inter', system-ui, sans-serif;
+  transition: transform 0.15s ease;
+}
+
+.artifact-node:hover {
+  transform: translateY(-2px);
+}
+
+.artifact-node.node-active {
+  border-width: 3px;
+  background: linear-gradient(135deg, #ffffff 0%, #fafafa 100%);
+}
+
+.artifact-icon {
+  font-size: 28px;
+  line-height: 1;
+}
+
+.artifact-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1a1a1a;
+  text-align: center;
+  word-break: break-word;
+  max-width: 140px;
+}
+
+.artifact-path {
+  font-size: 10px;
+  color: #666;
+  font-family: 'Fira Code', 'SF Mono', monospace;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artifact-type-label {
+  position: absolute;
+  bottom: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 9px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: white;
+  background: var(--artifact-color, #78909C);
+  padding: 2px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.artifact-handle {
+  width: 6px;
+  height: 6px;
+  background: var(--artifact-color, #78909C);
+  border: 2px solid white;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.artifact-node:hover .artifact-handle {
+  opacity: 1;
+}
+
+/* ============================================
+   Artifact Details Panel
+   ============================================ */
+.artifact-details {
+  width: 100%;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #e0e0e0;
+  overflow: hidden;
+}
+
+.artifact-description {
+  font-size: 11px;
+  color: #555;
+  line-height: 1.4;
+  margin: 0 0 8px 0;
+  text-align: center;
+}
+
+.artifact-highlights {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.artifact-highlight {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  font-family: 'Fira Code', 'SF Mono', monospace;
+  background: #f5f5f5;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.highlight-key {
+  color: #666;
+}
+
+.highlight-value {
+  color: #1a1a1a;
+  font-weight: 600;
+}
+
+/* ============================================
+   Artifact Type Variants
+   ============================================ */
+.artifact-helm-chart {
+  border-style: solid;
+}
+
+.artifact-values-yaml {
+  border-style: dashed;
+}
+
+.artifact-deployment .artifact-icon {
+  animation: none;
+}
+
+.artifact-deployment.node-active .artifact-icon {
+  animation: rocket-launch 2s ease-in-out infinite;
+}
+
+@keyframes rocket-launch {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+.artifact-secret {
+  background: linear-gradient(135deg, #ffffff 0%, #f3e5f5 100%);
+}
+
+.artifact-configmap {
+  background: linear-gradient(135deg, #ffffff 0%, #fff3e0 100%);
+}
+
+.artifact-external {
+  border-style: dotted;
+  background: linear-gradient(135deg, #ffffff 0%, #eceff1 100%);
+}
+
+/* ============================================
+   Canvas Background
+   ============================================ */
+.bc-deployment-canvas {
+  background: radial-gradient(circle at center, #f8f9fa 0%, #e8eaed 100%);
+}
+
+.bc-deployment-canvas .react-flow__background {
+  opacity: 0.5;
+}
+
+/* ============================================
+   Edge Styles
+   ============================================ */
+.bc-deployment-edge {
+  stroke-width: 2;
+}
+
+.bc-deployment-edge.edge-active {
+  stroke-width: 3;
+  filter: drop-shadow(0 0 4px currentColor);
+}
+
+.bc-deployment-edge-label {
+  font-size: 10px;
+  font-weight: 600;
+  background: white;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid #e0e0e0;
+}
+
+/* ============================================
+   Step Description Overlay
+   ============================================ */
+.bc-step-overlay {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(8px);
+  border-radius: 16px;
+  padding: 20px 32px;
+  max-width: 500px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  z-index: 100;
+}
+
+.bc-step-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1a1a1a;
+  margin: 0 0 8px 0;
+}
+
+.bc-step-description {
+  font-size: 14px;
+  color: #555;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.bc-step-progress {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.bc-step-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #e0e0e0;
+  transition: all 0.2s ease;
+}
+
+.bc-step-dot.active {
+  background: var(--bc-color, #4CAF50);
+  transform: scale(1.25);
+}
+
+.bc-step-dot.complete {
+  background: var(--bc-color, #4CAF50);
+  opacity: 0.5;
+}
+
+/* ============================================
+   Dark Mode
+   ============================================ */
+[data-theme="dark"] .bc-core-node {
+  background: linear-gradient(135deg, #2d2d2d 0%, #1a1a1a 100%);
+}
+
+[data-theme="dark"] .bc-core-name {
+  color: #e0e0e0;
+}
+
+[data-theme="dark"] .artifact-node {
+  background: #2d2d2d;
+}
+
+[data-theme="dark"] .artifact-name {
+  color: #e0e0e0;
+}
+
+[data-theme="dark"] .artifact-path {
+  color: #aaa;
+}
+
+[data-theme="dark"] .artifact-details {
+  border-color: #444;
+}
+
+[data-theme="dark"] .artifact-description {
+  color: #bbb;
+}
+
+[data-theme="dark"] .artifact-highlight {
+  background: #1a1a1a;
+}
+
+[data-theme="dark"] .highlight-key {
+  color: #888;
+}
+
+[data-theme="dark"] .highlight-value {
+  color: #e0e0e0;
+}
+
+[data-theme="dark"] .bc-step-overlay {
+  background: rgba(30, 30, 30, 0.95);
+}
+
+[data-theme="dark"] .bc-step-title {
+  color: #e0e0e0;
+}
+
+[data-theme="dark"] .bc-step-description {
+  color: #bbb;
+}
+
+[data-theme="dark"] .bc-deployment-canvas {
+  background: radial-gradient(circle at center, #1a1a1a 0%, #0d0d0d 100%);
+}

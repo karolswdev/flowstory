@@ -42,9 +42,9 @@ echo "=== Generating Demo GIFs ==="
 echo ""
 
 generate_gif "user-registration" "demo-user-story"
-generate_gif "http/user-creation" "demo-http-flow"
-generate_gif "service/order-processing" "demo-service-flow"
-generate_gif "pipeline/ci-cd-deploy" "demo-pipeline"
+generate_gif "http-user-creation" "demo-http-flow"
+generate_gif "service-order-processing" "demo-service-flow"
+generate_gif "pipeline-cicd" "demo-pipeline"
 
 echo ""
 echo "=== Done! ==="

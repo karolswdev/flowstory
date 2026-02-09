@@ -1,4 +1,31 @@
 /* ============================================
+   Edge Particles
+   ============================================ */
+.edge-particle {
+  transform-origin: center center;
+}
+
+.edge-particle-group {
+  pointer-events: none;
+}
+
+/* Particle trail effect */
+@keyframes particle-pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 0.8;
+  }
+}
+
+.edge-particle-active {
+  animation: particle-pulse 0.6s ease-in-out infinite;
+}
+
+/* ============================================
    Base Edge Styles
    ============================================ */
 
@@ -63,7 +90,7 @@
   background: white;
   padding: 2px 6px;
   border-radius: 4px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   color: #4CAF50;
   border: 1px solid #4CAF50;
@@ -102,7 +129,7 @@
   background: white;
   padding: 2px 6px;
   border-radius: 4px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   color: #F57F17;
   border: 1px solid #FFC107;
@@ -124,7 +151,7 @@
   background: white;
   padding: 2px 6px;
   border-radius: 4px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   color: #C62828;
   border: 1px solid #F44336;
@@ -163,7 +190,7 @@
   background: white;
   padding: 2px 6px;
   border-radius: 4px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   color: #6A1B9A;
   border: 1px solid #9C27B0;
@@ -234,4 +261,93 @@
 }
 .compensation-edge.edge-active {
   stroke: #D84315;
+}
+
+/* ============================================
+   Dark Mode Edge Styles
+   ============================================ */
+[data-theme="dark"] .react-flow__edge-path {
+  filter: brightness(1.2);
+}
+
+[data-theme="dark"] .flow-edge .react-flow__edge-path {
+  stroke: #81C784;
+}
+[data-theme="dark"] .flow-edge.edge-active .react-flow__edge-path {
+  stroke: #A5D6A7;
+}
+
+[data-theme="dark"] .event-edge .react-flow__edge-path {
+  stroke: #FFD54F;
+}
+[data-theme="dark"] .event-edge.edge-active .react-flow__edge-path {
+  stroke: #FFEE58;
+}
+
+[data-theme="dark"] .error-edge .react-flow__edge-path {
+  stroke: #EF5350;
+}
+[data-theme="dark"] .error-edge.edge-active .react-flow__edge-path {
+  stroke: #E57373;
+}
+
+[data-theme="dark"] .async-edge .react-flow__edge-path {
+  stroke: #BA68C8;
+}
+[data-theme="dark"] .async-edge.edge-active .react-flow__edge-path {
+  stroke: #CE93D8;
+}
+
+[data-theme="dark"] .command-edge .react-flow__edge-path {
+  stroke: #64B5F6;
+}
+[data-theme="dark"] .query-edge .react-flow__edge-path {
+  stroke: #4DD0E1;
+}
+[data-theme="dark"] .action-edge .react-flow__edge-path {
+  stroke: #4DB6AC;
+}
+[data-theme="dark"] .integration-edge .react-flow__edge-path {
+  stroke: #7986CB;
+}
+[data-theme="dark"] .compensation-edge .react-flow__edge-path {
+  stroke: #FF8A65;
+}
+
+/* Dark mode edge labels */
+[data-theme="dark"] .flow-edge-label,
+[data-theme="dark"] .event-edge-label,
+[data-theme="dark"] .error-edge-label,
+[data-theme="dark"] .async-edge-label,
+[data-theme="dark"] .edge-label {
+  background: #2d2d2d;
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+[data-theme="dark"] .flow-edge-label {
+  color: #81C784;
+}
+[data-theme="dark"] .event-edge-label {
+  color: #FFD54F;
+}
+[data-theme="dark"] .error-edge-label {
+  color: #EF5350;
+}
+[data-theme="dark"] .async-edge-label {
+  color: #BA68C8;
+}
+
+/* Dark mode edge icons */
+[data-theme="dark"] .event-edge-icon,
+[data-theme="dark"] .async-edge-icon,
+[data-theme="dark"] .edge-icon {
+  background: #2d2d2d;
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+[data-theme="dark"] .event-edge-icon.icon-active {
+  background: #3d3d3d;
+}
+[data-theme="dark"] .async-edge-icon.icon-active {
+  background: #3d3d3d;
 }

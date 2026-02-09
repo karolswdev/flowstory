@@ -1,7 +1,7 @@
 import { Handle, Position } from '@xyflow/react';
 import { motion, AnimatePresence } from 'motion/react';
 import type { ActionNodeProps } from './types';
-import { nodeVariants, pulseVariants, getNodeAnimationState } from './animations';
+import { nodeVariants, pulseVariants, getNodeAnimationState } from '../../animations/nodeVariants';
 import './nodes.css';
 
 /**
@@ -41,6 +41,7 @@ export function ActionNode({ data, selected }: ActionNodeProps) {
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.1, duration: 0.3 }}
       >
+        <span className="action-icon">👆</span>
         <div className="action-label">{label}</div>
       </motion.div>
 
