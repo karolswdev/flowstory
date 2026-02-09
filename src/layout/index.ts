@@ -53,6 +53,12 @@ export {
   type LayoutOutput,
 } from './layoutEngine';
 
+// Edge routing
+export {
+  routeEdges,
+  simplifyPath,
+} from './edgeRouter';
+
 // React hooks
 export {
   useLayout,
