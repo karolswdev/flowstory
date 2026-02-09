@@ -212,7 +212,7 @@ export const DEFAULT_TYPE_COLORS: Record<string, string> = {
   'entity': '#8BC34A',
   'value-object': '#CDDC39',
   'repository': '#795548',
-  'service': '#2196F3',
+  'domain-service': '#2196F3',
   'event': '#FF5722',
   'command': '#9C27B0',
   

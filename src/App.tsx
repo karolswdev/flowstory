@@ -12,12 +12,15 @@ import { parseStory } from './utils/parser';
 import { assignSimplePositions } from './utils/layout/simpleLayout';
 import { BCDeploymentCanvas } from './components/bc-deployment';
 import { validateBCDeploymentStory, type BCDeploymentStory } from './schemas/bc-deployment';
+import { BCCompositionCanvas } from './components/bc-composition';
+import { BCCompositionStorySchema, type BCCompositionStory } from './schemas/bc-composition';
 import './styles/global.css';
 
 /** Detect story type from YAML content */
-function detectStoryType(content: string): 'bc-deployment' | 'story-flow' {
+function detectStoryType(content: string): 'bc-composition' | 'bc-deployment' | 'story-flow' {
   try {
     const parsed = YAML.parse(content);
+    if (parsed?.type === 'bc-composition') return 'bc-composition';
     if (parsed?.type === 'bc-deployment') return 'bc-deployment';
   } catch { /* ignore parse errors, fall through */ }
   return 'story-flow';
@@ -410,6 +413,13 @@ steps:
     category: 'BC Deployments',
     yaml: '',
     file: '/stories/bc-deployment/api-gateway.yaml'
+  },
+  // BC Composition Examples (Progressive Reveal)
+  'bc-composition-order': {
+    title: 'Order Service Composition',
+    category: 'BC Composition',
+    yaml: '',
+    file: '/stories/bc-composition/order-service.yaml'
   }
 };
 
@@ -464,10 +474,12 @@ function StorySelector({
 /** Story loader component - handles both story-flow and bc-deployment */
 function StoryLoader({ 
   storyId, 
-  onBCDeploymentLoad 
+  onBCDeploymentLoad,
+  onBCCompositionLoad 
 }: { 
   storyId: string;
   onBCDeploymentLoad?: (story: BCDeploymentStory | null) => void;
+  onBCCompositionLoad?: (story: BCCompositionStory | null) => void;
 }) {
   const { loadStory, reset } = useStory();
 
@@ -478,13 +490,26 @@ function StoryLoader({
     const loadFromYaml = (yaml: string) => {
       const storyType = detectStoryType(yaml);
       
-      if (storyType === 'bc-deployment') {
-        // Parse as BC Deployment
+      if (storyType === 'bc-composition') {
+        // Parse as BC Composition (progressive reveal)
+        try {
+          const parsed = YAML.parse(yaml);
+          const bcStory = BCCompositionStorySchema.parse(parsed);
+          reset();
+          onBCCompositionLoad?.(bcStory);
+          onBCDeploymentLoad?.(null);
+        } catch (err) {
+          console.error('Failed to parse BC Composition story:', err);
+          onBCCompositionLoad?.(null);
+        }
+      } else if (storyType === 'bc-deployment') {
+        // Parse as BC Deployment (legacy)
         try {
           const parsed = YAML.parse(yaml);
           const bcStory = validateBCDeploymentStory(parsed);
           reset();
           onBCDeploymentLoad?.(bcStory);
+          onBCCompositionLoad?.(null);
         } catch (err) {
           console.error('Failed to parse BC Deployment story:', err);
           onBCDeploymentLoad?.(null);
@@ -492,6 +517,7 @@ function StoryLoader({
       } else {
         // Parse as story-flow
         onBCDeploymentLoad?.(null);
+        onBCCompositionLoad?.(null);
         const { story, validation } = parseStory(yaml);
         if (story && validation.valid) {
           // Auto-assign positions if nodes don't have them
@@ -516,7 +542,7 @@ function StoryLoader({
     } else if (storyData.yaml) {
       loadFromYaml(storyData.yaml);
     }
-  }, [storyId, loadStory, reset, onBCDeploymentLoad]);
+  }, [storyId, loadStory, reset, onBCDeploymentLoad, onBCCompositionLoad]);
 
   return null;
 }
@@ -534,12 +560,16 @@ function App() {
   const [currentStory, setCurrentStory] = useState(getInitialStory);
   const [bcDeploymentStory, setBCDeploymentStory] = useState<BCDeploymentStory | null>(null);
   const [bcDeploymentStep, setBCDeploymentStep] = useState(0);
+  const [bcCompositionStory, setBCCompositionStory] = useState<BCCompositionStory | null>(null);
+  const [bcCompositionStep, setBCCompositionStep] = useState(0);
 
-  // Reset BC Deployment state when story changes
+  // Reset special story states when story changes
   const handleStoryChange = useCallback((storyId: string) => {
     setCurrentStory(storyId);
     setBCDeploymentStory(null);
     setBCDeploymentStep(0);
+    setBCCompositionStory(null);
+    setBCCompositionStep(0);
     // Update URL for bookmarking/sharing
     const url = new URL(window.location.href);
     url.searchParams.set('story', storyId);
@@ -551,12 +581,22 @@ function App() {
     console.log('[FlowStory] BC Deployment load:', story ? `"${story.title}"` : 'null');
     setBCDeploymentStory(story);
     setBCDeploymentStep(0);
+    setBCCompositionStory(null); // Clear other type
+  }, []);
+
+  // Handle BC Composition story load
+  const handleBCCompositionLoad = useCallback((story: BCCompositionStory | null) => {
+    console.log('[FlowStory] BC Composition load:', story ? `"${story.title}"` : 'null');
+    setBCCompositionStory(story);
+    setBCCompositionStep(0);
+    setBCDeploymentStory(null); // Clear other type
   }, []);
 
   const isBCDeployment = bcDeploymentStory !== null;
+  const isBCComposition = bcCompositionStory !== null;
   
   // Debug logging
-  console.log('[FlowStory] Render - currentStory:', currentStory, 'isBCDeployment:', isBCDeployment);
+  console.log('[FlowStory] Render - currentStory:', currentStory, 'isBCDeployment:', isBCDeployment, 'isBCComposition:', isBCComposition);
 
   // Keyboard navigation for BC Deployment
   useEffect(() => {
@@ -588,6 +628,36 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isBCDeployment, bcDeploymentStory]);
 
+  // Keyboard navigation for BC Composition
+  useEffect(() => {
+    if (!isBCComposition || !bcCompositionStory) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      switch (e.key) {
+        case 'ArrowRight':
+        case ' ':
+          e.preventDefault();
+          setBCCompositionStep(s => Math.min(bcCompositionStory.steps.length - 1, s + 1));
+          break;
+        case 'ArrowLeft':
+          e.preventDefault();
+          setBCCompositionStep(s => Math.max(0, s - 1));
+          break;
+        case 'Home':
+          e.preventDefault();
+          setBCCompositionStep(0);
+          break;
+        case 'End':
+          e.preventDefault();
+          setBCCompositionStep(bcCompositionStory.steps.length - 1);
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isBCComposition, bcCompositionStory]);
+
   return (
     <div className="app" style={{ 
       width: '100vw', 
@@ -617,14 +687,79 @@ function App() {
           <StorySelector currentStory={currentStory} onStoryChange={handleStoryChange} />
         </div>
         <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-          {!isBCDeployment && <ExportButton showLabels />}
+          {!isBCDeployment && !isBCComposition && <ExportButton showLabels />}
           <ThemeToggle showLabel />
         </div>
       </header>
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-        <StoryLoader storyId={currentStory} onBCDeploymentLoad={handleBCDeploymentLoad} />
+        <StoryLoader 
+          storyId={currentStory} 
+          onBCDeploymentLoad={handleBCDeploymentLoad}
+          onBCCompositionLoad={handleBCCompositionLoad}
+        />
         
-        {isBCDeployment ? (
+        {isBCComposition ? (
+          <ReactFlowProvider key="bc-composition">
+            <div style={{ flex: 1, position: 'relative' }}>
+              <BCCompositionCanvas 
+                story={bcCompositionStory} 
+                currentStepIndex={bcCompositionStep}
+                onStepChange={setBCCompositionStep}
+              />
+              {/* Step controls for BC Composition */}
+              <div style={{
+                position: 'absolute',
+                bottom: 16,
+                left: '50%',
+                transform: 'translateX(-50%)',
+                display: 'flex',
+                gap: 8,
+                zIndex: 200,
+              }}>
+                <button
+                  onClick={() => setBCCompositionStep(s => Math.max(0, s - 1))}
+                  disabled={bcCompositionStep === 0}
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: 8,
+                    border: '1px solid var(--color-surface-border)',
+                    background: 'var(--color-surface-primary)',
+                    cursor: bcCompositionStep === 0 ? 'not-allowed' : 'pointer',
+                    opacity: bcCompositionStep === 0 ? 0.5 : 1,
+                  }}
+                >
+                  ← Previous
+                </button>
+                <span 
+                  className="step-counter"
+                  data-testid="step-counter"
+                  style={{
+                    padding: '8px 12px',
+                    background: 'var(--color-surface-primary)',
+                    borderRadius: 8,
+                    fontWeight: 600,
+                  }}
+                >
+                  {bcCompositionStep + 1} / {bcCompositionStory.steps.length}
+                </span>
+                <button
+                  onClick={() => setBCCompositionStep(s => Math.min(bcCompositionStory.steps.length - 1, s + 1))}
+                  disabled={bcCompositionStep >= bcCompositionStory.steps.length - 1}
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: 8,
+                    border: '1px solid var(--color-surface-border)',
+                    background: 'var(--color-surface-primary)',
+                    cursor: bcCompositionStep >= bcCompositionStory.steps.length - 1 ? 'not-allowed' : 'pointer',
+                    opacity: bcCompositionStep >= bcCompositionStory.steps.length - 1 ? 0.5 : 1,
+                  }}
+                >
+                  Next →
+                </button>
+              </div>
+            </div>
+          </ReactFlowProvider>
+        ) : isBCDeployment ? (
           <ReactFlowProvider key="bc-deployment">
             <div style={{ flex: 1, position: 'relative' }}>
               <BCDeploymentCanvas 
@@ -632,7 +767,7 @@ function App() {
                 currentStepIndex={bcDeploymentStep}
                 onStepChange={setBCDeploymentStep}
               />
-              {/* Simple step controls for BC Deployment */}
+              {/* Step controls for BC Deployment */}
               <div style={{
                 position: 'absolute',
                 bottom: 16,
