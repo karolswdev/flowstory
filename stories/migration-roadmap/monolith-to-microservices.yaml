@@ -1,0 +1,270 @@
+title: "Monolith to Microservices Migration"
+version: 2
+type: migration-roadmap
+
+migration: "Legacy Modernization"
+overallProgress: 42
+
+phases:
+  - id: phase-1
+    name: "Foundation"
+    description: "Strangler fig proxy, API Gateway, CI/CD"
+    timeline: "Q1 2026"
+    status: done
+    milestones:
+      - name: "API Gateway deployed"
+        done: true
+      - name: "CI/CD pipeline ready"
+        done: true
+      - name: "Monitoring baseline"
+        done: true
+
+  - id: phase-2
+    name: "Extract Services"
+    description: "Auth, User, Catalog services extracted"
+    timeline: "Q2 2026"
+    status: active
+    milestones:
+      - name: "Auth service live"
+        done: true
+      - name: "User service live"
+        done: false
+      - name: "Catalog service live"
+        done: false
+
+  - id: phase-3
+    name: "Core Migration"
+    description: "Order, Payment, Inventory services"
+    timeline: "Q3 2026"
+    status: planned
+    milestones:
+      - name: "Order service extracted"
+        done: false
+      - name: "Payment integration"
+        done: false
+      - name: "Inventory decoupled"
+        done: false
+
+  - id: phase-4
+    name: "Cutover"
+    description: "Full traffic migration, monolith decommission"
+    timeline: "Q4 2026"
+    status: planned
+    exitCriteria:
+      - "100% traffic on microservices"
+      - "Monolith read-only"
+      - "Data migration complete"
+
+workstreams:
+  # Phase 1 workstreams
+  - id: ws-gateway
+    name: "API Gateway"
+    phase: phase-1
+    status: done
+    owner: "platform"
+    tasks:
+      - id: gateway-setup
+        name: "Deploy Kong Gateway"
+        status: done
+        progress: 100
+        owner: "alice"
+
+      - id: gateway-routing
+        name: "Configure routing rules"
+        status: done
+        progress: 100
+        owner: "alice"
+
+      - id: gateway-auth
+        name: "Add authentication"
+        status: done
+        progress: 100
+        owner: "bob"
+
+  - id: ws-cicd
+    name: "CI/CD Pipeline"
+    phase: phase-1
+    status: done
+    owner: "devops"
+    tasks:
+      - id: cicd-setup
+        name: "GitHub Actions setup"
+        status: done
+        progress: 100
+        owner: "charlie"
+
+      - id: cicd-deploy
+        name: "K8s deployment automation"
+        status: done
+        progress: 100
+        owner: "charlie"
+
+  # Phase 2 workstreams
+  - id: ws-auth
+    name: "Auth Service"
+    phase: phase-2
+    status: done
+    owner: "identity-team"
+    tasks:
+      - id: auth-design
+        name: "Design auth boundaries"
+        status: done
+        progress: 100
+        owner: "dave"
+
+      - id: auth-impl
+        name: "Implement auth service"
+        status: done
+        progress: 100
+        owner: "dave"
+
+      - id: auth-migrate
+        name: "Migrate auth data"
+        status: done
+        progress: 100
+        owner: "eve"
+
+  - id: ws-user
+    name: "User Service"
+    phase: phase-2
+    status: active
+    owner: "identity-team"
+    tasks:
+      - id: user-design
+        name: "Design user boundaries"
+        status: done
+        progress: 100
+        owner: "frank"
+
+      - id: user-impl
+        name: "Implement user service"
+        status: active
+        progress: 70
+        owner: "frank"
+        risk: medium
+
+      - id: user-migrate
+        name: "Migrate user data"
+        status: planned
+        progress: 0
+        owner: "eve"
+        dependsOn: [user-impl]
+
+  - id: ws-catalog
+    name: "Catalog Service"
+    phase: phase-2
+    status: active
+    owner: "product-team"
+    tasks:
+      - id: catalog-design
+        name: "Design catalog boundaries"
+        status: done
+        progress: 100
+        owner: "grace"
+
+      - id: catalog-impl
+        name: "Implement catalog service"
+        status: blocked
+        progress: 40
+        owner: "grace"
+        risk: high
+        notes: "Blocked on legacy DB schema documentation"
+
+      - id: catalog-migrate
+        name: "Migrate catalog data"
+        status: planned
+        progress: 0
+        dependsOn: [catalog-impl]
+
+  # Phase 3 workstreams
+  - id: ws-order
+    name: "Order Service"
+    phase: phase-3
+    status: planned
+    owner: "orders-team"
+    tasks:
+      - id: order-design
+        name: "Design order boundaries"
+        status: planned
+        progress: 0
+
+      - id: order-impl
+        name: "Implement order service"
+        status: planned
+        progress: 0
+        risk: critical
+        dependsOn: [order-design]
+
+  - id: ws-payment
+    name: "Payment Integration"
+    phase: phase-3
+    status: planned
+    owner: "payments-team"
+    tasks:
+      - id: payment-design
+        name: "Design payment integration"
+        status: planned
+        progress: 0
+        dependsOn: [order-design]
+
+      - id: payment-impl
+        name: "Implement payment service"
+        status: planned
+        progress: 0
+        risk: critical
+
+steps:
+  - title: "Migration Overview"
+    description: "Monolith to Microservices - 4 phases over 2026"
+    zoomLevel: 0.8
+    duration: 4000
+
+  - title: "Phase 1: Foundation ✅"
+    description: "API Gateway and CI/CD complete"
+    focusPhase: phase-1
+    zoomLevel: 1.0
+    duration: 5000
+    narration:
+      speaker: "Tech Lead"
+      message: "Foundation laid in Q1 - all traffic routed through gateway"
+
+  - title: "Phase 2: Extracting Services"
+    description: "Currently extracting Auth, User, and Catalog services"
+    focusPhase: phase-2
+    zoomLevel: 1.0
+    duration: 5000
+
+  - title: "Auth Service: Done ✅"
+    description: "Authentication fully migrated to microservice"
+    highlightWorkstreams: [ws-auth]
+    zoomLevel: 1.1
+    duration: 4000
+
+  - title: "User Service: In Progress 🟡"
+    description: "Implementation at 70%, data migration pending"
+    highlightWorkstreams: [ws-user]
+    zoomLevel: 1.1
+    duration: 5000
+
+  - title: "⚠️ Blocker: Catalog Service"
+    description: "Blocked on legacy database documentation"
+    showBlockers: true
+    zoomLevel: 1.1
+    duration: 5000
+    narration:
+      speaker: "PM"
+      message: "Need DBA support to unblock catalog extraction"
+
+  - title: "What's Next: Phase 3"
+    description: "Order and Payment services in Q3"
+    focusPhase: phase-3
+    zoomLevel: 1.0
+    duration: 5000
+    narration:
+      speaker: "Architect"
+      message: "Order service is critical path - needs early design start"
+
+  - title: "Full Roadmap"
+    description: "42% overall progress, on track for Q4 cutover"
+    zoomLevel: 0.7
+    duration: 4000

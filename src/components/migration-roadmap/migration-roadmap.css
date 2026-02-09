@@ -1,0 +1,282 @@
+/* ============================================
+   Migration Roadmap Styles
+   ============================================ */
+
+/* ============================================
+   Phase Node
+   ============================================ */
+.mr-phase {
+  min-width: 200px;
+  background: white;
+  border: 2px solid #e0e0e0;
+  border-radius: 12px;
+  padding: 16px;
+  font-family: 'Inter', system-ui, sans-serif;
+  position: relative;
+  overflow: hidden;
+}
+
+.mr-phase:hover {
+  border-color: var(--status-color, #2196F3);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+/* Status bar */
+.mr-status-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+}
+
+/* Timeline badge */
+.mr-timeline {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: #f0f0f0;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #666;
+}
+
+/* Phase header */
+.mr-phase-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+
+.mr-status-icon {
+  font-size: 16px;
+}
+
+.mr-phase-name {
+  font-size: 16px;
+  font-weight: 700;
+  color: #333;
+}
+
+.mr-phase-desc {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 12px;
+  line-height: 1.4;
+}
+
+/* Progress bar */
+.mr-progress-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mr-progress-bar {
+  flex: 1;
+  height: 6px;
+  background: #e0e0e0;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.mr-progress-fill {
+  height: 100%;
+  border-radius: 3px;
+}
+
+.mr-progress-text {
+  font-size: 12px;
+  font-weight: 600;
+  color: #666;
+  min-width: 36px;
+}
+
+/* Milestones */
+.mr-milestones {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #eee;
+}
+
+.mr-milestone {
+  font-size: 11px;
+  color: #888;
+  padding: 2px 0;
+}
+
+.mr-milestone.mr-done {
+  color: #4CAF50;
+}
+
+/* ============================================
+   Task Node
+   ============================================ */
+.mr-task {
+  min-width: 160px;
+  background: white;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  display: flex;
+  overflow: hidden;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+.mr-task:hover {
+  border-color: var(--status-color, #2196F3);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Status indicator (left strip) */
+.mr-task-status {
+  width: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
+/* Task content */
+.mr-task-content {
+  flex: 1;
+  padding: 10px 12px;
+}
+
+.mr-task-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 4px;
+}
+
+.mr-task-desc {
+  font-size: 11px;
+  color: #666;
+  margin-bottom: 6px;
+}
+
+.mr-task-progress {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.mr-task-progress-bar {
+  flex: 1;
+  height: 4px;
+  background: #e0e0e0;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.mr-task-progress-fill {
+  height: 100%;
+}
+
+.mr-task-progress span {
+  font-size: 10px;
+  color: #666;
+}
+
+.mr-task-owner {
+  font-size: 10px;
+  color: #999;
+}
+
+.mr-task-risk {
+  display: inline-block;
+  font-size: 9px;
+  color: white;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-top: 4px;
+  text-transform: capitalize;
+}
+
+.mr-task-notes {
+  font-size: 10px;
+  color: #F44336;
+  margin-top: 6px;
+  font-style: italic;
+}
+
+/* ============================================
+   State Classes
+   ============================================ */
+.mr-dimmed {
+  opacity: 0.4;
+}
+
+.mr-highlighted {
+  border-color: var(--status-color, #2196F3);
+  box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.2), 0 4px 16px rgba(0, 0, 0, 0.15);
+  z-index: 100;
+}
+
+.mr-active {
+  border-color: var(--status-color, #2196F3);
+  box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.3), 0 8px 24px rgba(0, 0, 0, 0.2);
+  z-index: 100;
+}
+
+.node-selected {
+  outline: 3px solid #FFD700;
+  outline-offset: 2px;
+}
+
+/* ============================================
+   Handles
+   ============================================ */
+.mr-handle {
+  width: 8px;
+  height: 8px;
+  background: #B0BEC5;
+  border: 2px solid white;
+}
+
+.mr-phase:hover .mr-handle,
+.mr-task:hover .mr-handle {
+  background: var(--status-color, #2196F3);
+}
+
+/* ============================================
+   Dark Mode
+   ============================================ */
+[data-theme="dark"] .mr-phase,
+[data-theme="dark"] .mr-task {
+  background: #2d2d2d;
+  border-color: #444;
+}
+
+[data-theme="dark"] .mr-phase-name,
+[data-theme="dark"] .mr-task-name {
+  color: #e0e0e0;
+}
+
+[data-theme="dark"] .mr-phase-desc,
+[data-theme="dark"] .mr-task-desc {
+  color: #aaa;
+}
+
+[data-theme="dark"] .mr-timeline {
+  background: #3d3d3d;
+  color: #aaa;
+}
+
+[data-theme="dark"] .mr-progress-bar,
+[data-theme="dark"] .mr-task-progress-bar {
+  background: #444;
+}
+
+[data-theme="dark"] .mr-milestones {
+  border-top-color: #444;
+}
+
+[data-theme="dark"] .mr-milestone {
+  color: #888;
+}
