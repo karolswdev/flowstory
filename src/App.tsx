@@ -581,7 +581,7 @@ function App() {
     console.log('[FlowStory] BC Deployment load:', story ? `"${story.title}"` : 'null');
     setBCDeploymentStory(story);
     setBCDeploymentStep(0);
-    setBCCompositionStory(null); // Clear other type
+    if (story) setBCCompositionStory(null); // Only clear if setting a real story
   }, []);
 
   // Handle BC Composition story load
@@ -589,7 +589,7 @@ function App() {
     console.log('[FlowStory] BC Composition load:', story ? `"${story.title}"` : 'null');
     setBCCompositionStory(story);
     setBCCompositionStep(0);
-    setBCDeploymentStory(null); // Clear other type
+    if (story) setBCDeploymentStory(null); // Only clear if setting a real story
   }, []);
 
   const isBCDeployment = bcDeploymentStory !== null;
