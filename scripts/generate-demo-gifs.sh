@@ -46,6 +46,9 @@ generate_gif "user-registration" "demo-user-story"
 generate_gif "checkout-flow" "demo-checkout-flow"
 generate_gif "password-reset" "demo-password-reset"
 
+# BC Deployment stories
+generate_gif "bc-order-service" "demo-bc-deployment"
+
 echo ""
 echo "=== Done! ==="
 echo ""

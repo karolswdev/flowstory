@@ -541,6 +541,36 @@ function App() {
 
   const isBCDeployment = bcDeploymentStory !== null;
 
+  // Keyboard navigation for BC Deployment
+  useEffect(() => {
+    if (!isBCDeployment || !bcDeploymentStory) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      switch (e.key) {
+        case 'ArrowRight':
+        case ' ':
+          e.preventDefault();
+          setBCDeploymentStep(s => Math.min(bcDeploymentStory.steps.length - 1, s + 1));
+          break;
+        case 'ArrowLeft':
+          e.preventDefault();
+          setBCDeploymentStep(s => Math.max(0, s - 1));
+          break;
+        case 'Home':
+          e.preventDefault();
+          setBCDeploymentStep(0);
+          break;
+        case 'End':
+          e.preventDefault();
+          setBCDeploymentStep(bcDeploymentStory.steps.length - 1);
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isBCDeployment, bcDeploymentStory]);
+
   return (
     <div className="app" style={{ 
       width: '100vw', 
@@ -609,12 +639,16 @@ function App() {
                 >
                   ← Previous
                 </button>
-                <span style={{
-                  padding: '8px 12px',
-                  background: 'var(--color-surface-primary)',
-                  borderRadius: 8,
-                  fontWeight: 600,
-                }}>
+                <span 
+                  className="step-counter"
+                  data-testid="step-counter"
+                  style={{
+                    padding: '8px 12px',
+                    background: 'var(--color-surface-primary)',
+                    borderRadius: 8,
+                    fontWeight: 600,
+                  }}
+                >
                   {bcDeploymentStep + 1} / {bcDeploymentStory.steps.length}
                 </span>
                 <button
