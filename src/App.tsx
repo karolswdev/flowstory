@@ -399,7 +399,7 @@ steps:
     title: 'CI/CD Pipeline',
     category: 'Pipelines',
     yaml: '',
-    file: '/stories/pipeline/ci-cd-deploy.yaml'
+    file: '/stories/pipeline/ci-cd-pipeline.yaml'
   },
   // BC Deployment Examples
   'bc-order-service': {
