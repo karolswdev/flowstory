@@ -1,0 +1,212 @@
+title: "API Architecture Decisions"
+version: 2
+type: adr-timeline
+
+organization: "Acme Engineering"
+
+categories:
+  - id: api
+    name: "API Design"
+    color: "#2196F3"
+  - id: auth
+    name: "Authentication"
+    color: "#4CAF50"
+  - id: data
+    name: "Data"
+    color: "#FF9800"
+  - id: infra
+    name: "Infrastructure"
+    color: "#9C27B0"
+
+adrs:
+  - id: adr-001
+    number: 1
+    title: "Use REST for External APIs"
+    status: decided
+    date: "2024-01-15"
+    category: api
+    context: "Need a standardized approach for external API design that works well with existing tooling and developer experience."
+    decision: "Use REST with OpenAPI 3.0 specifications for all external-facing APIs."
+    consequences:
+      - "All external APIs follow REST conventions"
+      - "OpenAPI specs required for each service"
+      - "Enables auto-generated client SDKs"
+    deciders: ["Sarah Chen", "Mike Johnson"]
+    tags: ["api", "rest", "openapi"]
+
+  - id: adr-002
+    number: 2
+    title: "GraphQL for Internal APIs"
+    status: superseded
+    date: "2024-02-01"
+    category: api
+    context: "Internal services need flexible querying and reduced over-fetching."
+    decision: "Use GraphQL for internal service-to-service communication."
+    consequences:
+      - "Flexible queries reduce bandwidth"
+      - "Schema serves as documentation"
+    supersededBy: adr-006
+    tags: ["api", "graphql"]
+
+  - id: adr-003
+    number: 3
+    title: "OAuth 2.0 with PKCE"
+    status: decided
+    date: "2024-02-15"
+    category: auth
+    context: "Need secure authentication for public clients (SPAs, mobile apps)."
+    decision: "Implement OAuth 2.0 with PKCE flow for all public clients."
+    consequences:
+      - "No client secrets in browser/mobile code"
+      - "Secure token exchange"
+      - "Requires auth server upgrade"
+    relatedTo: [adr-005]
+    deciders: ["Lisa Park"]
+    tags: ["auth", "oauth", "security"]
+
+  - id: adr-004
+    number: 4
+    title: "PostgreSQL as Primary Database"
+    status: decided
+    date: "2024-03-01"
+    category: data
+    context: "Need to standardize on a relational database for consistency."
+    decision: "Use PostgreSQL 15+ as the primary relational database."
+    consequences:
+      - "Consistent tooling across teams"
+      - "Leverage JSONB for semi-structured data"
+      - "Migration from SQL Server required"
+    tags: ["database", "postgresql"]
+
+  - id: adr-005
+    number: 5
+    title: "JWT Access Tokens"
+    status: decided
+    date: "2024-03-15"
+    category: auth
+    context: "Need stateless authentication for microservices."
+    decision: "Use JWTs as access tokens with 15-minute expiry and refresh tokens."
+    consequences:
+      - "Stateless verification at service level"
+      - "Refresh tokens in secure HTTP-only cookies"
+      - "Token revocation via deny list"
+    relatedTo: [adr-003]
+    tags: ["auth", "jwt", "security"]
+
+  - id: adr-006
+    number: 6
+    title: "gRPC for Internal Services"
+    status: decided
+    date: "2024-04-01"
+    category: api
+    context: "GraphQL added complexity without proportional benefits for internal APIs."
+    decision: "Use gRPC with Protocol Buffers for internal service communication."
+    consequences:
+      - "Strong typing with protobuf"
+      - "Efficient binary serialization"
+      - "Built-in streaming support"
+    supersedes: adr-002
+    tags: ["api", "grpc", "protobuf"]
+
+  - id: adr-007
+    number: 7
+    title: "API Versioning Strategy"
+    status: decided
+    date: "2024-05-01"
+    category: api
+    context: "Need to evolve APIs without breaking existing clients."
+    decision: "Use URL path versioning (v1, v2) for major versions, headers for minor."
+    consequences:
+      - "Clear version boundaries"
+      - "Support multiple versions simultaneously"
+      - "Deprecation policy: 12 months notice"
+    relatedTo: [adr-001]
+    tags: ["api", "versioning"]
+
+  - id: adr-008
+    number: 8
+    title: "Event-Driven Architecture"
+    status: proposed
+    date: "2024-06-01"
+    category: infra
+    context: "Need async communication for decoupled services."
+    decision: "Adopt event-driven architecture with Apache Kafka."
+    consequences:
+      - "Decoupled service communication"
+      - "Event sourcing for audit trail"
+      - "Requires schema registry"
+    tags: ["events", "kafka", "async"]
+
+  - id: adr-009
+    number: 9
+    title: "Rate Limiting Strategy"
+    status: draft
+    date: "2024-06-15"
+    category: api
+    context: "Need to protect APIs from abuse and ensure fair usage."
+    decision: "Implement sliding window rate limiting at API gateway."
+    consequences:
+      - "Fair usage across clients"
+      - "Configurable per-endpoint limits"
+    tags: ["api", "rate-limiting", "security"]
+
+milestones:
+  - id: m1
+    date: "2024-01-01"
+    label: "Q1 2024"
+  - id: m2
+    date: "2024-04-01"
+    label: "Q2 2024"
+  - id: m3
+    date: "2024-07-01"
+    label: "Q3 2024"
+
+steps:
+  - title: "API Architecture Decisions"
+    description: "A timeline of our key API architecture decisions"
+    zoomLevel: 0.9
+    duration: 4000
+
+  - title: "Foundation: REST APIs"
+    description: "We started with REST for external APIs - a proven, well-understood approach"
+    highlightADRs: [adr-001]
+    focusDate: "2024-01"
+    zoomLevel: 1.1
+    duration: 5000
+
+  - title: "Authentication Strategy"
+    description: "OAuth 2.0 with PKCE and JWT tokens form our auth foundation"
+    filterCategory: auth
+    highlightADRs: [adr-003, adr-005]
+    showRelationships: true
+    zoomLevel: 1.0
+    duration: 5000
+
+  - title: "The GraphQL Experiment"
+    description: "We tried GraphQL for internal APIs but found it added complexity"
+    highlightADRs: [adr-002, adr-006]
+    showRelationships: true
+    zoomLevel: 1.1
+    duration: 6000
+    narration:
+      speaker: "Architect"
+      message: "GraphQL was superseded by gRPC after 2 months"
+
+  - title: "Data Standardization"
+    description: "PostgreSQL became our standard relational database"
+    filterCategory: data
+    highlightADRs: [adr-004]
+    zoomLevel: 1.2
+    duration: 5000
+
+  - title: "What's Coming"
+    description: "Event-driven architecture is proposed, rate limiting is in draft"
+    filterStatus: proposed
+    highlightADRs: [adr-008, adr-009]
+    zoomLevel: 1.0
+    duration: 5000
+
+  - title: "Full Timeline"
+    description: "All 9 ADRs showing the evolution of our API architecture"
+    zoomLevel: 0.8
+    duration: 4000

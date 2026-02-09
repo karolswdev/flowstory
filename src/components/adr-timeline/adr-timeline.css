@@ -1,0 +1,355 @@
+/* ============================================
+   ADR Node - Decision Record Card
+   ============================================ */
+.adr-node {
+  min-width: 220px;
+  max-width: 280px;
+  background: white;
+  border: 2px solid #e0e0e0;
+  border-radius: 12px;
+  padding: 12px 16px;
+  position: relative;
+  overflow: hidden;
+  font-family: 'Inter', system-ui, sans-serif;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.adr-node:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+}
+
+.adr-node.node-selected {
+  outline: 3px solid var(--category-color, #2196F3);
+  outline-offset: 2px;
+}
+
+/* Category Bar */
+.adr-category-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: var(--category-color, #2196F3);
+}
+
+/* Header */
+.adr-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  margin-top: 4px;
+}
+
+.adr-number {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: #666;
+  background: #f5f5f5;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.adr-status {
+  font-size: 10px;
+  font-weight: 600;
+  color: white;
+  padding: 3px 8px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Title */
+.adr-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1a1a1a;
+  margin: 0 0 8px 0;
+  line-height: 1.3;
+}
+
+.adr-title.adr-struck {
+  text-decoration: line-through;
+  color: #999;
+}
+
+/* Date */
+.adr-date {
+  font-size: 11px;
+  color: #666;
+}
+
+/* Details (expanded) */
+.adr-details {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #e0e0e0;
+  overflow: hidden;
+}
+
+.adr-section {
+  margin-bottom: 10px;
+}
+
+.adr-section strong {
+  font-size: 11px;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.adr-section p {
+  font-size: 12px;
+  color: #333;
+  margin: 0;
+  line-height: 1.4;
+}
+
+.adr-section ul {
+  font-size: 12px;
+  color: #333;
+  margin: 0;
+  padding-left: 16px;
+}
+
+.adr-section li {
+  margin-bottom: 4px;
+  line-height: 1.3;
+}
+
+/* Expand Hint */
+.adr-expand-hint {
+  position: absolute;
+  bottom: 8px;
+  right: 12px;
+  font-size: 10px;
+  color: #999;
+}
+
+/* Glow Effect */
+.adr-glow {
+  position: absolute;
+  inset: -2px;
+  border-radius: 14px;
+  border: 2px solid var(--category-color, #2196F3);
+  pointer-events: none;
+}
+
+/* State Classes */
+.adr-dimmed {
+  opacity: 0.4;
+}
+
+.adr-highlighted {
+  border-color: var(--category-color, #2196F3);
+  box-shadow: 0 4px 16px rgba(33, 150, 243, 0.2);
+}
+
+.adr-active {
+  border-color: var(--category-color, #2196F3);
+  box-shadow: 0 8px 24px rgba(33, 150, 243, 0.3);
+}
+
+/* Handles */
+.adr-handle {
+  width: 8px;
+  height: 8px;
+  background: #B0BEC5;
+  border: 2px solid white;
+}
+
+.adr-node:hover .adr-handle,
+.adr-active .adr-handle {
+  background: var(--category-color, #2196F3);
+}
+
+/* ============================================
+   Timeline Axis
+   ============================================ */
+.timeline-axis {
+  position: relative;
+  height: 60px;
+}
+
+.timeline-line {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #e0e0e0, #2196F3, #e0e0e0);
+  transform: translateY(-50%);
+}
+
+.timeline-marker {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.timeline-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #2196F3;
+  border: 3px solid white;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.timeline-label {
+  margin-top: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #666;
+  white-space: nowrap;
+}
+
+/* ============================================
+   Category Lane (Swimlane)
+   ============================================ */
+.category-lane {
+  position: relative;
+  min-height: 150px;
+  padding: 16px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.category-lane-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.category-lane-color {
+  width: 4px;
+  height: 24px;
+  border-radius: 2px;
+}
+
+.category-lane-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #333;
+}
+
+.category-lane-count {
+  font-size: 12px;
+  color: #666;
+  background: #f0f0f0;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+/* ============================================
+   Relationship Edge
+   ============================================ */
+.adr-relationship .react-flow__edge-path {
+  stroke: #9C27B0;
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+}
+
+.adr-supersedes .react-flow__edge-path {
+  stroke: #F44336;
+  stroke-width: 2;
+}
+
+.adr-relationship.edge-active .react-flow__edge-path {
+  stroke-width: 3;
+  filter: drop-shadow(0 0 4px rgba(156, 39, 176, 0.5));
+}
+
+/* ============================================
+   Legend
+   ============================================ */
+.adr-legend {
+  display: flex;
+  gap: 16px;
+  padding: 12px 16px;
+  background: #f5f5f5;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.adr-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.adr-legend-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+
+/* ============================================
+   Dark Mode
+   ============================================ */
+[data-theme="dark"] .adr-node {
+  background: #2d2d2d;
+  border-color: #444;
+}
+
+[data-theme="dark"] .adr-title {
+  color: #e0e0e0;
+}
+
+[data-theme="dark"] .adr-title.adr-struck {
+  color: #666;
+}
+
+[data-theme="dark"] .adr-number {
+  background: #3d3d3d;
+  color: #aaa;
+}
+
+[data-theme="dark"] .adr-date {
+  color: #888;
+}
+
+[data-theme="dark"] .adr-details {
+  border-top-color: #444;
+}
+
+[data-theme="dark"] .adr-section p,
+[data-theme="dark"] .adr-section li {
+  color: #ccc;
+}
+
+[data-theme="dark"] .adr-section strong {
+  color: #888;
+}
+
+[data-theme="dark"] .timeline-line {
+  background: linear-gradient(90deg, #444, #2196F3, #444);
+}
+
+[data-theme="dark"] .category-lane {
+  border-bottom-color: #444;
+}
+
+[data-theme="dark"] .category-lane-name {
+  color: #e0e0e0;
+}
+
+[data-theme="dark"] .category-lane-count {
+  background: #3d3d3d;
+  color: #aaa;
+}
+
+[data-theme="dark"] .adr-legend {
+  background: #2d2d2d;
+}
