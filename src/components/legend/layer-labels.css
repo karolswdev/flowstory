@@ -1,0 +1,129 @@
+/* ============================================
+   Layer Labels Styles
+   ============================================ */
+
+.layer-labels {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 36px;
+  height: 100%;
+  z-index: 15;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ============================================
+   Individual Label
+   ============================================ */
+
+.layer-label {
+  position: absolute;
+  left: 0;
+  width: 36px;
+  border-left: 4px solid;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s ease;
+}
+
+.layer-label-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  transform: rotate(180deg);
+}
+
+.layer-label-icon {
+  font-size: 14px;
+  transform: rotate(180deg);
+}
+
+.layer-label-text {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: #9ca3af;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+/* ============================================
+   Layer-specific Colors
+   ============================================ */
+
+.layer-label-orchestration {
+  border-left-color: #7c4dff;
+}
+
+.layer-label-orchestration .layer-label-text {
+  color: #a78bfa;
+}
+
+.layer-label-domain {
+  border-left-color: #4caf50;
+}
+
+.layer-label-domain .layer-label-text {
+  color: #86efac;
+}
+
+.layer-label-infrastructure {
+  border-left-color: #ff9800;
+}
+
+.layer-label-infrastructure .layer-label-text {
+  color: #fcd34d;
+}
+
+/* ============================================
+   Hover States (when enabled)
+   ============================================ */
+
+.layer-labels.interactive .layer-label {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.layer-labels.interactive .layer-label:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+/* ============================================
+   Responsive Adjustments
+   ============================================ */
+
+@media (max-width: 768px) {
+  .layer-labels {
+    width: 28px;
+  }
+  
+  .layer-label {
+    width: 28px;
+    border-left-width: 3px;
+  }
+  
+  .layer-label-text {
+    font-size: 9px;
+    letter-spacing: 1px;
+  }
+  
+  .layer-label-icon {
+    font-size: 12px;
+  }
+}
+
+/* ============================================
+   Reduced Motion
+   ============================================ */
+
+@media (prefers-reduced-motion: reduce) {
+  .layer-label {
+    transition: none;
+  }
+}

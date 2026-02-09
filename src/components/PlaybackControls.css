@@ -1,0 +1,126 @@
+/* Playback Controls Container */
+.playback-controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  background: var(--color-surface-primary, white);
+  border-top: 1px solid var(--color-surface-border, #e0e0e0);
+}
+
+/* Button group */
+.playback-buttons {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Individual buttons */
+.playback-button {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 4px;
+  background: var(--color-bg-secondary, #f5f5f5);
+  color: var(--color-text-primary, #333);
+  cursor: pointer;
+  font-size: 16px;
+  transition: all 0.15s ease;
+}
+
+.playback-button:hover:not(:disabled) {
+  background: var(--color-bg-tertiary, #e0e0e0);
+}
+
+.playback-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.playback-button-primary {
+  width: 44px;
+  height: 44px;
+  background: var(--color-primary, #2196F3);
+  color: var(--color-text-inverse, white);
+  font-size: 18px;
+}
+
+.playback-button-primary:hover:not(:disabled) {
+  background: var(--color-primary-hover, #1976D2);
+}
+
+/* Progress slider container */
+.playback-progress {
+  flex: 1;
+  position: relative;
+  height: 6px;
+  background: var(--color-bg-tertiary, #e0e0e0);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress-slider {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  z-index: 2;
+  margin: 0;
+}
+
+.progress-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: var(--color-primary, #2196F3);
+  border-radius: 3px;
+  transition: width 0.2s ease;
+  pointer-events: none;
+}
+
+/* Info section */
+.playback-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 60px;
+}
+
+.step-counter {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary, #333);
+  font-variant-numeric: tabular-nums;
+}
+
+.keyboard-hints {
+  font-size: 10px;
+  color: var(--color-text-muted, #999);
+  white-space: nowrap;
+}
+
+/* Responsive adjustments */
+@media (max-width: 600px) {
+  .playback-controls {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .playback-progress {
+    order: 3;
+    width: 100%;
+    flex: none;
+  }
+
+  .keyboard-hints {
+    display: none;
+  }
+}

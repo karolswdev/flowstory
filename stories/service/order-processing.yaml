@@ -1,0 +1,124 @@
+id: order-processing
+title: Order Processing Service Flow
+description: Microservice choreography for order creation
+renderer: service-flow
+schemaVersion: "2.0"
+layout: sequence
+
+services:
+  - id: gateway
+    name: API Gateway
+    type: gateway
+    technology: Kong
+    status: healthy
+
+  - id: orders
+    name: Order Service
+    type: api
+    technology: Node.js
+    status: healthy
+    instances: 3
+
+  - id: inventory
+    name: Inventory Service
+    type: api
+    technology: Go
+    status: healthy
+
+  - id: notification
+    name: Notification Worker
+    type: worker
+    technology: Python
+    status: healthy
+
+  - id: orders-db
+    name: Orders DB
+    type: database
+    technology: PostgreSQL
+
+queues:
+  - id: order-events
+    name: order-events
+    type: topic
+    broker: kafka
+    depth: 1234
+    consumers: 5
+
+  - id: notification-queue
+    name: notification-queue
+    type: queue
+    broker: rabbitmq
+    consumers: 2
+
+calls:
+  - id: create-order
+    type: sync
+    from: gateway
+    to: orders
+    method: POST
+    path: /orders
+    protocol: http
+    duration: 150
+    status: 201
+
+  - id: check-inventory
+    type: sync
+    from: orders
+    to: inventory
+    method: GET
+    path: /stock/ABC-123
+    protocol: grpc
+    duration: 45
+    status: ok
+
+  - id: save-order
+    type: sync
+    from: orders
+    to: orders-db
+    method: INSERT
+    duration: 12
+    status: ok
+
+  - id: publish-created
+    type: publish
+    from: orders
+    to: order-events
+    messageType: OrderCreatedEvent
+
+  - id: consume-for-notification
+    type: subscribe
+    from: order-events
+    to: notification
+    messageType: OrderCreatedEvent
+    action: SendConfirmationEmail
+
+steps:
+  - id: step-1
+    title: API Request Received
+    narrative: Customer submits order through API Gateway. Gateway routes to Order Service.
+    activeCalls: [create-order]
+    duration: 4000
+
+  - id: step-2
+    title: Inventory Check
+    narrative: Order Service checks inventory availability via gRPC call.
+    activeCalls: [check-inventory]
+    duration: 3000
+
+  - id: step-3
+    title: Persist Order
+    narrative: Order is saved to database.
+    activeCalls: [save-order]
+    duration: 2500
+
+  - id: step-4
+    title: Publish Event
+    narrative: OrderCreatedEvent published to Kafka topic for downstream consumers.
+    activeCalls: [publish-created]
+    duration: 3000
+
+  - id: step-5
+    title: Notification Triggered
+    narrative: Notification worker consumes event and sends confirmation email.
+    activeCalls: [consume-for-notification]
+    duration: 3500

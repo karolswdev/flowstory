@@ -1,0 +1,169 @@
+/**
+ * Architectural Canvas Styles
+ */
+
+.architectural-canvas {
+  position: relative;
+  background: var(--color-bg-primary, #ffffff);
+}
+
+/* ============================================
+   BC Label Fixes - Prevent Truncation
+   ============================================ */
+.bc-region-header {
+  min-width: 180px;
+  white-space: nowrap;
+  overflow: visible;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.bc-region-header .bc-name {
+  display: inline-block;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Event label improvements */
+.architectural-canvas .event-node .event-label,
+.architectural-canvas .react-flow__node [class*="event"] {
+  min-width: 160px;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Full label on hover */
+.architectural-canvas .event-node:hover .event-label {
+  white-space: normal;
+  overflow: visible;
+  min-width: auto;
+  max-width: 300px;
+  z-index: 100;
+  background: white;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+/* Standardized event badge styling */
+.architectural-canvas .event-node {
+  --event-color: #FFC107;
+  --event-bg: #FFF8E1;
+  --event-border: #FFB300;
+}
+
+.architectural-canvas .event-node .event-icon-wrapper {
+  background: var(--event-bg);
+  border: 2px solid var(--event-border);
+}
+
+/* BC Region Containers */
+.bc-region {
+  transition: box-shadow 0.3s ease, opacity 0.3s ease;
+}
+
+.bc-region-header {
+  user-select: none;
+}
+
+/* Orchestration Layer */
+.orchestration-layer {
+  user-select: none;
+}
+
+.orch-step {
+  transition: transform 0.2s ease, background-color 0.2s ease;
+  cursor: default;
+}
+
+/* Infrastructure Layer */
+.infrastructure-layer {
+  user-select: none;
+}
+
+/* Cross-BC edges get emphasized */
+.react-flow__edge[data-crossbc="true"] path {
+  stroke-width: 3px;
+}
+
+/* Active node glow effect */
+.architectural-canvas .react-flow__node.active {
+  filter: drop-shadow(0 0 8px rgba(124, 77, 255, 0.5));
+}
+
+/* Dark theme adjustments */
+[data-theme="dark"] .architectural-canvas {
+  background: var(--color-bg-primary, #121212);
+}
+
+[data-theme="dark"] .bc-region {
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+[data-theme="dark"] .bc-region-header {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+[data-theme="dark"] .orchestration-layer {
+  background: rgba(124, 77, 255, 0.2);
+  border-color: rgba(124, 77, 255, 0.5);
+}
+
+[data-theme="dark"] .infrastructure-layer > div {
+  background: rgba(255, 152, 0, 0.2);
+  border-color: rgba(255, 152, 0, 0.5);
+}
+
+/* Zoom level transitions */
+.architectural-canvas.transitioning .bc-region,
+.architectural-canvas.transitioning .orchestration-layer,
+.architectural-canvas.transitioning .infrastructure-layer {
+  transition: all 0.5s ease-out;
+}
+
+/* Executive view - simplified */
+.architectural-canvas[data-zoom="executive"] .bc-region {
+  /* Collapse to simpler view */
+}
+
+/* Manager view - BC level */
+.architectural-canvas[data-zoom="manager"] .bc-region {
+  /* Show BC headers, hide internal nodes */
+}
+
+/* Engineer view - full detail */
+.architectural-canvas[data-zoom="engineer"] .bc-region {
+  /* Show everything */
+}
+
+/* Animation keyframes */
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 rgba(124, 77, 255, 0);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(124, 77, 255, 0.4);
+  }
+}
+
+.bc-region.active {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+@keyframes flow-particle {
+  0% {
+    offset-distance: 0%;
+  }
+  100% {
+    offset-distance: 100%;
+  }
+}
+
+/* Event flow particles */
+.event-particle {
+  animation: flow-particle 0.8s linear forwards;
+}

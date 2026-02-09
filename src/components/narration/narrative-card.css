@@ -1,0 +1,269 @@
+/* ============================================
+   Narrative Card Styles
+   ============================================ */
+
+.narrative-card {
+  position: fixed;
+  bottom: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 90%;
+  max-width: 520px;
+  background: rgba(17, 24, 39, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  padding: 20px 24px;
+  backdrop-filter: blur(16px);
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+  z-index: 1001;
+  color: #f9fafb;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+/* ============================================
+   Close Button
+   ============================================ */
+
+.narrative-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 50%;
+  color: #9ca3af;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.narrative-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #f9fafb;
+}
+
+/* ============================================
+   Progress
+   ============================================ */
+
+.narrative-progress {
+  margin-bottom: 16px;
+}
+
+.narrative-step-text {
+  font-size: 12px;
+  color: #9ca3af;
+  margin-bottom: 8px;
+  display: block;
+}
+
+.narrative-progress-bar {
+  position: relative;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  overflow: visible;
+}
+
+.narrative-progress-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  background: linear-gradient(90deg, #7c4dff, #a78bfa);
+  border-radius: 2px;
+}
+
+.narrative-progress-marker {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 12px;
+  height: 12px;
+  background: #7c4dff;
+  border: 2px solid #f9fafb;
+  border-radius: 50%;
+  box-shadow: 0 0 8px rgba(124, 77, 255, 0.5);
+}
+
+/* ============================================
+   Content
+   ============================================ */
+
+.narrative-content {
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.narrative-title {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0 0 10px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #f9fafb;
+}
+
+.narrative-icon {
+  font-size: 20px;
+}
+
+.narrative-text {
+  font-size: 14px;
+  line-height: 1.65;
+  color: #d1d5db;
+  margin: 0;
+}
+
+/* ============================================
+   Controls
+   ============================================ */
+
+.narrative-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.narrative-btn {
+  padding: 10px 18px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+
+.narrative-btn-back {
+  background: transparent;
+  color: #9ca3af;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.narrative-btn-back:hover:not(:disabled) {
+  color: #f9fafb;
+  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.narrative-btn-back:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.narrative-btn-next {
+  background: linear-gradient(135deg, #7c4dff, #a78bfa);
+  color: white;
+  border: none;
+}
+
+.narrative-btn-next:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(124, 77, 255, 0.4);
+}
+
+.narrative-btn-next:active {
+  transform: translateY(0);
+}
+
+/* ============================================
+   Timer
+   ============================================ */
+
+.narrative-timer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+}
+
+.narrative-timer-btn {
+  padding: 8px 14px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 20px;
+  color: #9ca3af;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: inherit;
+  min-width: 70px;
+}
+
+.narrative-timer-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #f9fafb;
+}
+
+/* ============================================
+   Keyboard Hint
+   ============================================ */
+
+.narrative-hint {
+  margin-top: 14px;
+  text-align: center;
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.narrative-hint kbd {
+  display: inline-block;
+  padding: 2px 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  font-family: 'SF Mono', Monaco, monospace;
+  font-size: 10px;
+  color: #9ca3af;
+  margin: 0 2px;
+}
+
+/* ============================================
+   Responsive
+   ============================================ */
+
+@media (max-width: 600px) {
+  .narrative-card {
+    width: 95%;
+    padding: 16px 18px;
+    bottom: 40px;
+  }
+  
+  .narrative-title {
+    font-size: 16px;
+  }
+  
+  .narrative-text {
+    font-size: 13px;
+  }
+  
+  .narrative-btn {
+    padding: 8px 14px;
+    font-size: 13px;
+  }
+  
+  .narrative-hint {
+    display: none;
+  }
+}
+
+/* ============================================
+   Reduced Motion
+   ============================================ */
+
+@media (prefers-reduced-motion: reduce) {
+  .narrative-card,
+  .narrative-card * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

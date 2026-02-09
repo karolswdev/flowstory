@@ -1,0 +1,107 @@
+# Sample HTTP Flow Story - User Creation API
+id: user-creation-api
+title: User Creation API Flow
+description: REST API flow for creating a new user account
+renderer: http-flow
+schemaVersion: "2.0"
+layout: sequence
+
+participants:
+  - id: client
+    name: Mobile App
+    type: client
+    icon: 📱
+    
+  - id: gateway
+    name: API Gateway
+    type: gateway
+    icon: 🚪
+    baseUrl: https://api.example.com
+    
+  - id: users
+    name: User Service
+    type: service
+    icon: 👤
+    baseUrl: https://users.svc.cluster.local
+
+exchanges:
+  - id: create-user-request
+    request:
+      from: client
+      to: gateway
+      method: POST
+      path: /api/v1/users
+      headers:
+        Content-Type: application/json
+        Authorization: Bearer eyJhbGciOiJSUzI1NiIs...
+        X-Request-ID: req-abc-123
+      body:
+        name: John Doe
+        email: john@example.com
+        role: user
+    response:
+      status: 201
+      statusText: Created
+      headers:
+        Content-Type: application/json
+        Location: /api/v1/users/12345
+        X-Request-ID: req-abc-123
+      body:
+        id: 12345
+        name: John Doe
+        email: john@example.com
+        role: user
+        createdAt: "2026-02-08T09:00:00Z"
+    timing:
+      total: 145
+      dns: 5
+      connect: 20
+      tls: 35
+      ttfb: 70
+      download: 15
+
+  - id: forward-to-service
+    request:
+      from: gateway
+      to: users
+      method: POST
+      path: /users
+      headers:
+        Content-Type: application/json
+        X-Forwarded-For: 203.0.113.42
+        X-Request-ID: req-abc-123
+      body:
+        name: John Doe
+        email: john@example.com
+        role: user
+    response:
+      status: 201
+      headers:
+        Content-Type: application/json
+      body:
+        id: 12345
+        name: John Doe
+        email: john@example.com
+        role: user
+        createdAt: "2026-02-08T09:00:00Z"
+    timing:
+      total: 85
+
+steps:
+  - id: step-1
+    title: Client Sends Request
+    narrative: The mobile app sends a POST request to create a new user. The request includes authentication and the user data in JSON format.
+    activeExchanges: [create-user-request]
+    duration: 4000
+
+  - id: step-2
+    title: Gateway Forwards
+    narrative: The API Gateway validates the JWT token and forwards the request to the internal User Service.
+    activeExchanges: [forward-to-service]
+    duration: 3500
+
+  - id: step-3
+    title: Response Returned
+    narrative: The User Service creates the user and returns the new user object. The gateway forwards the 201 Created response to the client.
+    activeExchanges: [create-user-request, forward-to-service]
+    duration: 3000

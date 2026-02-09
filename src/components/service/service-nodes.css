@@ -1,0 +1,277 @@
+/* Service Flow Canvas */
+.service-flow-canvas {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  background: #fafafa;
+}
+
+/* Step Info Overlay */
+.service-flow-step-info {
+  position: absolute;
+  bottom: 20px;
+  left: 20px;
+  right: 20px;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+  max-width: 500px;
+  z-index: 10;
+}
+
+.service-flow-step-info .step-badge {
+  display: inline-block;
+  background: #2196F3;
+  color: white;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  margin-bottom: 8px;
+}
+
+.service-flow-step-info .step-title {
+  font-weight: 600;
+  font-size: 15px;
+  color: #333;
+  margin-bottom: 4px;
+}
+
+.service-flow-step-info .step-narrative {
+  font-size: 13px;
+  color: #666;
+  line-height: 1.5;
+}
+
+/* ============================================================================
+   Service Node
+   ============================================================================ */
+
+.service-node {
+  min-width: 180px;
+  background: white;
+  border: 2px solid #ddd;
+  border-radius: 8px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  transition: all 0.2s ease;
+}
+
+.service-node--active {
+  border-color: #2196F3;
+  box-shadow: 0 0 12px rgba(33, 150, 243, 0.4);
+}
+
+.service-node--complete {
+  border-color: #4CAF50;
+  opacity: 0.85;
+}
+
+.service-node--inactive {
+  opacity: 0.6;
+}
+
+.service-node__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #f5f5f5;
+  border-radius: 6px 6px 0 0;
+}
+
+.service-node__icon {
+  font-size: 18px;
+}
+
+.service-node__name {
+  font-weight: 600;
+  font-size: 13px;
+  color: #333;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.service-node__divider {
+  height: 1px;
+  background: #e0e0e0;
+}
+
+.service-node__details {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  font-size: 11px;
+  color: #666;
+}
+
+.service-node__sep {
+  color: #ccc;
+}
+
+.service-node__type {
+  font-weight: 500;
+  text-transform: lowercase;
+}
+
+.service-node__tech {
+  color: #888;
+}
+
+.service-node__instances {
+  color: #2196F3;
+  font-weight: 600;
+}
+
+.service-node__status {
+  padding: 6px 12px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.service-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.service-handle {
+  width: 8px;
+  height: 8px;
+  background: #2196F3;
+  border: 2px solid white;
+}
+
+/* ============================================================================
+   Queue Node
+   ============================================================================ */
+
+.queue-node {
+  min-width: 160px;
+  background: #f3e5f5;
+  border: 2px solid #9C27B0;
+  border-radius: 8px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  transition: all 0.2s ease;
+}
+
+.queue-node--active {
+  box-shadow: 0 0 12px rgba(156, 39, 176, 0.4);
+}
+
+.queue-node--complete {
+  opacity: 0.85;
+}
+
+.queue-node--inactive {
+  opacity: 0.6;
+}
+
+.queue-node__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(156, 39, 176, 0.1);
+  border-radius: 6px 6px 0 0;
+}
+
+.queue-node__icon {
+  font-size: 16px;
+}
+
+.queue-node__name {
+  font-weight: 600;
+  font-size: 12px;
+  color: #7B1FA2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.queue-node__divider {
+  height: 1px;
+  background: rgba(156, 39, 176, 0.2);
+}
+
+.queue-node__details {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  font-size: 10px;
+  color: #7B1FA2;
+}
+
+.queue-node__sep {
+  color: rgba(156, 39, 176, 0.4);
+}
+
+.queue-node__type {
+  font-weight: 500;
+}
+
+.queue-node__broker {
+  color: #9C27B0;
+}
+
+.queue-node__metrics {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px 8px;
+  font-size: 10px;
+  color: #666;
+}
+
+.queue-node__depth {
+  color: #7B1FA2;
+}
+
+.queue-node__consumers {
+  color: #4CAF50;
+}
+
+.queue-handle {
+  width: 8px;
+  height: 8px;
+  background: #9C27B0;
+  border: 2px solid white;
+}
+
+/* ============================================================================
+   Type-specific colors
+   ============================================================================ */
+
+.service-node--api .service-node__header {
+  background: rgba(33, 150, 243, 0.1);
+}
+
+.service-node--worker .service-node__header {
+  background: rgba(156, 39, 176, 0.1);
+}
+
+.service-node--gateway .service-node__header {
+  background: rgba(255, 152, 0, 0.1);
+}
+
+.service-node--database .service-node__header {
+  background: rgba(121, 85, 72, 0.1);
+}
+
+.service-node--cache .service-node__header {
+  background: rgba(0, 188, 212, 0.1);
+}
+
+.service-node--external .service-node__header {
+  background: rgba(96, 125, 139, 0.1);
+}

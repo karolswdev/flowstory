@@ -1,0 +1,98 @@
+/* ============================================
+   Animated Event Edge Styles
+   ============================================ */
+
+/* Animated overlay container */
+.animated-event-edge-overlays {
+  pointer-events: none;
+}
+
+/* Particle glow effect */
+.animated-event-edge-overlays circle[data-testid="transit-particle"] {
+  will-change: offset-distance, opacity;
+}
+
+/* Emission ripple */
+.animated-event-edge-overlays circle[data-testid="emit-ripple"] {
+  will-change: transform, opacity;
+}
+
+/* Reception flash */
+.animated-event-edge-overlays circle[data-testid="receive-flash"] {
+  will-change: transform, opacity;
+}
+
+/* Active edge glow during animation */
+.animated-event-edge-overlays path {
+  will-change: opacity;
+}
+
+/* ============================================
+   Animation Phase Indicators
+   ============================================ */
+
+/* Emitting phase - source node emphasis */
+.edge-phase-emitting .event-edge-icon {
+  animation: icon-pulse-emit 0.15s ease-out;
+}
+
+@keyframes icon-pulse-emit {
+  0% { transform: translate(-50%, -50%) scale(1); }
+  50% { transform: translate(-50%, -50%) scale(1.3); }
+  100% { transform: translate(-50%, -50%) scale(1); }
+}
+
+/* Transit phase - icon bobbing */
+.edge-phase-transit .event-edge-icon {
+  animation: icon-bob 0.5s ease-in-out;
+}
+
+@keyframes icon-bob {
+  0%, 100% { transform: translate(-50%, -50%) translateY(0); }
+  50% { transform: translate(-50%, -50%) translateY(-2px); }
+}
+
+/* Receiving phase - target emphasis */
+.edge-phase-receiving .event-edge-icon {
+  animation: icon-pulse-receive 0.15s ease-in;
+}
+
+@keyframes icon-pulse-receive {
+  0% { transform: translate(-50%, -50%) scale(1.2); }
+  100% { transform: translate(-50%, -50%) scale(1); }
+}
+
+/* ============================================
+   Reduced Motion
+   ============================================ */
+
+@media (prefers-reduced-motion: reduce) {
+  .animated-event-edge-overlays * {
+    animation: none !important;
+    transition: none !important;
+  }
+  
+  .event-edge-icon {
+    animation: none !important;
+  }
+}
+
+/* ============================================
+   Event Type Color Variants
+   ============================================ */
+
+.animated-edge-published .react-flow__edge-path {
+  stroke: #22c55e;
+}
+
+.animated-edge-subscribed .react-flow__edge-path {
+  stroke: #3b82f6;
+}
+
+.animated-edge-command .react-flow__edge-path {
+  stroke: #f59e0b;
+}
+
+.animated-edge-query .react-flow__edge-path {
+  stroke: #8b5cf6;
+}

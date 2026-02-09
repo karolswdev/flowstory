@@ -1,0 +1,71 @@
+{
+  "name": "flowstory",
+  "version": "1.0.0",
+  "description": "Visual story-driven flow diagrams for user journeys, system architecture, and process documentation",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/karolswdev/flowstory.git"
+  },
+  "keywords": [
+    "visualization",
+    "user-stories",
+    "flow-diagrams",
+    "architecture",
+    "react-flow",
+    "documentation"
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:check": "tsc -b && vite build",
+    "preview": "vite preview",
+    "lint": "eslint . --max-warnings 0",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write \"src/**/*.{ts,tsx}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx}\"",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:all": "npm run lint && npm run typecheck && npm run test && npm run test:e2e",
+    "screenshots": "tsx scripts/screenshot-slides.ts"
+  },
+  "dependencies": {
+    "@dagrejs/dagre": "^2.0.3",
+    "@xyflow/react": "^12.10.0",
+    "gif.js": "^0.2.0",
+    "html-to-image": "^1.11.13",
+    "jspdf": "^4.1.0",
+    "motion": "^12.33.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "yaml": "^2.8.2",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@playwright/test": "^1.58.2",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/dagre": "^0.7.53",
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.1.1",
+    "eslint": "^9.39.1",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.4.24",
+    "globals": "^16.5.0",
+    "jsdom": "^28.0.0",
+    "prettier": "^3.8.1",
+    "tsx": "^4.21.0",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.46.4",
+    "vite": "^7.2.4",
+    "vitest": "^4.0.18"
+  }
+}

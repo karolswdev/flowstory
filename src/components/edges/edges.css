@@ -1,0 +1,237 @@
+/* ============================================
+   Base Edge Styles
+   ============================================ */
+
+/* React Flow edge path styling via CSS classes */
+.react-flow__edge-path {
+  stroke-width: 2.5;
+  fill: none;
+}
+
+/* Architectural canvas gets thicker edges for visibility */
+.architectural-canvas .react-flow__edge-path {
+  stroke-width: 3;
+}
+
+/* Selection state */
+.edge-selected .react-flow__edge-path {
+  stroke-width: 3;
+}
+
+/* Active state - highlighted during current step */
+.edge-active .react-flow__edge-path {
+  stroke-width: 3;
+  filter: drop-shadow(0 0 4px rgba(33, 150, 243, 0.6));
+  animation: edge-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes edge-pulse {
+  0%, 100% {
+    filter: drop-shadow(0 0 4px rgba(33, 150, 243, 0.6));
+  }
+  50% {
+    filter: drop-shadow(0 0 8px rgba(33, 150, 243, 0.9));
+  }
+}
+
+/* Path tracing animation for new edges */
+.edge-trace .react-flow__edge-path {
+  stroke-dasharray: 1000;
+  stroke-dashoffset: 1000;
+  animation: edge-trace 0.8s ease-out forwards;
+}
+
+@keyframes edge-trace {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* ============================================
+   Flow Edge - Solid arrow
+   ============================================ */
+.flow-edge .react-flow__edge-path {
+  stroke: #4CAF50;
+  stroke-dasharray: none;
+}
+
+.flow-edge.edge-active .react-flow__edge-path {
+  stroke: #2E7D32;
+}
+
+.flow-edge-label {
+  background: white;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #4CAF50;
+  border: 1px solid #4CAF50;
+}
+
+/* ============================================
+   Event Edge - Dashed with lightning
+   ============================================ */
+.event-edge .react-flow__edge-path {
+  stroke: #FFC107;
+  stroke-dasharray: 8 4;
+}
+
+.event-edge.edge-active .react-flow__edge-path {
+  stroke: #FF8F00;
+}
+
+.event-edge-icon {
+  background: white;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  border: 2px solid #FFC107;
+}
+
+.event-edge-icon.icon-active {
+  border-color: #FF8F00;
+  background: #FFF8E1;
+}
+
+.event-edge-label {
+  background: white;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #F57F17;
+  border: 1px solid #FFC107;
+}
+
+/* ============================================
+   Error Edge - Red dashed
+   ============================================ */
+.error-edge .react-flow__edge-path {
+  stroke: #F44336;
+  stroke-dasharray: 6 3;
+}
+
+.error-edge.edge-active .react-flow__edge-path {
+  stroke: #C62828;
+}
+
+.error-edge-label {
+  background: white;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #C62828;
+  border: 1px solid #F44336;
+}
+
+/* ============================================
+   Async Edge - Dotted with clock
+   ============================================ */
+.async-edge .react-flow__edge-path {
+  stroke: #9C27B0;
+  stroke-dasharray: 3 3;
+}
+
+.async-edge.edge-active .react-flow__edge-path {
+  stroke: #6A1B9A;
+}
+
+.async-edge-icon {
+  background: white;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  border: 2px solid #9C27B0;
+}
+
+.async-edge-icon.icon-active {
+  border-color: #6A1B9A;
+  background: #F3E5F5;
+}
+
+.async-edge-label {
+  background: white;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #6A1B9A;
+  border: 1px solid #9C27B0;
+}
+
+/* ============================================
+   Common Label Styles
+   ============================================ */
+.edge-label {
+  font-family: 'Inter', system-ui, sans-serif;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  z-index: 10;
+}
+
+.edge-label.label-active {
+  font-weight: 600;
+}
+
+.edge-icon {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  z-index: 10;
+}
+
+/* ============================================
+   Extended Edge Types (Architectural Stories)
+   ============================================ */
+
+/* Command Edge - Blue (synchronous command) */
+.command-edge {
+  stroke: #2196F3;
+  stroke-dasharray: none;
+}
+.command-edge.edge-active {
+  stroke: #1565C0;
+}
+
+/* Query Edge - Cyan (request/response) */
+.query-edge {
+  stroke: #00BCD4;
+  stroke-dasharray: 4 4;
+}
+.query-edge.edge-active {
+  stroke: #00838F;
+}
+
+/* Action Edge - Teal (user action) */
+.action-edge {
+  stroke: #009688;
+  stroke-dasharray: none;
+}
+.action-edge.edge-active {
+  stroke: #00695C;
+}
+
+/* Integration Edge - Indigo (external integration) */
+.integration-edge {
+  stroke: #3F51B5;
+  stroke-dasharray: 6 3;
+}
+.integration-edge.edge-active {
+  stroke: #283593;
+}
+
+/* Compensation Edge - Deep Orange (rollback) */
+.compensation-edge {
+  stroke: #FF5722;
+  stroke-dasharray: 8 4;
+}
+.compensation-edge.edge-active {
+  stroke: #D84315;
+}

@@ -1,0 +1,210 @@
+/* Export Button Container */
+.export-button-container {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Main Export Button */
+.export-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: var(--color-surface-primary);
+  border: 1px solid var(--color-surface-border);
+  border-radius: 8px;
+  color: var(--color-text-primary);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.export-button:hover:not(:disabled) {
+  background: var(--color-surface-secondary);
+  border-color: var(--color-brand-primary);
+}
+
+.export-button:focus-visible {
+  outline: 2px solid var(--color-brand-primary);
+  outline-offset: 2px;
+}
+
+.export-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.export-button-active {
+  background: var(--color-surface-secondary);
+  border-color: var(--color-brand-primary);
+}
+
+/* Export Icon */
+.export-icon {
+  font-size: 16px;
+}
+
+.export-icon-loading {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Export Label */
+.export-label {
+  color: var(--color-text-primary);
+}
+
+/* Chevron */
+.export-chevron {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+  margin-left: 2px;
+  transition: transform 0.2s ease;
+}
+
+.export-button-active .export-chevron {
+  transform: rotate(180deg);
+}
+
+/* Dropdown Menu */
+.export-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 200px;
+  background: var(--color-surface-primary);
+  border: 1px solid var(--color-surface-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  overflow: hidden;
+  animation: dropdown-enter 0.15s ease-out;
+}
+
+@keyframes dropdown-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Export Option */
+.export-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 16px;
+  background: transparent;
+  border: none;
+  color: var(--color-text-primary);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.export-option:hover {
+  background: var(--color-surface-secondary);
+}
+
+.export-option:focus-visible {
+  outline: none;
+  background: var(--color-surface-secondary);
+}
+
+/* Export Sections */
+.export-section {
+  padding: 4px 0;
+}
+
+.export-section:not(:last-child) {
+  border-bottom: 1px solid var(--color-surface-border);
+}
+
+.export-section-title {
+  padding: 8px 16px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-text-tertiary);
+}
+
+.export-option:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.export-option:disabled:hover {
+  background: transparent;
+}
+
+/* Option Icon */
+.export-option-icon {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+/* Option Text */
+.export-option-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.export-option-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.export-option-desc {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+/* Error Message */
+.export-error {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  padding: 8px 12px;
+  background: var(--color-status-error-bg);
+  border: 1px solid var(--color-status-error);
+  border-radius: 6px;
+  color: var(--color-status-error);
+  font-size: 12px;
+  white-space: nowrap;
+  animation: error-enter 0.2s ease-out;
+}
+
+@keyframes error-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Compact variant for toolbar */
+.export-button-container.export-compact .export-button {
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.export-button-container.export-compact .export-icon {
+  font-size: 14px;
+}
