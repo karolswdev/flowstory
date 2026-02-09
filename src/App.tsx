@@ -428,6 +428,25 @@ steps:
     category: 'Effects',
     yaml: '',
     file: '/stories/effects-demo.yaml'
+  },
+  // Executive Pitch Stories
+  'pitch-pain': {
+    title: 'Translation Layer Pain',
+    category: 'Pitch',
+    yaml: '',
+    file: '/stories/pitch/translation-layer-pain.yaml'
+  },
+  'pitch-solution': {
+    title: 'Event-Driven Solution',
+    category: 'Pitch',
+    yaml: '',
+    file: '/stories/pitch/event-driven-solution.yaml'
+  },
+  'pitch-roadmap': {
+    title: '12-Week Pilot Roadmap',
+    category: 'Pitch',
+    yaml: '',
+    file: '/stories/pitch/migration-phases.yaml'
   }
 };
 

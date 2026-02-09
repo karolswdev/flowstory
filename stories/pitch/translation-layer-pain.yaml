@@ -1,0 +1,137 @@
+# Translation Layer Pain - Executive Pitch
+# Shows why the current architecture is problematic
+
+title: "The Translation Layer Problem"
+description: "Every feature touches three systems, compounding complexity"
+
+nodes:
+  # Legacy System
+  - id: legacy
+    type: system
+    label: "Legacy System"
+    description: "Monolithic PWS/Rhapsody"
+    position: { x: 100, y: 200 }
+    effects:
+      - type: glow
+        trigger: continuous
+        params:
+          color: "#ef4444"
+          intensity: 0.4
+          size: 20
+  
+  # Translation Layer (the PAIN point)
+  - id: translation
+    type: system
+    label: "Translation Layer"
+    description: "Complex mapping, data sync, state management"
+    position: { x: 350, y: 200 }
+    effects:
+      - type: shake
+        trigger: on-focus
+        params:
+          intensity: 8
+          duration: 800
+      - type: glow
+        trigger: continuous
+        params:
+          color: "#f97316"
+          intensity: 0.5
+          size: 25
+  
+  # New Services
+  - id: new-services
+    type: system
+    label: "New Services"
+    description: "Re-Catalyst microservices"
+    position: { x: 600, y: 200 }
+    effects:
+      - type: pulse
+        trigger: on-focus
+        params:
+          scale: 1.1
+          color: "#22c55e"
+
+  # Pain indicators
+  - id: pain-1
+    type: state
+    label: "Data Sync Issues"
+    variant: danger
+    position: { x: 350, y: 50 }
+    effects:
+      - type: shake
+        trigger: on-reveal
+        params:
+          intensity: 5
+          duration: 400
+
+  - id: pain-2
+    type: state
+    label: "Complexity Compounds"
+    variant: danger
+    position: { x: 350, y: 350 }
+    effects:
+      - type: shake
+        trigger: on-reveal
+        params:
+          intensity: 5
+          duration: 400
+
+  - id: velocity
+    type: state
+    label: "Velocity ↓"
+    variant: danger
+    position: { x: 600, y: 350 }
+    effects:
+      - type: glow
+        trigger: continuous
+        params:
+          color: "#ef4444"
+          intensity: 0.6
+
+edges:
+  - id: e1
+    source: legacy
+    target: translation
+    type: flow
+    label: "sync"
+    
+  - id: e2
+    source: translation
+    target: new-services
+    type: flow
+    label: "map"
+    
+  - id: e3
+    source: translation
+    target: pain-1
+    type: error
+    label: "breaks"
+    
+  - id: e4
+    source: translation
+    target: pain-2
+    type: error
+    
+  - id: e5
+    source: pain-2
+    target: velocity
+    type: error
+
+steps:
+  - id: step-1
+    title: "The Current Architecture"
+    nodeIds: [legacy, translation, new-services]
+    edgeIds: [e1, e2]
+    narrative: "Every feature requires touching legacy, translation, AND new services."
+
+  - id: step-2
+    title: "Translation Layer Pain"
+    nodeIds: [legacy, translation, new-services, pain-1, pain-2]
+    edgeIds: [e1, e2, e3, e4]
+    narrative: "The translation layer creates constant data sync issues and compounds complexity."
+
+  - id: step-3
+    title: "Velocity Declines"
+    nodeIds: [legacy, translation, new-services, pain-1, pain-2, velocity]
+    edgeIds: [e1, e2, e3, e4, e5]
+    narrative: "Result: development velocity declines as the system grows."
