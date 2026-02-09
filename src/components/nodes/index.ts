@@ -4,6 +4,7 @@ export { DecisionNode } from './DecisionNode';
 export { SystemNode } from './SystemNode';
 export { EventNode } from './EventNode';
 export { StateNode } from './StateNode';
+export { NodeHandles, getBestHandles } from './NodeHandles';
 
 export * from './types';
 export * from '../../animations/nodeVariants';

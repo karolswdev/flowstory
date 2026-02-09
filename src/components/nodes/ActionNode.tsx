@@ -1,4 +1,4 @@
-import { Handle, Position } from '@xyflow/react';
+import { NodeHandles } from './NodeHandles';
 import { motion, AnimatePresence } from 'motion/react';
 import type { ActionNodeProps } from './types';
 import { nodeVariants, pulseVariants, getNodeAnimationState } from '../../animations/nodeVariants';
@@ -60,8 +60,7 @@ export function ActionNode({ data, selected }: ActionNodeProps) {
         )}
       </AnimatePresence>
 
-      <Handle type="source" position={Position.Right} />
-      <Handle type="target" position={Position.Left} />
+      <NodeHandles />
     </motion.div>
   );
 }

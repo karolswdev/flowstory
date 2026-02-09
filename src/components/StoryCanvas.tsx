@@ -66,20 +66,75 @@ function toReactFlowNode(
   };
 }
 
+/** Calculate best edge handles based on node positions */
+function getBestEdgeHandles(
+  sourcePos: { x: number; y: number },
+  targetPos: { x: number; y: number }
+): { sourceHandle: string; targetHandle: string } {
+  const dx = targetPos.x - sourcePos.x;
+  const dy = targetPos.y - sourcePos.y;
+  const absDx = Math.abs(dx);
+  const absDy = Math.abs(dy);
+  
+  if (absDy > absDx) {
+    // Vertical connection preferred
+    if (dy > 0) {
+      return { sourceHandle: 'source-bottom', targetHandle: 'target-top' };
+    } else {
+      return { sourceHandle: 'source-top', targetHandle: 'target-bottom' };
+    }
+  } else {
+    // Horizontal connection preferred
+    if (dx > 0) {
+      return { sourceHandle: 'source-right', targetHandle: 'target-left' };
+    } else {
+      return { sourceHandle: 'source-left', targetHandle: 'target-right' };
+    }
+  }
+}
+
 /** Convert story edge to React Flow edge format */
 function toReactFlowEdge(
   edge: StoryEdge,
   activeEdgeIds: Set<string>,
-  completedEdgeIds: Set<string>
+  completedEdgeIds: Set<string>,
+  nodePositions: Map<string, { x: number; y: number }>
 ): Edge {
   const isActive = activeEdgeIds.has(edge.id);
   const isComplete = completedEdgeIds.has(edge.id);
   const isVisible = isActive || isComplete;
 
+  // Check for explicit anchors first
+  let sourceHandle: string | undefined;
+  let targetHandle: string | undefined;
+  
+  const srcAnchor = (edge as any).sourceAnchor;
+  const tgtAnchor = (edge as any).targetAnchor;
+  
+  if (srcAnchor && srcAnchor !== 'auto') {
+    sourceHandle = `source-${srcAnchor}`;
+  }
+  if (tgtAnchor && tgtAnchor !== 'auto') {
+    targetHandle = `target-${tgtAnchor}`;
+  }
+  
+  // Auto-calculate if not explicitly set
+  if (!sourceHandle || !targetHandle) {
+    const sourcePos = nodePositions.get(edge.source);
+    const targetPos = nodePositions.get(edge.target);
+    if (sourcePos && targetPos) {
+      const auto = getBestEdgeHandles(sourcePos, targetPos);
+      if (!sourceHandle) sourceHandle = auto.sourceHandle;
+      if (!targetHandle) targetHandle = auto.targetHandle;
+    }
+  }
+
   return {
     id: edge.id,
     source: edge.source,
     target: edge.target,
+    sourceHandle,
+    targetHandle,
     type: edge.type,
     data: {
       label: edge.label,
@@ -276,8 +331,15 @@ export function StoryCanvas({
 
   const legacyEdges = useMemo(() => {
     if (!story || useNewLayout) return [];
+    
+    // Build position map for smart handle selection
+    const nodePositions = new Map<string, { x: number; y: number }>();
+    for (const node of story.nodes) {
+      nodePositions.set(node.id, node.position);
+    }
+    
     return story.edges.map(edge =>
-      toReactFlowEdge(edge, activeEdgeIds, completedEdgeIds)
+      toReactFlowEdge(edge, activeEdgeIds, completedEdgeIds, nodePositions)
     );
   }, [story, activeEdgeIds, completedEdgeIds, useNewLayout]);
 

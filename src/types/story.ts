@@ -244,6 +244,9 @@ export type StoryEdgeType =
   | 'query'         // Query/read operation
   | 'compensation'; // Saga compensation
 
+/** Anchor position for edge connections */
+export type EdgeAnchor = 'top' | 'bottom' | 'left' | 'right' | 'auto';
+
 /** An edge connecting two nodes */
 export interface StoryEdge {
   /** Unique identifier */
@@ -258,6 +261,10 @@ export interface StoryEdge {
   label?: string;
   /** Whether edge should animate by default */
   animated?: boolean;
+  /** Where the edge exits the source node (default: auto) */
+  sourceAnchor?: EdgeAnchor;
+  /** Where the edge enters the target node (default: auto) */
+  targetAnchor?: EdgeAnchor;
   
   // Architectural extensions (v2)
   /** Whether this edge crosses BC boundaries */

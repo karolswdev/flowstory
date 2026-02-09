@@ -180,19 +180,73 @@ export function useStoryLayout({
     });
   }, [story, adjustedNodes, activeNodeIds, completedNodeIds, camera, viewport, enabled]);
 
-  // Convert to React Flow edges
+  // Convert to React Flow edges with smart handle selection
   const edges = useMemo((): Edge[] => {
     if (!story) return [];
+
+    // Build position map for handle calculation
+    const positionMap = new Map<string, { x: number; y: number }>();
+    for (const node of adjustedNodes) {
+      positionMap.set(node.id, { x: node.position[0], y: node.position[1] });
+    }
 
     return story.edges.map(storyEdge => {
       const isActive = activeEdgeIds.has(storyEdge.id);
       const isComplete = completedEdgeIds.has(storyEdge.id);
       const isVisible = isActive || isComplete;
 
+      // Calculate handles - use explicit anchors if provided, otherwise auto-calculate
+      const sourcePos = positionMap.get(storyEdge.source);
+      const targetPos = positionMap.get(storyEdge.target);
+      
+      let sourceHandle: string | undefined;
+      let targetHandle: string | undefined;
+      
+      // Check for explicit anchors first
+      const srcAnchor = (storyEdge as any).sourceAnchor;
+      const tgtAnchor = (storyEdge as any).targetAnchor;
+      
+      if (srcAnchor && srcAnchor !== 'auto') {
+        sourceHandle = `source-${srcAnchor}`;
+      }
+      if (tgtAnchor && tgtAnchor !== 'auto') {
+        targetHandle = `target-${tgtAnchor}`;
+      }
+      
+      // Auto-calculate if not explicitly set
+      if ((!sourceHandle || !targetHandle) && sourcePos && targetPos) {
+        const dx = targetPos.x - sourcePos.x;
+        const dy = targetPos.y - sourcePos.y;
+        const absDx = Math.abs(dx);
+        const absDy = Math.abs(dy);
+        
+        if (absDy > absDx) {
+          // Vertical connection preferred
+          if (dy > 0) {
+            if (!sourceHandle) sourceHandle = 'source-bottom';
+            if (!targetHandle) targetHandle = 'target-top';
+          } else {
+            if (!sourceHandle) sourceHandle = 'source-top';
+            if (!targetHandle) targetHandle = 'target-bottom';
+          }
+        } else {
+          // Horizontal connection preferred
+          if (dx > 0) {
+            if (!sourceHandle) sourceHandle = 'source-right';
+            if (!targetHandle) targetHandle = 'target-left';
+          } else {
+            if (!sourceHandle) sourceHandle = 'source-left';
+            if (!targetHandle) targetHandle = 'target-right';
+          }
+        }
+      }
+
       return {
         id: storyEdge.id,
         source: storyEdge.source,
         target: storyEdge.target,
+        sourceHandle,
+        targetHandle,
         type: storyEdge.type,
         data: {
           label: storyEdge.label,
@@ -202,7 +256,7 @@ export function useStoryLayout({
         animated: storyEdge.animated,
       };
     });
-  }, [story, activeEdgeIds, completedEdgeIds]);
+  }, [story, adjustedNodes, activeEdgeIds, completedEdgeIds]);
 
   // Fit view to visible nodes
   const fitView = useCallback(() => {

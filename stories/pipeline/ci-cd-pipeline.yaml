@@ -98,27 +98,41 @@ nodes:
     data: { variant: success }
 
 edges:
-  - { id: e1, source: trigger, target: build-stage, type: flow }
-  - { id: e2, source: build-stage, target: compile, type: flow }
-  - { id: e3, source: build-stage, target: lint, type: flow }
-  - { id: e4, source: build-stage, target: build-image, type: flow }
-  - { id: e5, source: compile, target: test-stage, type: flow }
-  - { id: e6, source: lint, target: test-stage, type: flow }
-  - { id: e7, source: build-image, target: test-stage, type: flow }
-  - { id: e8, source: test-stage, target: unit-tests, type: flow }
-  - { id: e9, source: test-stage, target: integration-tests, type: flow }
-  - { id: e10, source: test-stage, target: security-scan, type: flow }
-  - { id: e11, source: unit-tests, target: approval-gate, type: flow }
-  - { id: e12, source: integration-tests, target: approval-gate, type: flow }
-  - { id: e13, source: security-scan, target: approval-gate, type: flow }
-  - { id: e14, source: approval-gate, target: deploy-staging, type: flow, label: approved }
-  - { id: e15, source: deploy-staging, target: deploy-prod-stage, type: flow }
-  - { id: e16, source: deploy-prod-stage, target: deploy-us-east, type: flow }
-  - { id: e17, source: deploy-prod-stage, target: deploy-us-west, type: flow }
-  - { id: e18, source: deploy-prod-stage, target: deploy-eu, type: flow }
-  - { id: e19, source: deploy-us-east, target: complete, type: flow }
-  - { id: e20, source: deploy-us-west, target: complete, type: flow }
-  - { id: e21, source: deploy-eu, target: complete, type: flow }
+  # Vertical main flow - use bottom→top anchors
+  - { id: e1, source: trigger, target: build-stage, type: flow, sourceAnchor: bottom, targetAnchor: top }
+  
+  # Build stage fans out to parallel jobs
+  - { id: e2, source: build-stage, target: compile, type: flow, sourceAnchor: left, targetAnchor: top }
+  - { id: e3, source: build-stage, target: lint, type: flow, sourceAnchor: bottom, targetAnchor: top }
+  - { id: e4, source: build-stage, target: build-image, type: flow, sourceAnchor: right, targetAnchor: top }
+  # Build jobs converge to test stage
+  - { id: e5, source: compile, target: test-stage, type: flow, sourceAnchor: bottom, targetAnchor: left }
+  - { id: e6, source: lint, target: test-stage, type: flow, sourceAnchor: bottom, targetAnchor: top }
+  - { id: e7, source: build-image, target: test-stage, type: flow, sourceAnchor: bottom, targetAnchor: right }
+  
+  # Test stage fans out to parallel tests
+  - { id: e8, source: test-stage, target: unit-tests, type: flow, sourceAnchor: left, targetAnchor: top }
+  - { id: e9, source: test-stage, target: integration-tests, type: flow, sourceAnchor: bottom, targetAnchor: top }
+  - { id: e10, source: test-stage, target: security-scan, type: flow, sourceAnchor: right, targetAnchor: top }
+  
+  # Tests converge to approval gate
+  - { id: e11, source: unit-tests, target: approval-gate, type: flow, sourceAnchor: bottom, targetAnchor: left }
+  - { id: e12, source: integration-tests, target: approval-gate, type: flow, sourceAnchor: bottom, targetAnchor: top }
+  - { id: e13, source: security-scan, target: approval-gate, type: flow, sourceAnchor: bottom, targetAnchor: right }
+  
+  # Linear deployment flow
+  - { id: e14, source: approval-gate, target: deploy-staging, type: flow, sourceAnchor: bottom, targetAnchor: top, label: approved }
+  - { id: e15, source: deploy-staging, target: deploy-prod-stage, type: flow, sourceAnchor: bottom, targetAnchor: top }
+  
+  # Production fans out to regions
+  - { id: e16, source: deploy-prod-stage, target: deploy-us-east, type: flow, sourceAnchor: left, targetAnchor: top }
+  - { id: e17, source: deploy-prod-stage, target: deploy-us-west, type: flow, sourceAnchor: bottom, targetAnchor: top }
+  - { id: e18, source: deploy-prod-stage, target: deploy-eu, type: flow, sourceAnchor: right, targetAnchor: top }
+  
+  # Regions converge to complete
+  - { id: e19, source: deploy-us-east, target: complete, type: flow, sourceAnchor: bottom, targetAnchor: left }
+  - { id: e20, source: deploy-us-west, target: complete, type: flow, sourceAnchor: bottom, targetAnchor: top }
+  - { id: e21, source: deploy-eu, target: complete, type: flow, sourceAnchor: bottom, targetAnchor: right }
 
 steps:
   - id: step-1

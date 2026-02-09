@@ -1,4 +1,4 @@
-import { Handle, Position } from '@xyflow/react';
+import { NodeHandles } from './NodeHandles';
 import { motion, AnimatePresence } from 'motion/react';
 import type { DecisionNodeProps } from './types';
 import { nodeVariants, decisionVariants, pulseVariants, getNodeAnimationState } from '../../animations/nodeVariants';
@@ -103,10 +103,7 @@ export function DecisionNode({ data, selected }: DecisionNodeProps) {
         )}
       </AnimatePresence>
 
-      {/* Handles positioned for diamond shape */}
-      <Handle type="target" position={Position.Left} className="decision-handle-left" />
-      <Handle type="source" position={Position.Right} id="yes" className="decision-handle-right" />
-      <Handle type="source" position={Position.Bottom} id="no" className="decision-handle-bottom" />
+      <NodeHandles />
     </motion.div>
   );
 }
