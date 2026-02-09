@@ -1,8 +1,12 @@
 # Event-Driven Solution - Executive Pitch
 # Shows the elegant decoupled architecture
 
+id: event-driven-solution
 title: "Event-Driven Architecture"
 description: "Bounded Contexts communicating through events"
+version: "1.0"
+
+actors: []
 
 nodes:
   # Bounded Contexts

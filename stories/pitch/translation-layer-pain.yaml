@@ -1,8 +1,12 @@
 # Translation Layer Pain - Executive Pitch
 # Shows why the current architecture is problematic
 
+id: translation-layer-pain
 title: "The Translation Layer Problem"
 description: "Every feature touches three systems, compounding complexity"
+version: "1.0"
+
+actors: []
 
 nodes:
   # Legacy System
