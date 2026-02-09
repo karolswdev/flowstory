@@ -1,0 +1,156 @@
+title: "API Gateway - Deployment Overview"
+version: 2
+type: bc-deployment
+
+layout:
+  mode: radial
+  centerSize: 120
+  ringSpacing: 160
+
+bc:
+  id: api-gateway
+  name: "API Gateway"
+  icon: "🚪"
+  description: "Edge service handling authentication, routing, and rate limiting"
+  color: "#2196F3"
+  events:
+    publishes:
+      - RequestLoggedEvent
+      - RateLimitExceededEvent
+
+artifacts:
+  - id: helm-chart
+    artifactType: helm-chart
+    name: "api-gateway"
+    path: "charts/api-gateway"
+    layer: 1
+    children:
+      - id: gateway-deployment
+        type: deployment
+        name: "gateway"
+        annotations:
+          replicas: "5"
+          strategy: "RollingUpdate"
+      - id: gateway-service
+        type: service
+        name: "gateway-svc"
+      - id: gateway-hpa
+        type: hpa
+        name: "gateway-hpa"
+        annotations:
+          minReplicas: "3"
+          maxReplicas: "10"
+
+  - id: ingress
+    artifactType: ingress
+    name: "public-ingress"
+    layer: 1
+    annotations:
+      class: "nginx"
+      ssl: "true"
+
+  - id: configmap
+    artifactType: configmap
+    name: "gateway-routes"
+    description: "API routing configuration"
+    layer: 2
+    annotations:
+      routes: "15"
+      upstreams: "8"
+
+  - id: rate-limits
+    artifactType: configmap
+    name: "rate-limit-config"
+    description: "Rate limiting rules per endpoint"
+    layer: 2
+
+  - id: tls-secret
+    artifactType: secret
+    name: "tls-cert"
+    description: "TLS certificate for HTTPS"
+    layer: 2
+
+  - id: cache
+    artifactType: cache
+    name: "rate-limit-cache"
+    description: "Redis for rate limit counters"
+    layer: 3
+    annotations:
+      type: "Redis"
+      ttl: "60s"
+
+  - id: monitoring
+    artifactType: monitoring
+    name: "gateway-dashboards"
+    description: "Grafana dashboards and alerts"
+    layer: 3
+    annotations:
+      panels: "12"
+      alerts: "5"
+
+edges:
+  - source: ingress
+    target: gateway-service
+    type: exposes
+    label: "routes to"
+
+  - source: gateway-hpa
+    target: gateway-deployment
+    type: scales
+    label: "autoscales"
+
+  - source: gateway-deployment
+    target: configmap
+    type: mounts
+
+  - source: gateway-deployment
+    target: rate-limits
+    type: mounts
+
+  - source: gateway-deployment
+    target: cache
+    type: depends
+    label: "rate limits"
+
+  - source: ingress
+    target: tls-secret
+    type: mounts
+    label: "TLS"
+
+steps:
+  - title: "Gateway Overview"
+    description: "The API Gateway handles all external traffic, providing authentication and routing"
+    focusNodes:
+      - helm-chart
+    expandNodes:
+      - helm-chart
+    zoomLevel: 1.2
+
+  - title: "Traffic Flow"
+    description: "External requests enter through the Ingress and route to the Gateway service"
+    focusNodes:
+      - ingress
+      - gateway-service
+    activeEdges:
+      - ingress->gateway-service
+    zoomLevel: 1.0
+
+  - title: "Auto-Scaling"
+    description: "HPA automatically scales the gateway based on CPU and request metrics"
+    focusNodes:
+      - gateway-hpa
+      - gateway-deployment
+    activeEdges:
+      - gateway-hpa->gateway-deployment
+    zoomLevel: 1.1
+
+  - title: "Rate Limiting"
+    description: "Redis-backed rate limiting protects downstream services"
+    focusNodes:
+      - gateway-deployment
+      - rate-limits
+      - cache
+    activeEdges:
+      - gateway-deployment->rate-limits
+      - gateway-deployment->cache
+    zoomLevel: 1.0
