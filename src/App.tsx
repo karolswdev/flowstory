@@ -849,7 +849,7 @@ function App() {
           </ReactFlowProvider>
         ) : (
           <>
-            <StoryCanvas showMinimap showControls showBackground showNavigation={false} />
+            <StoryCanvas showMinimap showControls showBackground showNavigation={false} useNewLayout />
             <StoryPanel showHeader showNextPreview showStepBadge />
             <PlaybackControls showHints />
           </>

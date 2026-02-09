@@ -1,18 +1,16 @@
-title: "Order Service - Deployment Overview"
+title: Order Service - Deployment Overview
 version: 2
 type: bc-deployment
-
 layout:
   mode: radial
   centerSize: 120
   ringSpacing: 140
   childLayout: nested
-
 bc:
   id: order-service
-  name: "Order Service"
-  icon: "🛒"
-  description: "Handles order lifecycle from creation to fulfillment"
+  name: Order Service
+  icon: 🛒
+  description: Handles order lifecycle from creation to fulfillment
   color: "#4CAF50"
   events:
     publishes:
@@ -22,155 +20,133 @@ bc:
     subscribes:
       - PaymentCompletedEvent
       - InventoryReservedEvent
-
 artifacts:
-  # Layer 1 - Core deployment artifacts
   - id: helm-chart
     artifactType: helm-chart
-    name: "order-service"
-    path: "charts/order-service"
-    description: "Helm chart packaging all Order Service resources"
+    name: order-service
+    path: charts/order-service
+    description: Helm chart packaging all Order Service resources
     layer: 1
     children:
       - id: api-deployment
         type: deployment
-        name: "order-api"
+        name: order-api
         annotations:
           replicas: "3"
-          image: "order-api:1.5.0"
+          image: order-api:1.5.0
       - id: worker-deployment
         type: deployment
-        name: "order-worker"
+        name: order-worker
         annotations:
           replicas: "2"
       - id: api-service
         type: service
-        name: "order-api-svc"
+        name: order-api-svc
         annotations:
           port: "8080"
-          type: "ClusterIP"
-
+          type: ClusterIP
   - id: api-ingress
     artifactType: ingress
-    name: "order-api-ingress"
-    path: "charts/order-service/templates/ingress.yaml"
+    name: order-api-ingress
+    path: charts/order-service/templates/ingress.yaml
     layer: 1
     annotations:
-      host: "api.example.com"
-      path: "/orders/*"
-
-  # Layer 2 - Configuration
+      host: api.example.com
+      path: /orders/*
   - id: values-prod
     artifactType: values-yaml
-    name: "values-prod.yaml"
-    path: "charts/order-service/values-prod.yaml"
-    description: "Production environment overrides"
+    name: values-prod.yaml
+    path: charts/order-service/values-prod.yaml
+    description: Production environment overrides
     layer: 2
     annotations:
       replicas: "3"
-      cpu: "500m"
-      memory: "512Mi"
-
+      cpu: 500m
+      memory: 512Mi
   - id: configmap
     artifactType: configmap
-    name: "order-config"
-    description: "Application configuration"
+    name: order-config
+    description: Application configuration
     layer: 2
     annotations:
-      LOG_LEVEL: "info"
-      FEATURE_FLAGS: "enabled"
-
+      LOG_LEVEL: info
+      FEATURE_FLAGS: enabled
   - id: secrets
     artifactType: secret
-    name: "order-secrets"
-    description: "Database credentials and API keys"
+    name: order-secrets
+    description: Database credentials and API keys
     layer: 2
-
-  # Layer 3 - Infrastructure dependencies
   - id: database
     artifactType: database
-    name: "orders-db"
-    description: "PostgreSQL database for order persistence"
+    name: orders-db
+    description: PostgreSQL database for order persistence
     layer: 3
     annotations:
-      type: "PostgreSQL"
+      type: PostgreSQL
       version: "15"
-      storage: "100Gi"
-
+      storage: 100Gi
   - id: cache
     artifactType: cache
-    name: "order-cache"
-    description: "Redis cache for order lookup"
+    name: order-cache
+    description: Redis cache for order lookup
     layer: 3
     annotations:
-      type: "Redis"
-      memory: "2Gi"
-
+      type: Redis
+      memory: 2Gi
   - id: queue
     artifactType: queue
-    name: "order-events"
-    description: "RabbitMQ for event publishing"
+    name: order-events
+    description: RabbitMQ for event publishing
     layer: 3
     annotations:
-      type: "RabbitMQ"
+      type: RabbitMQ
       durable: "true"
-
 edges:
   - source: helm-chart
     target: values-prod
     type: configures
-    label: "overrides"
-
+    label: overrides
   - source: helm-chart
     target: configmap
     type: contains
-
   - source: helm-chart
     target: secrets
     type: contains
-
   - source: api-deployment
     target: configmap
     type: mounts
-    label: "env vars"
-
+    label: env vars
   - source: api-deployment
     target: secrets
     type: mounts
-    label: "credentials"
-
+    label: credentials
   - source: api-deployment
     target: database
     type: depends
-    label: "persists to"
-
+    label: persists to
   - source: api-deployment
     target: cache
     type: depends
-    label: "caches in"
-
+    label: caches in
   - source: worker-deployment
     target: queue
     type: depends
-    label: "consumes from"
-
+    label: consumes from
   - source: api-ingress
     target: api-service
     type: exposes
-    label: "routes to"
-
+    label: routes to
 steps:
-  - title: "Helm Chart Structure"
-    description: "The Order Service is packaged as a Helm chart containing multiple Kubernetes resources"
+  - title: Helm Chart Structure
+    description: The Order Service is packaged as a Helm chart containing multiple Kubernetes resources
     focusNodes:
       - helm-chart
     expandNodes:
       - helm-chart
     zoomLevel: 1.2
     duration: 5000
-
-  - title: "Production Configuration"
-    description: "Environment-specific values override the chart defaults for production deployment"
+  - title: Production Configuration
+    description: Environment-specific values override the chart defaults for production deployment
     focusNodes:
       - values-prod
       - configmap
@@ -179,11 +155,10 @@ steps:
       - helm-chart->values-prod
       - helm-chart->configmap
       - helm-chart->secrets
-    zoomLevel: 1.0
+    zoomLevel: 1
     duration: 5000
-
-  - title: "API Deployment"
-    description: "The API deployment mounts configuration and connects to the database"
+  - title: API Deployment
+    description: The API deployment mounts configuration and connects to the database
     focusNodes:
       - api-deployment
       - configmap
@@ -193,19 +168,17 @@ steps:
       - api-deployment->database
     zoomLevel: 1.1
     duration: 5000
-
-  - title: "External Access"
-    description: "The Ingress routes external traffic to the API service"
+  - title: External Access
+    description: The Ingress routes external traffic to the API service
     focusNodes:
       - api-ingress
       - api-service
     activeEdges:
       - api-ingress->api-service
-    zoomLevel: 1.0
+    zoomLevel: 1
     duration: 5000
-
-  - title: "Event Processing"
-    description: "The worker deployment processes events from the message queue"
+  - title: Event Processing
+    description: The worker deployment processes events from the message queue
     focusNodes:
       - worker-deployment
       - queue
@@ -213,9 +186,8 @@ steps:
       - worker-deployment->queue
     zoomLevel: 1.1
     duration: 5000
-
-  - title: "Full Architecture"
-    description: "Complete deployment view showing all components and their relationships"
+  - title: Full Architecture
+    description: Complete deployment view showing all components and their relationships
     focusNodes:
       - helm-chart
       - database
@@ -223,3 +195,8 @@ steps:
       - cache
     zoomLevel: 0.8
     duration: 5000
+camera:
+  center:
+    - 0
+    - 0
+  zoom: 1

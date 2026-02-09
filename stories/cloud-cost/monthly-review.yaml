@@ -1,248 +1,216 @@
-title: "Cloud Cost Review - January 2026"
+title: Cloud Cost Review - January 2026
 version: 2
 type: cloud-cost
-
-organization: "Acme Corp"
-period: "2026-01"
+organization: Acme Corp
+period: 2026-01
 provider: aws
-
 totalBudget: 150000
 totalSpend: 125000
-
 categories:
   - id: compute
-    name: "Compute"
+    name: Compute
     category: compute
     spend: 65000
     budget: 70000
-
   - id: storage
-    name: "Storage"
+    name: Storage
     category: storage
     spend: 25000
     budget: 30000
-
   - id: database
-    name: "Databases"
+    name: Databases
     category: database
     spend: 18000
     budget: 20000
-
   - id: network
-    name: "Network"
+    name: Network
     category: network
     spend: 12000
     budget: 15000
-
   - id: monitoring
-    name: "Monitoring"
+    name: Monitoring
     category: monitoring
     spend: 5000
     budget: 5000
-
 resources:
-  # Compute
   - id: k8s-prod
-    name: "Production K8s"
+    name: Production K8s
     category: compute
-    service: "EKS"
+    service: EKS
     spend: 35000
     trend: up
     trendPct: 15
-    team: "platform"
+    team: platform
     environment: production
-    notes: "Scaled for holiday traffic"
-
+    notes: Scaled for holiday traffic
   - id: k8s-staging
-    name: "Staging K8s"
+    name: Staging K8s
     category: compute
-    service: "EKS"
+    service: EKS
     spend: 8000
     trend: stable
-    team: "platform"
+    team: platform
     environment: staging
-
   - id: ec2-legacy
-    name: "Legacy VMs"
+    name: Legacy VMs
     category: compute
-    service: "EC2"
+    service: EC2
     spend: 12000
     trend: down
     trendPct: 8
-    team: "migration"
+    team: migration
     environment: production
     optimize: true
-    notes: "Migration in progress"
-
+    notes: Migration in progress
   - id: lambda
-    name: "Lambda Functions"
+    name: Lambda Functions
     category: compute
-    service: "Lambda"
+    service: Lambda
     spend: 10000
     trend: up
     trendPct: 25
-    team: "api"
+    team: api
     environment: production
-
-  # Storage
   - id: s3-primary
-    name: "S3 Primary"
+    name: S3 Primary
     category: storage
-    service: "S3"
+    service: S3
     spend: 15000
     trend: stable
-    team: "platform"
-
+    team: platform
   - id: s3-backup
-    name: "S3 Backups"
+    name: S3 Backups
     category: storage
-    service: "S3 Glacier"
+    service: S3 Glacier
     spend: 3000
     trend: stable
-    team: "platform"
-
+    team: platform
   - id: ebs
-    name: "EBS Volumes"
+    name: EBS Volumes
     category: storage
-    service: "EBS"
+    service: EBS
     spend: 7000
     trend: up
     trendPct: 10
-    team: "platform"
+    team: platform
     optimize: true
-    notes: "Unused snapshots detected"
-
-  # Database
+    notes: Unused snapshots detected
   - id: rds-prod
-    name: "RDS Production"
+    name: RDS Production
     category: database
-    service: "RDS"
+    service: RDS
     spend: 12000
     trend: stable
-    team: "data"
+    team: data
     environment: production
-
   - id: dynamodb
-    name: "DynamoDB"
+    name: DynamoDB
     category: database
-    service: "DynamoDB"
+    service: DynamoDB
     spend: 4000
     trend: up
     trendPct: 20
-    team: "api"
-
+    team: api
   - id: elasticache
-    name: "ElastiCache"
+    name: ElastiCache
     category: database
-    service: "ElastiCache"
+    service: ElastiCache
     spend: 2000
     trend: stable
-    team: "platform"
-
-  # Network
+    team: platform
   - id: cloudfront
-    name: "CloudFront CDN"
+    name: CloudFront CDN
     category: network
-    service: "CloudFront"
+    service: CloudFront
     spend: 5000
     trend: stable
-    team: "platform"
-
+    team: platform
   - id: data-transfer
-    name: "Data Transfer"
+    name: Data Transfer
     category: network
-    service: "Data Transfer"
+    service: Data Transfer
     spend: 7000
     trend: up
     trendPct: 30
-    team: "platform"
+    team: platform
     optimize: true
-    notes: "Cross-AZ traffic review needed"
-
-  # Monitoring
+    notes: Cross-AZ traffic review needed
   - id: cloudwatch
-    name: "CloudWatch"
+    name: CloudWatch
     category: monitoring
-    service: "CloudWatch"
+    service: CloudWatch
     spend: 3000
     trend: stable
-    team: "platform"
-
+    team: platform
   - id: datadog
-    name: "Datadog"
+    name: Datadog
     category: monitoring
-    service: "Datadog"
+    service: Datadog
     spend: 2000
     trend: stable
-    team: "platform"
-
+    team: platform
 teams:
   - id: platform
-    name: "Platform Team"
+    name: Platform Team
     spend: 85000
     budget: 90000
-
   - id: api
-    name: "API Team"
+    name: API Team
     spend: 14000
     budget: 15000
-
   - id: data
-    name: "Data Team"
+    name: Data Team
     spend: 12000
     budget: 15000
-
   - id: migration
-    name: "Migration Team"
+    name: Migration Team
     spend: 14000
     budget: 20000
-
 steps:
-  - title: "January 2026 Cloud Spend"
+  - title: January 2026 Cloud Spend
     description: "Total spend: $125K of $150K budget (83% utilization)"
     zoomLevel: 0.8
     duration: 4000
-
-  - title: "Cost by Category"
-    description: "Compute leads at $65K (52% of total)"
+  - title: Cost by Category
+    description: Compute leads at $65K (52% of total)
     highlightResources: []
     zoomLevel: 0.9
     duration: 5000
-
-  - title: "Compute Deep Dive"
-    description: "Kubernetes clusters are the primary driver"
+  - title: Compute Deep Dive
+    description: Kubernetes clusters are the primary driver
     focusCategory: compute
-    zoomLevel: 1.0
+    zoomLevel: 1
     duration: 5000
     narration:
-      speaker: "FinOps"
-      message: "Production K8s up 15% due to holiday scaling"
-
-  - title: "Cost Trending Up ↑"
-    description: "Resources with increasing costs"
+      speaker: FinOps
+      message: Production K8s up 15% due to holiday scaling
+  - title: Cost Trending Up ↑
+    description: Resources with increasing costs
     filterTrend: up
     zoomLevel: 0.95
     duration: 5000
     narration:
-      speaker: "CTO"
-      message: "Lambda and data transfer need attention"
-
-  - title: "Optimization Opportunities"
-    description: "Identified savings potential"
+      speaker: CTO
+      message: Lambda and data transfer need attention
+  - title: Optimization Opportunities
+    description: Identified savings potential
     showOptimizations: true
-    zoomLevel: 1.0
+    zoomLevel: 1
     duration: 6000
     narration:
-      speaker: "FinOps"
-      message: "~$8K potential monthly savings identified"
-
-  - title: "Team Allocation"
-    description: "Spend by engineering team"
+      speaker: FinOps
+      message: ~$8K potential monthly savings identified
+  - title: Team Allocation
+    description: Spend by engineering team
     showByTeam: true
     zoomLevel: 0.9
     duration: 5000
-
-  - title: "Summary"
-    description: "On track for budget, 3 optimization actions identified"
+  - title: Summary
+    description: On track for budget, 3 optimization actions identified
     zoomLevel: 0.85
     duration: 4000
+camera:
+  center:
+    - 0
+    - 0
+  zoom: 1

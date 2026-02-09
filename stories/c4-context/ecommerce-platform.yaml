@@ -1,14 +1,12 @@
-title: "E-Commerce Platform - System Context"
+title: E-Commerce Platform - System Context
 version: 2
 type: c4-context
-
-organization: "Acme Commerce"
-
+organization: Acme Commerce
 system:
   id: ecommerce-platform
-  name: "E-Commerce Platform"
-  description: "Online shopping platform enabling customers to browse products, place orders, and track deliveries"
-  icon: "🛒"
+  name: E-Commerce Platform
+  description: Online shopping platform enabling customers to browse products, place orders, and track deliveries
+  icon: 🛒
   color: "#2196F3"
   capabilities:
     - Product catalog and search
@@ -16,191 +14,175 @@ system:
     - Order management
     - Customer accounts
     - Inventory sync
-  technology: "React, .NET, PostgreSQL, Redis"
-
+  technology: React, .NET, PostgreSQL, Redis
 people:
   - id: customer
-    name: "Customer"
-    description: "Browses products, places orders, tracks deliveries"
-    icon: "👤"
+    name: Customer
+    description: Browses products, places orders, tracks deliveries
+    icon: 👤
     external: true
-    role: "Shopper"
-
+    role: Shopper
   - id: admin
-    name: "Admin User"
-    description: "Manages products, orders, and site configuration"
-    icon: "👤"
+    name: Admin User
+    description: Manages products, orders, and site configuration
+    icon: 👤
     external: false
-    role: "Staff"
-
+    role: Staff
   - id: support
-    name: "Support Agent"
-    description: "Handles customer inquiries and order issues"
-    icon: "👤"
+    name: Support Agent
+    description: Handles customer inquiries and order issues
+    icon: 👤
     external: false
-    role: "Support"
-
+    role: Support
   - id: warehouse
-    name: "Warehouse Staff"
-    description: "Fulfills orders and manages inventory"
-    icon: "👤"
+    name: Warehouse Staff
+    description: Fulfills orders and manages inventory
+    icon: 👤
     external: false
-    role: "Operations"
-
+    role: Operations
 externalSystems:
   - id: payment-gateway
-    name: "Payment Gateway"
-    description: "Processes credit card and digital wallet payments"
-    icon: "💳"
-    vendor: "Stripe"
+    name: Payment Gateway
+    description: Processes credit card and digital wallet payments
+    icon: 💳
+    vendor: Stripe
     type: saas
     critical: true
-
   - id: shipping-api
-    name: "Shipping Service"
-    description: "Calculates rates and generates shipping labels"
-    icon: "📦"
-    vendor: "ShipStation"
+    name: Shipping Service
+    description: Calculates rates and generates shipping labels
+    icon: 📦
+    vendor: ShipStation
     type: api
-
   - id: email-service
-    name: "Email Service"
-    description: "Sends transactional emails and marketing campaigns"
-    icon: "📧"
-    vendor: "SendGrid"
+    name: Email Service
+    description: Sends transactional emails and marketing campaigns
+    icon: 📧
+    vendor: SendGrid
     type: saas
-
   - id: analytics
-    name: "Analytics Platform"
-    description: "Tracks user behavior and business metrics"
-    icon: "📊"
-    vendor: "Mixpanel"
+    name: Analytics Platform
+    description: Tracks user behavior and business metrics
+    icon: 📊
+    vendor: Mixpanel
     type: saas
-
   - id: inventory-system
-    name: "Inventory System"
-    description: "Warehouse management and stock levels"
-    icon: "🏭"
-    vendor: "Internal"
+    name: Inventory System
+    description: Warehouse management and stock levels
+    icon: 🏭
+    vendor: Internal
     type: legacy
     critical: true
-
   - id: erp
-    name: "ERP System"
-    description: "Financial and accounting integration"
-    icon: "🏢"
-    vendor: "SAP"
+    name: ERP System
+    description: Financial and accounting integration
+    icon: 🏢
+    vendor: SAP
     type: legacy
-
 relationships:
-  # Customer interactions
   - from: customer
     to: ecommerce-platform
     type: uses
-    description: "Browses, orders, tracks"
-    technology: "HTTPS/Web"
-
-  # Admin interactions
+    description: Browses, orders, tracks
+    technology: HTTPS/Web
   - from: admin
     to: ecommerce-platform
     type: manages
-    description: "Configures products and settings"
-    technology: "HTTPS/Web"
-
-  # Support interactions
+    description: Configures products and settings
+    technology: HTTPS/Web
   - from: support
     to: ecommerce-platform
     type: uses
-    description: "Views and updates orders"
-    technology: "HTTPS/Web"
-
-  # Warehouse interactions
+    description: Views and updates orders
+    technology: HTTPS/Web
   - from: warehouse
     to: ecommerce-platform
     type: uses
-    description: "Fulfills orders"
-    technology: "HTTPS/Web"
-
-  # External system integrations
+    description: Fulfills orders
+    technology: HTTPS/Web
   - from: ecommerce-platform
     to: payment-gateway
     type: calls
-    description: "Processes payments"
-    technology: "REST/HTTPS"
+    description: Processes payments
+    technology: REST/HTTPS
     critical: true
-
   - from: ecommerce-platform
     to: shipping-api
     type: calls
-    description: "Gets rates, creates labels"
-    technology: "REST/HTTPS"
-
+    description: Gets rates, creates labels
+    technology: REST/HTTPS
   - from: ecommerce-platform
     to: email-service
     type: sends
-    description: "Order confirmations, shipping updates"
-    technology: "REST/HTTPS"
+    description: Order confirmations, shipping updates
+    technology: REST/HTTPS
     sync: false
-
   - from: ecommerce-platform
     to: analytics
     type: sends
-    description: "User events, conversions"
-    technology: "JavaScript SDK"
+    description: User events, conversions
+    technology: JavaScript SDK
     sync: false
-
   - from: ecommerce-platform
     to: inventory-system
     type: reads
-    description: "Stock levels, availability"
-    technology: "REST/HTTPS"
+    description: Stock levels, availability
+    technology: REST/HTTPS
     critical: true
-
   - from: ecommerce-platform
     to: erp
     type: sends
-    description: "Order and financial data"
-    technology: "SFTP/CSV"
+    description: Order and financial data
+    technology: SFTP/CSV
     sync: false
-
 steps:
-  - title: "System Context Overview"
-    description: "The E-Commerce Platform and its environment"
+  - title: System Context Overview
+    description: The E-Commerce Platform and its environment
     focusNode: ecommerce-platform
-    zoomLevel: 1.0
+    zoomLevel: 1
     duration: 5000
-
-  - title: "Our Customers"
-    description: "External customers browse products, place orders, and track deliveries"
-    highlightNodes: [customer, ecommerce-platform]
-    showRelationships: [customer-ecommerce-platform]
+  - title: Our Customers
+    description: External customers browse products, place orders, and track deliveries
+    highlightNodes:
+      - customer
+      - ecommerce-platform
+    showRelationships:
+      - customer-ecommerce-platform
     zoomLevel: 1.1
     duration: 5000
-
-  - title: "Internal Users"
-    description: "Admin, Support, and Warehouse staff manage the platform"
-    highlightNodes: [admin, support, warehouse]
-    zoomLevel: 1.0
+  - title: Internal Users
+    description: Admin, Support, and Warehouse staff manage the platform
+    highlightNodes:
+      - admin
+      - support
+      - warehouse
+    zoomLevel: 1
     duration: 5000
-
-  - title: "Critical Dependencies"
-    description: "Payment and Inventory are critical - if they fail, we can't process orders"
+  - title: Critical Dependencies
+    description: Payment and Inventory are critical - if they fail, we can't process orders
     showCriticalPath: true
-    highlightNodes: [payment-gateway, inventory-system]
-    zoomLevel: 1.0
+    highlightNodes:
+      - payment-gateway
+      - inventory-system
+    zoomLevel: 1
     duration: 6000
     narration:
-      speaker: "CTO"
-      message: "These integrations require 99.9% uptime SLAs"
-
-  - title: "Data Flow"
-    description: "Analytics and ERP receive async data for reporting"
-    highlightNodes: [analytics, erp]
+      speaker: CTO
+      message: These integrations require 99.9% uptime SLAs
+  - title: Data Flow
+    description: Analytics and ERP receive async data for reporting
+    highlightNodes:
+      - analytics
+      - erp
     filterRelationType: sends
-    zoomLevel: 1.0
+    zoomLevel: 1
     duration: 5000
-
-  - title: "Full Context"
-    description: "Complete view of the E-Commerce Platform ecosystem"
+  - title: Full Context
+    description: Complete view of the E-Commerce Platform ecosystem
     zoomLevel: 0.85
     duration: 4000
+camera:
+  center:
+    - 0
+    - 0
+  zoom: 1

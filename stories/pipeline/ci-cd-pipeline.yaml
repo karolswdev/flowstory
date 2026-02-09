@@ -1,198 +1,299 @@
-# CI/CD Pipeline Story
-# Vertical stages, horizontal parallel jobs
 id: ci-cd-pipeline
 title: CI/CD Build & Deploy Pipeline
 description: Automated build, test, and deployment workflow
 version: "1.0"
-
 actors:
   - id: pipeline
     name: CI/CD Pipeline
     type: system
     color: "#3B82F6"
-
 nodes:
-  # Trigger
   - id: trigger
     type: event
-    label: "Push to main"
-    position: { x: 400, y: 50 }
+    label: Push to main
+    position:
+      x: 0
+      y: -504
     data:
       variant: info
-
-  # Build Stage - horizontal jobs
   - id: build-stage
     type: system
-    label: "Build Stage"
-    position: { x: 400, y: 150 }
+    label: Build Stage
+    position:
+      x: 0
+      y: -404
     data:
       variant: default
-      
   - id: compile
     type: action
-    label: "Compile"
-    position: { x: 200, y: 250 }
-    
+    label: Compile
+    position:
+      x: -200
+      y: -304
   - id: lint
     type: action
-    label: "Lint"
-    position: { x: 400, y: 250 }
-    
+    label: Lint
+    position:
+      x: 0
+      y: -304
   - id: build-image
     type: action
-    label: "Build Image"
-    position: { x: 600, y: 250 }
-
-  # Test Stage - horizontal jobs
+    label: Build Image
+    position:
+      x: 200
+      y: -304
   - id: test-stage
     type: system
-    label: "Test Stage"
-    position: { x: 400, y: 380 }
-    
+    label: Test Stage
+    position:
+      x: 0
+      y: -174
   - id: unit-tests
     type: action
-    label: "Unit Tests"
-    position: { x: 200, y: 480 }
-    
+    label: Unit Tests
+    position:
+      x: -200
+      y: -74
   - id: integration-tests
     type: action
-    label: "Integration Tests"
-    position: { x: 400, y: 480 }
-    
+    label: Integration Tests
+    position:
+      x: 0
+      y: -74
   - id: security-scan
     type: action
-    label: "Security Scan"
-    position: { x: 600, y: 480 }
-
-  # Gate
+    label: Security Scan
+    position:
+      x: 200
+      y: -74
   - id: approval-gate
     type: state
-    label: "Approval Required"
-    position: { x: 400, y: 600 }
+    label: Approval Required
+    position:
+      x: 0
+      y: 46
     data:
       variant: warning
-
-  # Deploy Staging
   - id: deploy-staging
     type: system
-    label: "Deploy Staging"
-    position: { x: 400, y: 720 }
-    
-  # Deploy Production - parallel
+    label: Deploy Staging
+    position:
+      x: 0
+      y: 166
   - id: deploy-prod-stage
     type: system
-    label: "Deploy Production"
-    position: { x: 400, y: 850 }
-    
+    label: Deploy Production
+    position:
+      x: 0
+      y: 296
   - id: deploy-us-east
     type: action
-    label: "US-East"
-    position: { x: 250, y: 950 }
-    
+    label: US-East
+    position:
+      x: -150
+      y: 396
   - id: deploy-us-west
     type: action
-    label: "US-West"
-    position: { x: 400, y: 950 }
-    
+    label: US-West
+    position:
+      x: 0
+      y: 396
   - id: deploy-eu
     type: action
-    label: "EU-West"
-    position: { x: 550, y: 950 }
-
-  # Success
+    label: EU-West
+    position:
+      x: 150
+      y: 396
   - id: complete
     type: state
-    label: "Deployment Complete"
-    position: { x: 400, y: 1080 }
+    label: Deployment Complete
+    position:
+      x: 0
+      y: 526
     data:
       variant: success
-
 edges:
-  # Trigger to Build
-  - { id: e1, source: trigger, target: build-stage, type: flow }
-  
-  # Build stage to jobs (parallel)
-  - { id: e2, source: build-stage, target: compile, type: flow }
-  - { id: e3, source: build-stage, target: lint, type: flow }
-  - { id: e4, source: build-stage, target: build-image, type: flow }
-  
-  # Build jobs to Test stage
-  - { id: e5, source: compile, target: test-stage, type: flow }
-  - { id: e6, source: lint, target: test-stage, type: flow }
-  - { id: e7, source: build-image, target: test-stage, type: flow }
-  
-  # Test stage to jobs (parallel)
-  - { id: e8, source: test-stage, target: unit-tests, type: flow }
-  - { id: e9, source: test-stage, target: integration-tests, type: flow }
-  - { id: e10, source: test-stage, target: security-scan, type: flow }
-  
-  # Test jobs to Gate
-  - { id: e11, source: unit-tests, target: approval-gate, type: flow }
-  - { id: e12, source: integration-tests, target: approval-gate, type: flow }
-  - { id: e13, source: security-scan, target: approval-gate, type: flow }
-  
-  # Gate to Deploy Staging
-  - { id: e14, source: approval-gate, target: deploy-staging, type: flow, label: "approved" }
-  
-  # Staging to Production
-  - { id: e15, source: deploy-staging, target: deploy-prod-stage, type: flow }
-  
-  # Production parallel deploys
-  - { id: e16, source: deploy-prod-stage, target: deploy-us-east, type: flow }
-  - { id: e17, source: deploy-prod-stage, target: deploy-us-west, type: flow }
-  - { id: e18, source: deploy-prod-stage, target: deploy-eu, type: flow }
-  
-  # Deploys to Complete
-  - { id: e19, source: deploy-us-east, target: complete, type: flow }
-  - { id: e20, source: deploy-us-west, target: complete, type: flow }
-  - { id: e21, source: deploy-eu, target: complete, type: flow }
-
+  - id: e1
+    source: trigger
+    target: build-stage
+    type: flow
+  - id: e2
+    source: build-stage
+    target: compile
+    type: flow
+  - id: e3
+    source: build-stage
+    target: lint
+    type: flow
+  - id: e4
+    source: build-stage
+    target: build-image
+    type: flow
+  - id: e5
+    source: compile
+    target: test-stage
+    type: flow
+  - id: e6
+    source: lint
+    target: test-stage
+    type: flow
+  - id: e7
+    source: build-image
+    target: test-stage
+    type: flow
+  - id: e8
+    source: test-stage
+    target: unit-tests
+    type: flow
+  - id: e9
+    source: test-stage
+    target: integration-tests
+    type: flow
+  - id: e10
+    source: test-stage
+    target: security-scan
+    type: flow
+  - id: e11
+    source: unit-tests
+    target: approval-gate
+    type: flow
+  - id: e12
+    source: integration-tests
+    target: approval-gate
+    type: flow
+  - id: e13
+    source: security-scan
+    target: approval-gate
+    type: flow
+  - id: e14
+    source: approval-gate
+    target: deploy-staging
+    type: flow
+    label: approved
+  - id: e15
+    source: deploy-staging
+    target: deploy-prod-stage
+    type: flow
+  - id: e16
+    source: deploy-prod-stage
+    target: deploy-us-east
+    type: flow
+  - id: e17
+    source: deploy-prod-stage
+    target: deploy-us-west
+    type: flow
+  - id: e18
+    source: deploy-prod-stage
+    target: deploy-eu
+    type: flow
+  - id: e19
+    source: deploy-us-east
+    target: complete
+    type: flow
+  - id: e20
+    source: deploy-us-west
+    target: complete
+    type: flow
+  - id: e21
+    source: deploy-eu
+    target: complete
+    type: flow
 steps:
   - id: step-1
     order: 1
-    nodeIds: [trigger]
+    nodeIds:
+      - trigger
     edgeIds: []
-    narrative: "A developer pushes code to the main branch, triggering the CI/CD pipeline."
+    narrative: A developer pushes code to the main branch, triggering the CI/CD pipeline.
     duration: 2000
-
   - id: step-2
     order: 2
-    nodeIds: [trigger, build-stage, compile, lint, build-image]
-    edgeIds: [e1, e2, e3, e4]
+    nodeIds:
+      - trigger
+      - build-stage
+      - compile
+      - lint
+      - build-image
+    edgeIds:
+      - e1
+      - e2
+      - e3
+      - e4
     narrative: "The Build stage runs three parallel jobs: Compile, Lint, and Build Image."
     duration: 3000
-
   - id: step-3
     order: 3
-    nodeIds: [build-stage, compile, lint, build-image, test-stage, unit-tests, integration-tests, security-scan]
-    edgeIds: [e5, e6, e7, e8, e9, e10]
-    narrative: "Once all build jobs complete, the Test stage begins with Unit Tests, Integration Tests, and Security Scan running in parallel."
+    nodeIds:
+      - build-stage
+      - compile
+      - lint
+      - build-image
+      - test-stage
+      - unit-tests
+      - integration-tests
+      - security-scan
+    edgeIds:
+      - e5
+      - e6
+      - e7
+      - e8
+      - e9
+      - e10
+    narrative: Once all build jobs complete, the Test stage begins with Unit Tests, Integration Tests, and Security Scan running in parallel.
     duration: 3000
-
   - id: step-4
     order: 4
-    nodeIds: [test-stage, unit-tests, integration-tests, security-scan, approval-gate]
-    edgeIds: [e11, e12, e13]
-    narrative: "All tests pass and the pipeline reaches the approval gate. A tech lead must approve before production deployment."
+    nodeIds:
+      - test-stage
+      - unit-tests
+      - integration-tests
+      - security-scan
+      - approval-gate
+    edgeIds:
+      - e11
+      - e12
+      - e13
+    narrative: All tests pass and the pipeline reaches the approval gate. A tech lead must approve before production deployment.
     duration: 3000
-
   - id: step-5
     order: 5
-    nodeIds: [approval-gate, deploy-staging]
-    edgeIds: [e14]
-    narrative: "After approval, the code is deployed to the staging environment for final validation."
+    nodeIds:
+      - approval-gate
+      - deploy-staging
+    edgeIds:
+      - e14
+    narrative: After approval, the code is deployed to the staging environment for final validation.
     duration: 2500
-
   - id: step-6
     order: 6
-    nodeIds: [deploy-staging, deploy-prod-stage, deploy-us-east, deploy-us-west, deploy-eu]
-    edgeIds: [e15, e16, e17, e18]
+    nodeIds:
+      - deploy-staging
+      - deploy-prod-stage
+      - deploy-us-east
+      - deploy-us-west
+      - deploy-eu
+    edgeIds:
+      - e15
+      - e16
+      - e17
+      - e18
     narrative: "Production deployment begins across three regions in parallel: US-East, US-West, and EU-West."
     duration: 3000
-
   - id: step-7
     order: 7
-    nodeIds: [deploy-us-east, deploy-us-west, deploy-eu, complete]
-    edgeIds: [e19, e20, e21]
-    narrative: "All regional deployments complete successfully. The pipeline is done!"
+    nodeIds:
+      - deploy-us-east
+      - deploy-us-west
+      - deploy-eu
+      - complete
+    edgeIds:
+      - e19
+      - e20
+      - e21
+    narrative: All regional deployments complete successfully. The pipeline is done!
     duration: 2000
+camera:
+  center:
+    - 0
+    - 0
+  zoom: 0.6

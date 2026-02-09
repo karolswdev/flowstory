@@ -1,233 +1,204 @@
-title: "Technology Radar - 2026 Q1"
+title: Technology Radar - 2026 Q1
 version: 2
 type: tech-radar
-
-organization: "Acme Engineering"
-date: "2026-01"
-
+organization: Acme Engineering
+date: 2026-01
 technologies:
-  # Languages - Adopt
   - id: typescript
-    name: "TypeScript"
+    name: TypeScript
     quadrant: languages
     ring: adopt
-    description: "Primary language for frontend and Node.js backends"
-    
+    description: Primary language for frontend and Node.js backends
   - id: go
-    name: "Go"
+    name: Go
     quadrant: languages
     ring: adopt
-    description: "High-performance services and CLIs"
-    
+    description: High-performance services and CLIs
   - id: csharp
-    name: "C#"
+    name: C#
     quadrant: languages
     ring: adopt
-    description: "Enterprise APIs and backend services"
-
-  # Languages - Trial
+    description: Enterprise APIs and backend services
   - id: rust
-    name: "Rust"
+    name: Rust
     quadrant: languages
     ring: trial
-    description: "Performance-critical components"
+    description: Performance-critical components
     isNew: true
-
-  # Languages - Hold
   - id: python2
-    name: "Python 2"
+    name: Python 2
     quadrant: languages
     ring: hold
-    description: "Legacy - migrate to Python 3"
-
-  # Frameworks - Adopt
+    description: Legacy - migrate to Python 3
   - id: react
-    name: "React"
+    name: React
     quadrant: frameworks
     ring: adopt
-    description: "Primary frontend framework"
-    
+    description: Primary frontend framework
   - id: nextjs
-    name: "Next.js"
+    name: Next.js
     quadrant: frameworks
     ring: adopt
-    description: "Full-stack React applications"
+    description: Full-stack React applications
     moved: 1
-    
   - id: dotnet
-    name: ".NET 8"
+    name: .NET 8
     quadrant: frameworks
     ring: adopt
-    description: "Enterprise API development"
-
-  # Frameworks - Trial
+    description: Enterprise API development
   - id: htmx
-    name: "HTMX"
+    name: HTMX
     quadrant: frameworks
     ring: trial
-    description: "Simple interactivity without heavy JS"
+    description: Simple interactivity without heavy JS
     isNew: true
-    
   - id: fastapi
-    name: "FastAPI"
+    name: FastAPI
     quadrant: frameworks
     ring: trial
-    description: "Python APIs with auto-docs"
-
-  # Frameworks - Assess
+    description: Python APIs with auto-docs
   - id: qwik
-    name: "Qwik"
+    name: Qwik
     quadrant: frameworks
     ring: assess
-    description: "Resumability-first framework"
+    description: Resumability-first framework
     isNew: true
-
-  # Frameworks - Hold
   - id: jquery
-    name: "jQuery"
+    name: jQuery
     quadrant: frameworks
     ring: hold
-    description: "Legacy - use modern alternatives"
-
-  # Data - Adopt
+    description: Legacy - use modern alternatives
   - id: postgresql
-    name: "PostgreSQL"
+    name: PostgreSQL
     quadrant: data
     ring: adopt
-    description: "Primary relational database"
-    
+    description: Primary relational database
   - id: redis
-    name: "Redis"
+    name: Redis
     quadrant: data
     ring: adopt
-    description: "Caching and session storage"
-    
+    description: Caching and session storage
   - id: kafka
-    name: "Kafka"
+    name: Kafka
     quadrant: data
     ring: adopt
-    description: "Event streaming platform"
-
-  # Data - Trial
+    description: Event streaming platform
   - id: clickhouse
-    name: "ClickHouse"
+    name: ClickHouse
     quadrant: data
     ring: trial
-    description: "Analytics and time-series"
+    description: Analytics and time-series
     isNew: true
-    
   - id: timescale
-    name: "TimescaleDB"
+    name: TimescaleDB
     quadrant: data
     ring: trial
-    description: "Time-series on PostgreSQL"
-
-  # Data - Assess
+    description: Time-series on PostgreSQL
   - id: duckdb
-    name: "DuckDB"
+    name: DuckDB
     quadrant: data
     ring: assess
-    description: "Embedded analytics"
+    description: Embedded analytics
     isNew: true
-
-  # Data - Hold
   - id: mongodb
-    name: "MongoDB"
+    name: MongoDB
     quadrant: data
     ring: hold
-    description: "Use PostgreSQL JSONB instead"
+    description: Use PostgreSQL JSONB instead
     moved: -1
-
-  # Platforms - Adopt
   - id: kubernetes
-    name: "Kubernetes"
+    name: Kubernetes
     quadrant: platforms
     ring: adopt
-    description: "Container orchestration"
-    
+    description: Container orchestration
   - id: azure
-    name: "Azure"
+    name: Azure
     quadrant: platforms
     ring: adopt
-    description: "Primary cloud provider"
-    
+    description: Primary cloud provider
   - id: github-actions
-    name: "GitHub Actions"
+    name: GitHub Actions
     quadrant: platforms
     ring: adopt
-    description: "CI/CD pipelines"
-
-  # Platforms - Trial
+    description: CI/CD pipelines
   - id: fly
-    name: "Fly.io"
+    name: Fly.io
     quadrant: platforms
     ring: trial
-    description: "Edge deployment"
+    description: Edge deployment
     isNew: true
-    
   - id: cloudflare-workers
-    name: "Cloudflare Workers"
+    name: Cloudflare Workers
     quadrant: platforms
     ring: trial
-    description: "Edge functions"
-
-  # Platforms - Assess
+    description: Edge functions
   - id: wasm
-    name: "WebAssembly"
+    name: WebAssembly
     quadrant: platforms
     ring: assess
-    description: "Browser and edge compute"
-
+    description: Browser and edge compute
 steps:
-  - title: "Our Technology Radar"
-    description: "A snapshot of our technology landscape for Q1 2026"
-    zoomLevel: 1.0
+  - title: Our Technology Radar
+    description: A snapshot of our technology landscape for Q1 2026
+    zoomLevel: 1
     duration: 4000
-
-  - title: "What We Adopt"
-    description: "Production-ready technologies we actively recommend"
+  - title: What We Adopt
+    description: Production-ready technologies we actively recommend
     focusRing: adopt
     zoomLevel: 1.1
     duration: 5000
-
-  - title: "Languages We Use"
-    description: "TypeScript, Go, and C# are our primary languages"
+  - title: Languages We Use
+    description: TypeScript, Go, and C# are our primary languages
     focusQuadrant: languages
-    highlightTech: [typescript, go, csharp]
+    highlightTech:
+      - typescript
+      - go
+      - csharp
     zoomLevel: 1.2
     duration: 5000
-
-  - title: "New This Quarter"
-    description: "Technologies we've added to the radar"
+  - title: New This Quarter
+    description: Technologies we've added to the radar
     showNew: true
-    highlightTech: [rust, htmx, qwik, clickhouse, duckdb, fly]
-    zoomLevel: 1.0
+    highlightTech:
+      - rust
+      - htmx
+      - qwik
+      - clickhouse
+      - duckdb
+      - fly
+    zoomLevel: 1
     duration: 5000
     narration:
-      speaker: "CTO"
-      message: "Exciting new technologies to explore!"
-
-  - title: "Movement"
-    description: "Technologies that changed rings"
+      speaker: CTO
+      message: Exciting new technologies to explore!
+  - title: Movement
+    description: Technologies that changed rings
     showMoved: true
-    highlightTech: [nextjs, mongodb]
-    zoomLevel: 1.0
+    highlightTech:
+      - nextjs
+      - mongodb
+    zoomLevel: 1
     duration: 5000
-
-  - title: "Hold - Proceed with Caution"
-    description: "Technologies we're moving away from"
+  - title: Hold - Proceed with Caution
+    description: Technologies we're moving away from
     focusRing: hold
-    highlightTech: [python2, jquery, mongodb]
+    highlightTech:
+      - python2
+      - jquery
+      - mongodb
     zoomLevel: 1.1
     duration: 5000
-
-  - title: "Data & Storage"
-    description: "PostgreSQL is our default, with Redis for caching and Kafka for events"
+  - title: Data & Storage
+    description: PostgreSQL is our default, with Redis for caching and Kafka for events
     focusQuadrant: data
     zoomLevel: 1.2
     duration: 5000
-
-  - title: "Full Radar View"
-    description: "Our complete technology landscape"
+  - title: Full Radar View
+    description: Our complete technology landscape
     zoomLevel: 0.9
     duration: 4000
+camera:
+  center:
+    - 0
+    - 0
+  zoom: 1

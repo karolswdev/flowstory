@@ -1,57 +1,55 @@
-# Event-Driven Solution - Executive Pitch
-# Shows the elegant decoupled architecture
-
 id: event-driven-solution
-title: "Event-Driven Architecture"
-description: "Bounded Contexts communicating through events"
+title: Event-Driven Architecture
+description: Bounded Contexts communicating through events
 version: "1.0"
-
 actors: []
-
 nodes:
-  # Bounded Contexts
   - id: ed-bc
     type: system
-    label: "E&D BC"
-    description: "Enrollment & Demand"
-    position: { x: 100, y: 100 }
+    label: E&D BC
+    description: Enrollment & Demand
+    position:
+      x: -250
+      y: -146
     effects:
       - type: pulse
         trigger: on-focus
         params:
           scale: 1.08
           color: "#3b82f6"
-  
   - id: routing-bc
     type: system
-    label: "Routing BC"
-    description: "Route Optimization"
-    position: { x: 350, y: 100 }
+    label: Routing BC
+    description: Route Optimization
+    position:
+      x: 0
+      y: -146
     effects:
       - type: pulse
         trigger: on-focus
         params:
           scale: 1.08
           color: "#8b5cf6"
-  
   - id: trip-bc
     type: system
-    label: "Trip BC"
-    description: "Trip Management"
-    position: { x: 600, y: 100 }
+    label: Trip BC
+    description: Trip Management
+    position:
+      x: 250
+      y: -146
     effects:
       - type: pulse
         trigger: on-focus
         params:
           scale: 1.08
           color: "#06b6d4"
-
-  # Event Bus (central)
   - id: event-bus
     type: event
-    label: "Azure Service Bus"
-    description: "Domain Events"
-    position: { x: 350, y: 280 }
+    label: Azure Service Bus
+    description: Domain Events
+    position:
+      x: 0
+      y: 34
     effects:
       - type: glow
         trigger: continuous
@@ -59,98 +57,124 @@ nodes:
           color: "#22c55e"
           intensity: 0.4
           size: 30
-
-  # Success indicators
   - id: decoupled
     type: state
-    label: "Decoupled"
+    label: Decoupled
     variant: success
-    position: { x: 100, y: 380 }
+    position:
+      x: -250
+      y: 134
     effects:
       - type: emoji-explosion
         trigger: on-reveal
         params:
-          emojis: ["✅", "🔗"]
+          emojis:
+            - ✅
+            - 🔗
           count: 8
           duration: 1200
-
   - id: scalable
     type: state
-    label: "Scalable"
+    label: Scalable
     variant: success
-    position: { x: 350, y: 380 }
+    position:
+      x: 0
+      y: 134
     effects:
       - type: emoji-explosion
         trigger: on-reveal
         params:
-          emojis: ["📈", "⚡"]
+          emojis:
+            - 📈
+            - ⚡
           count: 8
           duration: 1200
-
   - id: velocity-up
     type: state
-    label: "Velocity ↑"
+    label: Velocity ↑
     variant: success
-    position: { x: 600, y: 380 }
+    position:
+      x: 250
+      y: 134
     effects:
       - type: emoji-explosion
         trigger: on-reveal
         params:
-          emojis: ["🚀", "💨", "⭐"]
+          emojis:
+            - 🚀
+            - 💨
+            - ⭐
           count: 15
           duration: 1500
-
 edges:
-  # BCs to Event Bus
   - id: e1
     source: ed-bc
     target: event-bus
     type: event
-    label: "publishes"
-    
+    label: publishes
   - id: e2
     source: routing-bc
     target: event-bus
     type: event
-    label: "publishes"
-    
+    label: publishes
   - id: e3
     source: trip-bc
     target: event-bus
     type: event
-    label: "subscribes"
-
-  # Event Bus to outcomes
+    label: subscribes
   - id: e4
     source: event-bus
     target: decoupled
     type: flow
-    
   - id: e5
     source: event-bus
     target: scalable
     type: flow
-    
   - id: e6
     source: event-bus
     target: velocity-up
     type: flow
-
 steps:
   - id: step-1
-    title: "Bounded Contexts"
-    nodeIds: [ed-bc, routing-bc, trip-bc]
+    title: Bounded Contexts
+    nodeIds:
+      - ed-bc
+      - routing-bc
+      - trip-bc
     edgeIds: []
-    narrative: "Each bounded context owns its domain completely."
-
+    narrative: Each bounded context owns its domain completely.
   - id: step-2
-    title: "Event-Driven Communication"
-    nodeIds: [ed-bc, routing-bc, trip-bc, event-bus]
-    edgeIds: [e1, e2, e3]
-    narrative: "Services communicate through domain events on Azure Service Bus."
-
+    title: Event-Driven Communication
+    nodeIds:
+      - ed-bc
+      - routing-bc
+      - trip-bc
+      - event-bus
+    edgeIds:
+      - e1
+      - e2
+      - e3
+    narrative: Services communicate through domain events on Azure Service Bus.
   - id: step-3
-    title: "The Benefits"
-    nodeIds: [ed-bc, routing-bc, trip-bc, event-bus, decoupled, scalable, velocity-up]
-    edgeIds: [e1, e2, e3, e4, e5, e6]
+    title: The Benefits
+    nodeIds:
+      - ed-bc
+      - routing-bc
+      - trip-bc
+      - event-bus
+      - decoupled
+      - scalable
+      - velocity-up
+    edgeIds:
+      - e1
+      - e2
+      - e3
+      - e4
+      - e5
+      - e6
     narrative: "Result: decoupled, scalable architecture with increased velocity!"
+camera:
+  center:
+    - 0
+    - 0
+  zoom: 1

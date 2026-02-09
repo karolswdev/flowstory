@@ -4,7 +4,6 @@ description: Build, test, and deploy workflow
 renderer: pipeline
 schemaVersion: "2.0"
 layout: stages
-
 pipeline:
   name: Build & Deploy
   trigger:
@@ -14,29 +13,29 @@ pipeline:
     actor: developer
   status: success
   duration: 245000
-
 stages:
   - id: build
     name: Build
-    
   - id: test
     name: Test
-    needs: [build]
-    
+    needs:
+      - build
   - id: staging
     name: Deploy Staging
-    needs: [test]
+    needs:
+      - test
     environment: staging
-    
   - id: production
     name: Deploy Production
-    needs: [staging]
+    needs:
+      - staging
     environment: production
     gate:
       type: approval
       status: pending
-      approvers: [tech-lead, product-owner]
-
+      approvers:
+        - tech-lead
+        - product-owner
 jobs:
   - id: compile
     stage: build
@@ -44,83 +43,93 @@ jobs:
     runner: ubuntu-latest
     status: success
     duration: 45000
-    
   - id: lint
     stage: build
     name: Lint
     runner: ubuntu-latest
     status: success
     duration: 23000
-    
   - id: unit-tests
     stage: test
     name: Unit Tests
     runner: ubuntu-latest
     status: success
     duration: 67000
-    needs: [compile]
-    
+    needs:
+      - compile
   - id: integration-tests
     stage: test
     name: Integration Tests
     runner: ubuntu-latest
     status: success
     duration: 120000
-    needs: [compile]
-    
+    needs:
+      - compile
   - id: deploy-staging
     stage: staging
     name: Deploy to Staging
     runner: ubuntu-latest
     status: success
     duration: 35000
-    
   - id: smoke-tests
     stage: staging
     name: Smoke Tests
     runner: ubuntu-latest
     status: success
     duration: 25000
-    needs: [deploy-staging]
-    
+    needs:
+      - deploy-staging
   - id: deploy-prod
     stage: production
     name: Deploy to Production
     runner: ubuntu-latest
     status: pending
-
 steps:
   - id: step-1
     title: Build Phase
     narrative: Code is compiled and linted in parallel. Both jobs run on ubuntu-latest runners.
-    activeStages: [build]
-    activeJobs: [compile, lint]
+    activeStages:
+      - build
+    activeJobs:
+      - compile
+      - lint
     duration: 4000
-    
   - id: step-2
     title: Test Phase
     narrative: Unit and integration tests run after successful compilation. Tests are parallelized for speed.
-    activeStages: [test]
-    activeJobs: [unit-tests, integration-tests]
+    activeStages:
+      - test
+    activeJobs:
+      - unit-tests
+      - integration-tests
     duration: 4000
-    
   - id: step-3
     title: Staging Deployment
     narrative: Application is deployed to staging environment. Smoke tests validate the deployment.
-    activeStages: [staging]
-    activeJobs: [deploy-staging, smoke-tests]
+    activeStages:
+      - staging
+    activeJobs:
+      - deploy-staging
+      - smoke-tests
     duration: 3500
-    
   - id: step-4
     title: Awaiting Approval
     narrative: Production deployment requires approval from tech-lead or product-owner. Gate is pending.
-    activeStages: [production]
-    activeGates: [production]
+    activeStages:
+      - production
+    activeGates:
+      - production
     duration: 5000
-    
   - id: step-5
     title: Production Deployment
     narrative: After approval, the application is deployed to production. Deployment is now pending.
-    activeStages: [production]
-    activeJobs: [deploy-prod]
+    activeStages:
+      - production
+    activeJobs:
+      - deploy-prod
     duration: 3000
+camera:
+  center:
+    - 0
+    - 0
+  zoom: 1
