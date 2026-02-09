@@ -59,8 +59,16 @@ export function BCDeploymentCanvas({
   console.log('[BCDeploymentCanvas] Hooks initialized, nodes count:', nodes.length);
 
   const currentStep = story.steps[currentStepIndex] as BCDeploymentStep | undefined;
-  const focusNodeIds = new Set(currentStep?.focusNodes || []);
-  const activeEdgeIds = new Set(currentStep?.activeEdges || []);
+  
+  // Memoize Sets to prevent infinite render loops
+  const focusNodeIds = useMemo(
+    () => new Set(currentStep?.focusNodes || []),
+    [currentStep?.focusNodes]
+  );
+  const activeEdgeIds = useMemo(
+    () => new Set(currentStep?.activeEdges || []),
+    [currentStep?.activeEdges]
+  );
   
   // Auto-expand nodes specified in step
   useEffect(() => {
@@ -270,7 +278,7 @@ export function BCDeploymentCanvas({
   const layoutMode = story.layout?.mode || 'radial';
 
   return (
-    <div className="bc-deployment-canvas" style={{ width: '100%', height: '100%' }}>
+    <div className="bc-deployment-canvas" style={{ width: '100%', height: '100%', minHeight: '600px' }}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
