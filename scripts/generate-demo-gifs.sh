@@ -41,10 +41,10 @@ echo ""
 echo "=== Generating Demo GIFs ==="
 echo ""
 
+# Stories with inline YAML (from App.tsx)
 generate_gif "user-registration" "demo-user-story"
-generate_gif "http-user-creation" "demo-http-flow"
-generate_gif "service-order-processing" "demo-service-flow"
-generate_gif "pipeline-cicd" "demo-pipeline"
+generate_gif "checkout-flow" "demo-checkout-flow"
+generate_gif "password-reset" "demo-password-reset"
 
 echo ""
 echo "=== Done! ==="
