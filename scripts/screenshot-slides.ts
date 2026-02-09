@@ -33,7 +33,7 @@ import { chromium, type Page } from 'playwright';
 import { existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 
-const DEV_SERVER_URL = 'http://localhost:5173';
+const DEV_SERVER_URL = process.env.DEV_SERVER_URL || 'http://localhost:5173';
 const SCREENSHOT_DIR = 'screenshots';
 
 async function waitForCanvasReady(page: Page): Promise<void> {
