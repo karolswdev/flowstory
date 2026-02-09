@@ -1,4 +1,5 @@
 import { NodeHandles } from './NodeHandles';
+import { getNodeSize, getSizeStyles } from './sizes';
 import { motion, AnimatePresence } from 'motion/react';
 import type { StateNodeProps } from './types';
 import { nodeVariants, celebrateVariants, getNodeAnimationState, getStateVariant } from '../../animations/nodeVariants';
@@ -9,12 +10,15 @@ import './nodes.css';
  * Pill shape with variant-based styling and celebration animations
  */
 export function StateNode({ data, selected }: StateNodeProps) {
-  const { label, description, variant, isActive, isComplete } = data;
+  const { label, description, variant, isActive, isComplete, size } = data;
+  const sizeConfig = getNodeSize('state', size);
+  const sizeStyles = getSizeStyles(sizeConfig);
 
   const animationState = getNodeAnimationState(isActive, isComplete);
   const variantState = getStateVariant(variant, isActive);
   const stateClass = isActive ? 'node-active' : isComplete ? 'node-complete' : '';
   const variantClass = variant ? `state-${variant}` : '';
+  const sizeClass = size ? `node-size-${size}` : '';
 
   // Variant-specific icons
   const variantIcon = {
@@ -26,7 +30,7 @@ export function StateNode({ data, selected }: StateNodeProps) {
 
   return (
     <motion.div
-      className={`state-node ${stateClass} ${variantClass} ${selected ? 'node-selected' : ''}`}
+      className={`state-node ${stateClass} ${variantClass} ${sizeClass} ${selected ? 'node-selected' : ''}`}
       data-testid="state-node"
       data-state={animationState}
       title={description}
@@ -34,6 +38,7 @@ export function StateNode({ data, selected }: StateNodeProps) {
       initial="hidden"
       animate={animationState}
       layout
+      style={sizeStyles}
     >
       {/* Variant-specific glow */}
       <motion.div

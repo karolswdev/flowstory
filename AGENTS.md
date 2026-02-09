@@ -43,6 +43,42 @@ nodes:
     position: { x: 0, y: 150 }    # 150px below center
 ```
 
+### Node Sizes
+
+Standardized sizes for consistent layouts. Font scales with size.
+
+```yaml
+nodes:
+  - id: main-service
+    type: system
+    label: "Core API"
+    size: xl          # xs | s | m | l | xl
+    position: { x: 0, y: 0 }
+    
+  - id: helper
+    type: action
+    label: "Validate"
+    size: s           # Compact helper
+    position: { x: 200, y: 0 }
+```
+
+**Size presets:**
+| Size | Width | Height | Font | Use Case |
+|------|-------|--------|------|----------|
+| `xs` | 70 | 35 | 10px | Tiny labels, start/end |
+| `s` | 100 | 45 | 12px | Compact, secondary |
+| `m` | 140 | 55 | 14px | Default |
+| `l` | 180 | 70 | 16px | Important nodes |
+| `xl` | 220 | 90 | 18px | Main focus |
+
+**Default sizes by type:**
+- `system` → `l` (large, important)
+- `action` → `m` (medium)
+- `event` → `s` (small badge)
+- `state` → `s` (compact)
+- `actor` → `m` (circular)
+- `start`/`end` → `xs` (tiny)
+
 ### Edge Anchors
 
 Control where edges connect to nodes:

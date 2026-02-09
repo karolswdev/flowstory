@@ -1,4 +1,5 @@
 import { NodeHandles } from './NodeHandles';
+import { getNodeSize, getSizeStyles } from './sizes';
 import { motion, AnimatePresence } from 'motion/react';
 import type { ActionNodeProps } from './types';
 import { nodeVariants, pulseVariants, getNodeAnimationState } from '../../animations/nodeVariants';
@@ -9,14 +10,17 @@ import './nodes.css';
  * Renders as a rounded rectangle with dynamic animations
  */
 export function ActionNode({ data, selected }: ActionNodeProps) {
-  const { label, description, isActive, isComplete } = data;
+  const { label, description, isActive, isComplete, size } = data;
+  const sizeConfig = getNodeSize('action', size);
+  const sizeStyles = getSizeStyles(sizeConfig);
 
   const animationState = getNodeAnimationState(isActive, isComplete);
   const stateClass = isActive ? 'node-active' : isComplete ? 'node-complete' : '';
+  const sizeClass = size ? `node-size-${size}` : '';
 
   return (
     <motion.div
-      className={`action-node ${stateClass} ${selected ? 'node-selected' : ''}`}
+      className={`action-node ${stateClass} ${sizeClass} ${selected ? 'node-selected' : ''}`}
       data-testid="action-node"
       data-state={animationState}
       title={description}
@@ -25,7 +29,7 @@ export function ActionNode({ data, selected }: ActionNodeProps) {
       animate={animationState}
       layout
       layoutId={`action-${label}`}
-      style={{ perspective: 1000 }}
+      style={{ ...sizeStyles, perspective: 1000 }}
     >
       {/* Glow effect layer */}
       <motion.div

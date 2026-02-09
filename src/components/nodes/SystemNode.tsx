@@ -1,4 +1,5 @@
 import { NodeHandles } from './NodeHandles';
+import { getNodeSize, getSizeStyles } from './sizes';
 import { motion, AnimatePresence } from 'motion/react';
 import type { SystemNodeProps } from './types';
 import { nodeVariants, spinVariants, pulseVariants, getNodeAnimationState } from '../../animations/nodeVariants';
@@ -9,14 +10,17 @@ import './nodes.css';
  * Rectangle with spinning gear icon when active
  */
 export function SystemNode({ data, selected }: SystemNodeProps) {
-  const { label, description, isActive, isComplete } = data;
+  const { label, description, isActive, isComplete, size } = data;
+  const sizeConfig = getNodeSize('system', size);
+  const sizeStyles = getSizeStyles(sizeConfig);
 
   const animationState = getNodeAnimationState(isActive, isComplete);
   const stateClass = isActive ? 'node-active' : isComplete ? 'node-complete' : '';
+  const sizeClass = size ? `node-size-${size}` : '';
 
   return (
     <motion.div
-      className={`system-node ${stateClass} ${selected ? 'node-selected' : ''}`}
+      className={`system-node ${stateClass} ${sizeClass} ${selected ? 'node-selected' : ''}`}
       data-testid="system-node"
       data-state={animationState}
       title={description}
@@ -24,6 +28,7 @@ export function SystemNode({ data, selected }: SystemNodeProps) {
       initial="hidden"
       animate={animationState}
       layout
+      style={sizeStyles}
     >
       {/* Glow effect */}
       <motion.div

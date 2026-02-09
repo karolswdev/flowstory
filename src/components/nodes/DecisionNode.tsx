@@ -1,4 +1,5 @@
 import { NodeHandles } from './NodeHandles';
+import { getNodeSize, getSizeStyles } from './sizes';
 import { motion, AnimatePresence } from 'motion/react';
 import type { DecisionNodeProps } from './types';
 import { nodeVariants, decisionVariants, pulseVariants, getNodeAnimationState } from '../../animations/nodeVariants';
@@ -9,14 +10,18 @@ import './nodes.css';
  * Diamond shape with 3D rotation when active
  */
 export function DecisionNode({ data, selected }: DecisionNodeProps) {
-  const { label, description, isActive, isComplete } = data;
+  const { label, description, isActive, isComplete, size } = data;
+  const sizeConfig = getNodeSize('decision', size);
+  // Decision is a diamond - use max dimension for square bounding box
+  const diamondSize = Math.max(sizeConfig.width, sizeConfig.height);
 
   const animationState = getNodeAnimationState(isActive, isComplete);
   const stateClass = isActive ? 'node-active' : isComplete ? 'node-complete' : '';
+  const sizeClass = size ? `node-size-${size}` : '';
 
   return (
     <motion.div
-      className={`decision-node-wrapper ${stateClass} ${selected ? 'node-selected' : ''}`}
+      className={`decision-node-wrapper ${stateClass} ${sizeClass} ${selected ? 'node-selected' : ''}`}
       data-testid="decision-node"
       data-state={animationState}
       title={description}
@@ -24,7 +29,7 @@ export function DecisionNode({ data, selected }: DecisionNodeProps) {
       initial="hidden"
       animate={animationState}
       layout
-      style={{ perspective: 800 }}
+      style={{ perspective: 800, width: diamondSize, height: diamondSize, fontSize: sizeConfig.fontSize }}
     >
       {/* Glow layer behind diamond */}
       <motion.div

@@ -60,7 +60,8 @@ function toReactFlowNode(
       avatar: actor?.avatar,
       color: actor?.color,
       variant: node.data?.variant,
-      effects: node.effects, // Pass effects configuration
+      size: node.size,
+      effects: node.effects,
     },
     hidden: !isVisible,
   };
@@ -226,6 +227,7 @@ function CanvasContent({
   showMinimap,
   showControls,
   showBackground,
+  useNewLayout,
 }: {
   story: UserStory;
   nodes: Node[];
@@ -234,27 +236,31 @@ function CanvasContent({
   showMinimap: boolean;
   showControls: boolean;
   showBackground: boolean;
+  useNewLayout: boolean;
 }) {
   const reactFlowInstance = useRef<ReactFlowInstance | null>(null);
 
   const onInit = useCallback((instance: ReactFlowInstance) => {
     reactFlowInstance.current = instance;
-    // Initial fit with padding
-    setTimeout(() => {
-      instance.fitView({ padding: 0.3, duration: 300 });
-    }, 100);
-  }, []);
+    // Only auto-fit in legacy mode - new layout handles camera
+    if (!useNewLayout) {
+      setTimeout(() => {
+        instance.fitView({ padding: 0.3, duration: 300 });
+      }, 100);
+    }
+  }, [useNewLayout]);
 
   return (
     <>
-      <AutoFocus activeNodeIds={activeNodeIds} story={story} />
+      {/* Only use AutoFocus in legacy mode - new layout has its own camera control */}
+      {!useNewLayout && <AutoFocus activeNodeIds={activeNodeIds} story={story} />}
       <ReactFlow
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         onInit={onInit}
-        fitView
+        fitView={!useNewLayout}
         fitViewOptions={{ padding: 0.3 }}
         proOptions={{ hideAttribution: true }}
         minZoom={0.3}
@@ -390,6 +396,7 @@ export function StoryCanvas({
           showMinimap={showMinimap}
           showControls={showControls}
           showBackground={showBackground}
+          useNewLayout={useNewLayout}
         />
       </div>
     </div>

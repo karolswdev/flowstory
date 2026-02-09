@@ -6,24 +6,12 @@
 
 import { useMemo, useCallback, useState, useEffect, useRef } from 'react';
 import type { Node, Edge } from '@xyflow/react';
-import type { UserStory, StoryNode, StoryEdge, StoryStep } from '../types/story';
+import type { UserStory, StoryNode, StoryEdge, StoryStep, NodeSizePreset } from '../types/story';
 import type { Camera, LayoutNode, LayoutEdge, Viewport, LayoutConfig } from './types';
 import { DEFAULT_CAMERA, DEFAULT_LAYOUT_CONFIG } from './types';
 import { worldToScreen, interpolateCamera, fitNodesToView } from './camera';
 import { detectAndResolveOverlaps, applyAdjustments } from './overlap';
-
-// Default node sizes by type
-const NODE_SIZES: Record<string, { width: number; height: number }> = {
-  actor: { width: 80, height: 80 },
-  action: { width: 140, height: 50 },
-  system: { width: 160, height: 60 },
-  decision: { width: 100, height: 100 },
-  event: { width: 150, height: 50 },
-  state: { width: 120, height: 40 },
-  start: { width: 40, height: 40 },
-  end: { width: 40, height: 40 },
-  default: { width: 120, height: 50 },
-};
+import { getNodeSize } from '../components/nodes/sizes';
 
 export interface UseStoryLayoutOptions {
   /** Story data */
@@ -75,19 +63,29 @@ export function useStoryLayout({
   config = {},
   enabled = true,
 }: UseStoryLayoutOptions): UseStoryLayoutResult {
-  // Camera state
-  const [camera, setCamera] = useState<Camera>(() => {
-    // Check if story has camera config
+  // Camera state - start with default, update when story loads
+  const [camera, setCamera] = useState<Camera>(DEFAULT_CAMERA);
+  const storyIdRef = useRef<string | null>(null);
+  
+  // Initialize camera from story when story loads/changes
+  useEffect(() => {
+    if (!story) return;
+    
+    // Only reset camera when story changes (not on every render)
+    if (storyIdRef.current === story.id) return;
+    storyIdRef.current = story.id;
+    
     const storyCamera = (story as any)?.camera;
     if (storyCamera) {
-      return {
+      setCamera({
         center: storyCamera.center || [0, 0],
         zoom: storyCamera.zoom || 1,
         bounds: storyCamera.bounds,
-      };
+      });
+    } else {
+      setCamera(DEFAULT_CAMERA);
     }
-    return DEFAULT_CAMERA;
-  });
+  }, [story]);
 
   // Layout config
   const layoutConfig = useMemo(() => ({
@@ -100,13 +98,13 @@ export function useStoryLayout({
     if (!story) return [];
 
     return story.nodes.map(node => {
-      const size = NODE_SIZES[node.type] || NODE_SIZES.default;
+      const sizeConfig = getNodeSize(node.type, node.size as NodeSizePreset | undefined);
       const allowOverlap = (node.data as any)?.allowOverlap ?? false;
 
       return {
         id: node.id,
         position: [node.position.x, node.position.y] as [number, number],
-        size,
+        size: { width: sizeConfig.width, height: sizeConfig.height },
         allowOverlap,
       };
     });
@@ -173,6 +171,7 @@ export function useStoryLayout({
           avatar: actor?.avatar,
           color: actor?.color,
           variant: storyNode.data?.variant,
+          size: storyNode.size,
           effects: storyNode.effects,
         },
         hidden: !isVisible,

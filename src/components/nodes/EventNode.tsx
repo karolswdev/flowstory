@@ -1,4 +1,5 @@
 import { NodeHandles } from './NodeHandles';
+import { getNodeSize, getSizeStyles } from './sizes';
 import { motion, AnimatePresence } from 'motion/react';
 import type { EventNodeProps } from './types';
 import { nodeVariants, flashVariants, getNodeAnimationState } from '../../animations/nodeVariants';
@@ -9,14 +10,17 @@ import './nodes.css';
  * Badge shape with lightning icon and flash animation
  */
 export function EventNode({ data, selected }: EventNodeProps) {
-  const { label, description, isActive, isComplete } = data;
+  const { label, description, isActive, isComplete, size } = data;
+  const sizeConfig = getNodeSize('event', size);
+  const sizeStyles = getSizeStyles(sizeConfig);
 
   const animationState = getNodeAnimationState(isActive, isComplete);
   const stateClass = isActive ? 'node-active' : isComplete ? 'node-complete' : '';
+  const sizeClass = size ? `node-size-${size}` : '';
 
   return (
     <motion.div
-      className={`event-node ${stateClass} ${selected ? 'node-selected' : ''}`}
+      className={`event-node ${stateClass} ${sizeClass} ${selected ? 'node-selected' : ''}`}
       data-testid="event-node"
       data-state={animationState}
       title={description}
@@ -24,6 +28,7 @@ export function EventNode({ data, selected }: EventNodeProps) {
       initial="hidden"
       animate={animationState}
       layout
+      style={sizeStyles}
     >
       {/* Electric glow effect */}
       <motion.div

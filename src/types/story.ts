@@ -198,6 +198,9 @@ export interface NodeEffect {
   then?: NodeEffect[];
 }
 
+/** Node size preset */
+export type NodeSizePreset = 'xs' | 's' | 'm' | 'l' | 'xl';
+
 /** A node in the story graph */
 export interface StoryNode {
   /** Unique identifier */
@@ -214,6 +217,8 @@ export interface StoryNode {
   description?: string;
   /** Position on canvas (ignored by auto-layout renderers) */
   position: { x: number; y: number };
+  /** Size preset (xs, s, m, l, xl) - defaults by node type */
+  size?: NodeSizePreset;
   /** Additional data for rendering */
   data?: Record<string, unknown>;
   /** Effects to attach to this node */

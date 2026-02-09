@@ -5,6 +5,8 @@ export { SystemNode } from './SystemNode';
 export { EventNode } from './EventNode';
 export { StateNode } from './StateNode';
 export { NodeHandles, getBestHandles } from './NodeHandles';
+export { SIZE_PRESETS, DEFAULT_NODE_SIZES, getNodeSize, getSizeStyles } from './sizes';
+export type { NodeSize, SizeConfig } from './sizes';
 
 export * from './types';
 export * from '../../animations/nodeVariants';

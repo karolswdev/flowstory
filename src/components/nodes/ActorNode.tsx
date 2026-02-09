@@ -1,4 +1,5 @@
 import { NodeHandles } from './NodeHandles';
+import { getNodeSize, getSizeStyles } from './sizes';
 import { motion, AnimatePresence } from 'motion/react';
 import type { ActorNodeProps } from './types';
 import { nodeVariants, floatVariants, pulseVariants, getNodeAnimationState } from '../../animations/nodeVariants';
@@ -9,20 +10,25 @@ import './nodes.css';
  * Renders as a circle with floating animation when active
  */
 export function ActorNode({ data, selected }: ActorNodeProps) {
-  const { label, avatar, color, isActive, isComplete } = data;
+  const { label, avatar, color, isActive, isComplete, size } = data;
+  const sizeConfig = getNodeSize('actor', size);
+  // Actor is circular - use height as diameter
+  const diameter = sizeConfig.height;
 
   const animationState = getNodeAnimationState(isActive, isComplete);
   const stateClass = isActive ? 'node-active' : isComplete ? 'node-complete' : '';
+  const sizeClass = size ? `node-size-${size}` : '';
 
   return (
     <motion.div
-      className={`actor-node ${stateClass} ${selected ? 'node-selected' : ''}`}
+      className={`actor-node ${stateClass} ${sizeClass} ${selected ? 'node-selected' : ''}`}
       data-testid="actor-node"
       data-state={animationState}
       variants={nodeVariants}
       initial="hidden"
       animate={animationState}
       layout
+      style={{ width: diameter, height: diameter, fontSize: sizeConfig.fontSize }}
     >
       {/* Outer glow ring */}
       <motion.div

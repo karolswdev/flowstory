@@ -1,5 +1,5 @@
 import type { NodeProps } from '@xyflow/react';
-import type { NodeEffect } from '../../types/story';
+import type { NodeEffect, NodeSizePreset } from '../../types/story';
 
 /** Common props for all custom nodes */
 export interface BaseNodeData {
@@ -7,6 +7,8 @@ export interface BaseNodeData {
   description?: string;
   isActive?: boolean;
   isComplete?: boolean;
+  /** Size preset (xs, s, m, l, xl) */
+  size?: NodeSizePreset;
   /** Effects configuration from YAML */
   effects?: NodeEffect[];
 }
