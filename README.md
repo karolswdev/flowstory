@@ -29,6 +29,11 @@ Document build pipelines with stages, jobs, gates, and status indicators.
 
 ![Pipeline Demo](docs/demos/demo-pipeline.gif)
 
+### BC Deployment
+Visualize Kubernetes deployments with Helm charts, secrets, services, and infrastructure relationships.
+
+![BC Deployment Demo](docs/demos/demo-bc-deployment.gif)
+
 ## Features
 
 - **YAML-based stories** - Define flows in simple, readable YAML
