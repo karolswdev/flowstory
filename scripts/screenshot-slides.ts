@@ -37,19 +37,25 @@ const DEV_SERVER_URL = 'http://localhost:5173';
 const SCREENSHOT_DIR = 'screenshots';
 
 async function waitForCanvasReady(page: Page): Promise<void> {
-  // Wait for either React Flow canvas OR Architectural canvas
+  // Wait for one of the canvas types: React Flow, Architectural, or BC Deployment
   try {
-    await page.waitForSelector('.react-flow, [data-testid="architectural-canvas"]', { timeout: 15000 });
-    // For React Flow, wait for at least one node; for Architectural, wait for canvas content
+    await page.waitForSelector('.react-flow, [data-testid="architectural-canvas"], .bc-deployment-canvas', { timeout: 15000 });
+    
+    // Check which canvas type is visible
+    const isBCDeployment = await page.locator('.bc-deployment-canvas').isVisible().catch(() => false);
     const isArchitectural = await page.locator('[data-testid="architectural-canvas"]').isVisible().catch(() => false);
-    if (!isArchitectural) {
+    
+    if (isBCDeployment) {
+      // For BC Deployment, wait for the step overlay
+      await page.waitForSelector('.bc-step-overlay', { timeout: 10000 });
+    } else if (!isArchitectural) {
       await page.waitForSelector('.react-flow__node', { timeout: 15000 });
     }
     // Wait for animations to settle
     await page.waitForTimeout(1000);
   } catch (err) {
     // Try just waiting for the story panel as fallback
-    await page.waitForSelector('.story-panel, [data-testid="story-panel"]', { timeout: 5000 });
+    await page.waitForSelector('.story-panel, [data-testid="story-panel"], .bc-step-overlay', { timeout: 5000 });
     await page.waitForTimeout(1000);
   }
 }
@@ -85,9 +91,20 @@ async function selectStory(page: Page, storyId: string, outputDir: string): Prom
     await selector.selectOption(storyId);
     console.log(`✓ Selected: ${storyId}`);
     
-    // Wait for story to load
-    await page.waitForTimeout(1000);
-    await waitForCanvasReady(page);
+    // Check if this is a BC Deployment story
+    const isBCDeployment = storyId.startsWith('bc-');
+    
+    // Wait for story to load - longer timeout for BC Deployment
+    await page.waitForTimeout(isBCDeployment ? 2000 : 1000);
+    
+    if (isBCDeployment) {
+      // For BC Deployment, wait for the canvas and step overlay
+      await page.waitForSelector('.bc-deployment-canvas', { timeout: 15000 });
+      await page.waitForSelector('.bc-step-overlay', { timeout: 10000 });
+      console.log('✓ BC Deployment canvas loaded');
+    } else {
+      await waitForCanvasReady(page);
+    }
     return true;
   } catch (err) {
     console.log(`⚠️ Could not select story: ${err}`);
