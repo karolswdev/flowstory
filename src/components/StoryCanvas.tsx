@@ -57,6 +57,7 @@ function toReactFlowNode(
       avatar: actor?.avatar,
       color: actor?.color,
       variant: node.data?.variant,
+      effects: node.effects, // Pass effects configuration
     },
     hidden: !isVisible,
   };

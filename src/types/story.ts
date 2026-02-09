@@ -184,6 +184,20 @@ export type StoryNodeType =
   | 'service'            // Domain service
   | 'external';          // External system
 
+/** Effect configuration for a node */
+export interface NodeEffect {
+  /** Effect type (pulse, glow, shake, emoji-explosion, particles, etc.) */
+  type: string;
+  /** Trigger condition */
+  trigger?: 'on-reveal' | 'on-focus' | 'on-blur' | 'on-click' | 'on-hover' | 'continuous' | 'manual';
+  /** Effect-specific parameters */
+  params?: Record<string, unknown>;
+  /** Delay before effect starts (ms) */
+  delay?: number;
+  /** Chained effects to run after this one */
+  then?: NodeEffect[];
+}
+
 /** A node in the story graph */
 export interface StoryNode {
   /** Unique identifier */
@@ -202,6 +216,8 @@ export interface StoryNode {
   position: { x: number; y: number };
   /** Additional data for rendering */
   data?: Record<string, unknown>;
+  /** Effects to attach to this node */
+  effects?: NodeEffect[];
   
   // Architectural extensions (v2)
   /** Bounded context this node belongs to */

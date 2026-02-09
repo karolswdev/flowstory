@@ -1,4 +1,5 @@
 import type { NodeProps } from '@xyflow/react';
+import type { NodeEffect } from '../../types/story';
 
 /** Common props for all custom nodes */
 export interface BaseNodeData {
@@ -6,6 +7,8 @@ export interface BaseNodeData {
   description?: string;
   isActive?: boolean;
   isComplete?: boolean;
+  /** Effects configuration from YAML */
+  effects?: NodeEffect[];
 }
 
 /** Props for ActorNode */

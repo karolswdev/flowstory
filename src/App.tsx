@@ -14,6 +14,7 @@ import { BCDeploymentCanvas } from './components/bc-deployment';
 import { validateBCDeploymentStory, type BCDeploymentStory } from './schemas/bc-deployment';
 import { BCCompositionCanvas } from './components/bc-composition';
 import { BCCompositionStorySchema, type BCCompositionStory } from './schemas/bc-composition';
+import { EffectsProvider } from './effects';
 import './styles/global.css';
 
 /** Detect story type from YAML content */
@@ -842,11 +843,13 @@ function App() {
 function AppWrapper() {
   return (
     <ThemeProvider defaultTheme="light">
-      <ReactFlowProvider>
-        <StoryProvider>
-          <App />
-        </StoryProvider>
-      </ReactFlowProvider>
+      <EffectsProvider>
+        <ReactFlowProvider>
+          <StoryProvider>
+            <App />
+          </StoryProvider>
+        </ReactFlowProvider>
+      </EffectsProvider>
     </ThemeProvider>
   );
 }
