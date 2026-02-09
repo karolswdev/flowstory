@@ -93,3 +93,7 @@ export {
   type UseEffectsSystemOptions,
   type UseEffectsSystemResult,
 } from './hooks';
+
+// React components
+export { EffectsProvider, useEffects, useStepEffects, EffectsContext } from './EffectsProvider';
+export { EffectWrapper } from './EffectWrapper';
