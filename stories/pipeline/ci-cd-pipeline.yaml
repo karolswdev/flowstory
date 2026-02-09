@@ -17,83 +17,99 @@ nodes:
   - id: trigger
     type: event
     label: Push to main
+    size: s
     position: { x: 0, y: -504 }
     data: { variant: info }
 
   - id: build-stage
     type: system
     label: Build Stage
+    size: l
     position: { x: 0, y: -404 }
 
   - id: compile
     type: action
     label: Compile
+    size: s
     position: { x: -200, y: -304 }
 
   - id: lint
     type: action
     label: Lint
+    size: s
     position: { x: 0, y: -304 }
 
   - id: build-image
     type: action
     label: Build Image
+    size: s
     position: { x: 200, y: -304 }
 
   - id: test-stage
     type: system
     label: Test Stage
+    size: l
     position: { x: 0, y: -174 }
 
   - id: unit-tests
     type: action
     label: Unit Tests
+    size: s
     position: { x: -200, y: -74 }
 
   - id: integration-tests
     type: action
     label: Integration Tests
+    size: s
     position: { x: 0, y: -74 }
 
   - id: security-scan
     type: action
     label: Security Scan
+    size: s
     position: { x: 200, y: -74 }
 
   - id: approval-gate
     type: state
     label: Approval Required
+    size: m
     position: { x: 0, y: 46 }
     data: { variant: warning }
 
   - id: deploy-staging
     type: system
     label: Deploy Staging
+    size: l
     position: { x: 0, y: 166 }
 
   - id: deploy-prod-stage
     type: system
     label: Deploy Production
+    size: l
     position: { x: 0, y: 296 }
 
   - id: deploy-us-east
     type: action
     label: US-East
+    size: s
     position: { x: -150, y: 396 }
 
   - id: deploy-us-west
     type: action
     label: US-West
+    size: s
     position: { x: 0, y: 396 }
 
   - id: deploy-eu
     type: action
     label: EU-West
+    size: s
     position: { x: 150, y: 396 }
 
   - id: complete
     type: state
     label: Deployment Complete
+    size: m
     position: { x: 0, y: 526 }
     data: { variant: success }
 

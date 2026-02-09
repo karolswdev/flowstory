@@ -12,12 +12,14 @@ nodes:
   - id: start
     type: actor
     label: "User"
-    position: { x: -320, y: -30 }
+    size: m
+    position: { x: -300, y: 0 }
     
   - id: action-1
     type: action
     label: "Submit Form"
-    position: { x: -120, y: -30 }
+    size: m
+    position: { x: -100, y: 0 }
     effects:
       - type: pulse
         trigger: on-focus
@@ -29,7 +31,8 @@ nodes:
     type: system
     label: "Process Request"
     description: "Validate and process"
-    position: { x: 80, y: -30 }
+    size: l
+    position: { x: 100, y: 0 }
     effects:
       - type: glow
         trigger: on-focus
@@ -42,7 +45,8 @@ nodes:
     type: state
     label: "Validation Error"
     variant: danger
-    position: { x: 80, y: 120 }
+    size: s
+    position: { x: 100, y: 120 }
     effects:
       - type: shake
         trigger: on-focus
@@ -59,7 +63,8 @@ nodes:
     type: state
     label: "Success!"
     variant: success
-    position: { x: 280, y: -30 }
+    size: m
+    position: { x: 300, y: 0 }
     effects:
       - type: emoji-explosion
         trigger: on-reveal
@@ -78,22 +83,30 @@ edges:
     source: start
     target: action-1
     label: "initiates"
+    sourceAnchor: right
+    targetAnchor: left
     
   - id: e2
     source: action-1
     target: process
     label: "submit"
+    sourceAnchor: right
+    targetAnchor: left
     
   - id: e3
     source: process
     target: error
     label: "invalid"
     type: error
+    sourceAnchor: bottom
+    targetAnchor: top
     
   - id: e4
     source: process
     target: success
     label: "valid"
+    sourceAnchor: right
+    targetAnchor: left
 
 steps:
   - id: step-1
