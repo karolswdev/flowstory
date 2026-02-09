@@ -196,7 +196,7 @@ async function runScreenshotPipeline(storyId?: string): Promise<void> {
     const text = msg.text();
     if (msg.type() === 'error') {
       console.log(`🔴 Page error: ${text}`);
-    } else if (text.includes('[FlowStory]')) {
+    } else if (text.includes('[FlowStory]') || text.includes('[BCDeploymentCanvas]')) {
       console.log(`📋 ${text}`);
     }
   });
@@ -228,6 +228,15 @@ async function runScreenshotPipeline(storyId?: string): Promise<void> {
         console.log('⚠️ BC Deployment canvas not found, checking page state...');
         const bcCount = await page.locator('.bc-deployment-canvas').count();
         console.log(`   BC canvas count: ${bcCount}`);
+        
+        // Debug: check react-flow elements
+        const rfCount = await page.locator('.react-flow').count();
+        console.log(`   React Flow count: ${rfCount}`);
+        
+        // Debug: dump main content
+        const mainHtml = await page.locator('main').innerHTML().catch(() => 'N/A');
+        console.log(`   Main innerHTML: ${mainHtml.slice(0, 300)}...`);
+        
         await page.screenshot({ path: join(outputDir, 'debug-bc-error.png') });
       }
     } else {

@@ -49,10 +49,14 @@ export function BCDeploymentCanvas({
   currentStepIndex,
   onStepChange 
 }: BCDeploymentCanvasProps) {
+  console.log('[BCDeploymentCanvas] Rendering, story:', story?.title);
+  
   const { fitBounds, getNodes } = useReactFlow();
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
+  
+  console.log('[BCDeploymentCanvas] Hooks initialized, nodes count:', nodes.length);
 
   const currentStep = story.steps[currentStepIndex] as BCDeploymentStep | undefined;
   const focusNodeIds = new Set(currentStep?.focusNodes || []);
