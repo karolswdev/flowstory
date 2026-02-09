@@ -10,6 +10,18 @@
 export { BCDeploymentCanvas } from './BCDeploymentCanvas';
 export { BCCoreNode } from './BCCoreNode';
 export { ArtifactNode } from './ArtifactNode';
+export { ChildArtifactNode } from './ChildArtifactNode';
+
+// Layout utilities
+export { 
+  calculateBCDeploymentLayout,
+  calculateRadialLayout,
+  calculateHierarchicalLayout,
+  calculateLayeredLayout,
+  flattenPositions,
+  calculateBounds,
+  type PositionedNode,
+} from '../../utils/layout/bcDeploymentLayout';
 
 // Re-export schema types
 export type { 

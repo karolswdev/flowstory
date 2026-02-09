@@ -13,8 +13,14 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { BCCoreNode } from './BCCoreNode';
 import { ArtifactNode } from './ArtifactNode';
+import { ChildArtifactNode } from './ChildArtifactNode';
 import type { BCDeploymentStory, BCDeploymentStep } from '../../schemas/bc-deployment';
 import { ARTIFACT_COLORS, EDGE_STYLES, BC_DEPLOYMENT_LAYOUT } from '../../schemas/bc-deployment';
+import { 
+  calculateBCDeploymentLayout, 
+  flattenPositions,
+  type PositionedNode 
+} from '../../utils/layout/bcDeploymentLayout';
 import './bc-deployment.css';
 
 interface BCDeploymentCanvasProps {
@@ -26,32 +32,17 @@ interface BCDeploymentCanvasProps {
 const nodeTypes = {
   'bc-core': BCCoreNode,
   'artifact': ArtifactNode,
+  'child-artifact': ChildArtifactNode,
 };
 
 /**
- * Calculate radial positions for artifacts around the BC core
- */
-function calculateRadialLayout(
-  artifactCount: number,
-  radius: number,
-  startAngle: number = -90
-): Array<{ x: number; y: number }> {
-  const positions: Array<{ x: number; y: number }> = [];
-  const angleStep = 360 / artifactCount;
-
-  for (let i = 0; i < artifactCount; i++) {
-    const angle = (startAngle + i * angleStep) * (Math.PI / 180);
-    positions.push({
-      x: Math.cos(angle) * radius,
-      y: Math.sin(angle) * radius,
-    });
-  }
-
-  return positions;
-}
-
-/**
  * BCDeploymentCanvas - Main canvas for BC deployment visualization
+ * 
+ * Features:
+ * - Three layout modes: radial (default), hierarchical, layered
+ * - Expandable artifact nodes with child artifacts
+ * - Step-based focus and zoom
+ * - Animated transitions
  */
 export function BCDeploymentCanvas({ 
   story, 
@@ -61,60 +52,126 @@ export function BCDeploymentCanvas({
   const { fitBounds, getNodes } = useReactFlow();
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
 
   const currentStep = story.steps[currentStepIndex] as BCDeploymentStep | undefined;
   const focusNodeIds = new Set(currentStep?.focusNodes || []);
   const activeEdgeIds = new Set(currentStep?.activeEdges || []);
-
-  // Build nodes from story data
+  
+  // Auto-expand nodes specified in step
   useEffect(() => {
-    const { innerRadius, outerRadius, coreSize, artifactSize, staggerDelay } = BC_DEPLOYMENT_LAYOUT;
-    const artifactPositions = calculateRadialLayout(
-      story.artifacts.length,
-      story.artifacts.length <= 6 ? innerRadius : outerRadius
-    );
+    if (currentStep?.expandNodes) {
+      setExpandedNodes(prev => {
+        const next = new Set(prev);
+        currentStep.expandNodes?.forEach(id => next.add(id));
+        return next;
+      });
+    }
+  }, [currentStep?.expandNodes]);
 
-    const bcNode: Node = {
-      id: story.bc.id,
-      type: 'bc-core',
-      position: { x: 0, y: 0 },
-      data: {
-        bc: story.bc,
-        isActive: focusNodeIds.has(story.bc.id),
-        isComplete: currentStepIndex > 0 && !focusNodeIds.has(story.bc.id),
-      },
-    };
+  // Toggle expand state for an artifact
+  const toggleExpand = useCallback((nodeId: string) => {
+    setExpandedNodes(prev => {
+      const next = new Set(prev);
+      if (next.has(nodeId)) {
+        next.delete(nodeId);
+      } else {
+        next.add(nodeId);
+      }
+      return next;
+    });
+  }, []);
 
-    const artifactNodes: Node[] = story.artifacts.map((artifact, index) => ({
-      id: artifact.id,
-      type: 'artifact',
-      position: {
-        x: artifactPositions[index].x - artifactSize / 2,
-        y: artifactPositions[index].y - artifactSize / 2,
-      },
-      data: {
-        ...artifact,
-        isActive: focusNodeIds.has(artifact.id),
-        isComplete: currentStepIndex > 0 && !focusNodeIds.has(artifact.id),
-        enterDelay: index * staggerDelay,
-      },
-    }));
+  // Calculate layout positions
+  const positions = useMemo(() => {
+    return calculateBCDeploymentLayout(story, {
+      mode: story.layout?.mode,
+      centerSize: story.layout?.centerSize,
+      ringSpacing: story.layout?.ringSpacing,
+      childLayout: story.layout?.childLayout,
+    });
+  }, [story]);
 
-    setNodes([bcNode, ...artifactNodes]);
-  }, [story, currentStepIndex, focusNodeIds, setNodes]);
+  // Build nodes from story data and layout
+  useEffect(() => {
+    const { staggerDelay } = BC_DEPLOYMENT_LAYOUT;
+    const resultNodes: Node[] = [];
+
+    // BC Core node
+    const bcPosition = positions.get(story.bc.id);
+    if (bcPosition) {
+      resultNodes.push({
+        id: story.bc.id,
+        type: 'bc-core',
+        position: { x: bcPosition.x, y: bcPosition.y },
+        data: {
+          bc: story.bc,
+          isActive: focusNodeIds.has(story.bc.id),
+          isComplete: currentStepIndex > 0 && !focusNodeIds.has(story.bc.id),
+        },
+      });
+    }
+
+    // Artifact nodes
+    story.artifacts.forEach((artifact, index) => {
+      const position = positions.get(artifact.id);
+      if (!position) return;
+
+      const isExpanded = expandedNodes.has(artifact.id);
+
+      resultNodes.push({
+        id: artifact.id,
+        type: 'artifact',
+        position: { x: position.x, y: position.y },
+        data: {
+          ...artifact,
+          isActive: focusNodeIds.has(artifact.id),
+          isComplete: currentStepIndex > 0 && !focusNodeIds.has(artifact.id),
+          enterDelay: index * staggerDelay,
+          isExpanded,
+          onToggleExpand: () => toggleExpand(artifact.id),
+        },
+      });
+
+      // Child nodes (only when expanded)
+      if (isExpanded && position.children) {
+        position.children.forEach((childPos, childIndex) => {
+          const childData = artifact.children?.find(c => c.id === childPos.id);
+          if (!childData) return;
+
+          resultNodes.push({
+            id: childPos.id,
+            type: 'child-artifact',
+            position: { x: childPos.x, y: childPos.y },
+            parentId: artifact.id, // React Flow parent grouping
+            data: {
+              ...childData,
+              isActive: focusNodeIds.has(childPos.id),
+              isComplete: currentStepIndex > 0 && !focusNodeIds.has(childPos.id),
+              enterDelay: (index * staggerDelay) + (childIndex + 1) * 50,
+              parentId: artifact.id,
+            },
+          });
+        });
+      }
+    });
+
+    setNodes(resultNodes);
+  }, [story, positions, currentStepIndex, focusNodeIds, expandedNodes, toggleExpand, setNodes]);
 
   // Build edges from story data
   useEffect(() => {
     const storyEdges: Edge[] = story.edges.map((edge) => {
+      const edgeId = edge.id || `${edge.source}->${edge.target}`;
       const edgeStyle = EDGE_STYLES[edge.type];
-      const isActive = activeEdgeIds.has(edge.id);
+      const isActive = activeEdgeIds.has(edgeId);
 
       return {
-        id: edge.id,
+        id: edgeId,
         source: edge.source,
         target: edge.target,
         type: 'default',
-        animated: isActive,
+        animated: isActive || edge.animated,
         label: edge.label,
         className: `bc-deployment-edge ${isActive ? 'edge-active' : ''}`,
         style: {
@@ -123,7 +180,7 @@ export function BCDeploymentCanvas({
           strokeWidth: isActive ? 3 : 2,
         },
         labelStyle: {
-          fontSize: 10,
+          fontSize: 11,
           fontWeight: 600,
         },
         labelBgStyle: {
@@ -134,8 +191,29 @@ export function BCDeploymentCanvas({
       };
     });
 
+    // Add edges for expanded children (parent -> child)
+    expandedNodes.forEach(parentId => {
+      const parent = story.artifacts.find(a => a.id === parentId);
+      if (parent?.children) {
+        parent.children.forEach(child => {
+          storyEdges.push({
+            id: `${parentId}->child-${child.id}`,
+            source: parentId,
+            target: child.id,
+            type: 'default',
+            className: 'bc-deployment-edge child-edge',
+            style: {
+              stroke: '#B0BEC5',
+              strokeDasharray: '4,4',
+              strokeWidth: 1.5,
+            },
+          });
+        });
+      }
+    });
+
     setEdges(storyEdges);
-  }, [story.edges, activeEdgeIds, setEdges]);
+  }, [story.edges, story.artifacts, activeEdgeIds, expandedNodes, setEdges]);
 
   // Focus camera on active nodes
   useEffect(() => {
@@ -166,7 +244,9 @@ export function BCDeploymentCanvas({
         { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }
       );
 
-      const padding = currentStep.zoomLevel > 1 ? 100 : 150;
+      // Adjust padding based on zoom level
+      const zoomLevel = currentStep.zoomLevel || 1;
+      const padding = zoomLevel > 1 ? 80 : 120;
       
       fitBounds(
         {
@@ -181,6 +261,9 @@ export function BCDeploymentCanvas({
 
     return () => clearTimeout(timer);
   }, [currentStep, focusNodeIds, fitBounds, getNodes]);
+
+  // Layout mode indicator
+  const layoutMode = story.layout?.mode || 'radial';
 
   return (
     <div className="bc-deployment-canvas" style={{ width: '100%', height: '100%' }}>
@@ -201,6 +284,7 @@ export function BCDeploymentCanvas({
         <MiniMap 
           nodeColor={(node) => {
             if (node.type === 'bc-core') return story.bc.color || '#4CAF50';
+            if (node.type === 'child-artifact') return '#B0BEC5';
             const artifact = story.artifacts.find(a => a.id === node.id);
             return artifact ? ARTIFACT_COLORS[artifact.artifactType] : '#78909C';
           }}
@@ -208,6 +292,14 @@ export function BCDeploymentCanvas({
           style={{ width: 120, height: 80 }}
         />
       </ReactFlow>
+
+      {/* Layout mode badge */}
+      <div className="bc-layout-badge">
+        {layoutMode === 'radial' && '⭕'}
+        {layoutMode === 'hierarchical' && '🌲'}
+        {layoutMode === 'layered' && '📊'}
+        <span>{layoutMode}</span>
+      </div>
 
       {/* Step Description Overlay */}
       <AnimatePresence mode="wait">
@@ -223,6 +315,16 @@ export function BCDeploymentCanvas({
           >
             <h3 className="bc-step-title">{currentStep.title}</h3>
             <p className="bc-step-description">{currentStep.description}</p>
+            
+            {/* Narration bubble (if present) */}
+            {currentStep.narration && (
+              <div className={`bc-narration ${currentStep.narration.position || 'right'}`}>
+                {currentStep.narration.speaker && (
+                  <span className="narration-speaker">{currentStep.narration.speaker}:</span>
+                )}
+                <span className="narration-message">{currentStep.narration.message}</span>
+              </div>
+            )}
             
             <div className="bc-step-progress">
               {story.steps.map((_, i) => (
