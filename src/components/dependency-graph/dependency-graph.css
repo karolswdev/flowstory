@@ -1,0 +1,302 @@
+/* ============================================
+   Dependency Graph Styles
+   ============================================ */
+
+/* ============================================
+   Service Node
+   ============================================ */
+.dg-service-node {
+  width: 160px;
+  min-height: 90px;
+  background: white;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-family: 'Inter', system-ui, sans-serif;
+  position: relative;
+  overflow: hidden;
+}
+
+.dg-service-node:hover {
+  border-color: var(--health-color, #2196F3);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* Health status bar at top */
+.dg-health-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+}
+
+/* Entry point indicator */
+.dg-entry-point {
+  position: absolute;
+  top: -20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #2196F3;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 4px 4px 0 0;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+/* Header */
+.dg-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  margin-bottom: 6px;
+}
+
+.dg-icon {
+  font-size: 18px;
+}
+
+.dg-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: #333;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Health display */
+.dg-health {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.dg-health-icon {
+  font-size: 12px;
+}
+
+.dg-health-value {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--health-color, #333);
+}
+
+/* Metrics */
+.dg-metrics {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.dg-metric {
+  font-size: 10px;
+  color: #666;
+  background: #f5f5f5;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+/* Footer */
+.dg-footer {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #eee;
+}
+
+.dg-tech {
+  font-size: 9px;
+  color: #999;
+}
+
+.dg-owner {
+  font-size: 9px;
+  color: #666;
+}
+
+/* Failing state */
+.dg-failing {
+  border-color: #F44336;
+  background: #FFF5F5;
+}
+
+.dg-failing-pulse {
+  position: absolute;
+  inset: -4px;
+  border: 3px solid #F44336;
+  border-radius: 12px;
+  pointer-events: none;
+}
+
+/* ============================================
+   Database/Cache/Queue Variants
+   ============================================ */
+.dg-database-node {
+  border-radius: 8px 8px 16px 16px;
+  background: linear-gradient(180deg, white 0%, #E3F2FD 100%);
+}
+
+.dg-cache-node {
+  transform: rotate(45deg);
+  width: 100px;
+  height: 100px;
+}
+
+.dg-cache-node .dg-content {
+  transform: rotate(-45deg);
+}
+
+/* ============================================
+   State Classes
+   ============================================ */
+.dg-dimmed {
+  opacity: 0.4;
+}
+
+.dg-highlighted {
+  border-color: var(--health-color, #2196F3);
+  box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.2), 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 100;
+}
+
+.dg-active {
+  border-color: var(--health-color, #2196F3);
+  box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.3), 0 8px 24px rgba(0, 0, 0, 0.2);
+  z-index: 100;
+}
+
+.node-selected {
+  outline: 3px solid #FFD700;
+  outline-offset: 2px;
+}
+
+/* ============================================
+   Handles
+   ============================================ */
+.dg-handle {
+  width: 10px;
+  height: 10px;
+  background: #B0BEC5;
+  border: 2px solid white;
+}
+
+.dg-service-node:hover .dg-handle {
+  background: var(--health-color, #2196F3);
+}
+
+/* ============================================
+   Dependency Edges
+   ============================================ */
+.dg-edge .react-flow__edge-path {
+  stroke: #78909C;
+  stroke-width: 2;
+}
+
+.dg-edge.edge-active .react-flow__edge-path {
+  stroke: #455A64;
+  stroke-width: 3;
+}
+
+.dg-edge.critical .react-flow__edge-path {
+  stroke: #E57373;
+  stroke-width: 3;
+}
+
+.dg-edge.high .react-flow__edge-path {
+  stroke: #FFB74D;
+  stroke-width: 2.5;
+}
+
+.dg-edge.async .react-flow__edge-path {
+  stroke-dasharray: 8 4;
+}
+
+.dg-edge-label {
+  background: white;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  color: #666;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* Cascade failure animation */
+.dg-edge.cascade .react-flow__edge-path {
+  stroke: #F44336;
+  stroke-width: 4;
+  animation: cascade-pulse 0.5s ease-in-out infinite;
+}
+
+@keyframes cascade-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* ============================================
+   Legend
+   ============================================ */
+.dg-legend {
+  display: flex;
+  gap: 16px;
+  padding: 8px 12px;
+  background: white;
+  border-radius: 6px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  font-size: 11px;
+}
+
+.dg-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.dg-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+/* ============================================
+   Dark Mode
+   ============================================ */
+[data-theme="dark"] .dg-service-node {
+  background: #2d2d2d;
+  border-color: #444;
+}
+
+[data-theme="dark"] .dg-name {
+  color: #e0e0e0;
+}
+
+[data-theme="dark"] .dg-metric {
+  background: #3d3d3d;
+  color: #aaa;
+}
+
+[data-theme="dark"] .dg-footer {
+  border-top-color: #444;
+}
+
+[data-theme="dark"] .dg-tech,
+[data-theme="dark"] .dg-owner {
+  color: #888;
+}
+
+[data-theme="dark"] .dg-failing {
+  background: #3d2a2a;
+}
+
+[data-theme="dark"] .dg-edge-label {
+  background: #2d2d2d;
+  color: #ccc;
+}
+
+[data-theme="dark"] .dg-legend {
+  background: #2d2d2d;
+}

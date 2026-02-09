@@ -1,0 +1,255 @@
+title: "Microservices Health Dashboard"
+version: 2
+type: dependency-graph
+
+system: "E-Commerce Platform"
+
+services:
+  # Entry Points
+  - id: api-gateway
+    name: "API Gateway"
+    type: gateway
+    health: 99.9
+    latency: 45
+    rps: 5000
+    tech: "Kong"
+    owner: "platform"
+    entryPoint: true
+
+  # Core Services
+  - id: order-service
+    name: "Order Service"
+    type: service
+    health: 99.5
+    latency: 120
+    rps: 1200
+    tech: ".NET"
+    owner: "orders"
+
+  - id: user-service
+    name: "User Service"
+    type: service
+    health: 98.2
+    latency: 85
+    rps: 800
+    tech: ".NET"
+    owner: "identity"
+
+  - id: payment-service
+    name: "Payment Service"
+    type: service
+    health: 94.1
+    latency: 450
+    rps: 400
+    tech: "Node.js"
+    owner: "payments"
+
+  - id: inventory-service
+    name: "Inventory"
+    type: service
+    health: 99.8
+    latency: 65
+    rps: 600
+    tech: "Go"
+    owner: "warehouse"
+
+  - id: notification-service
+    name: "Notifications"
+    type: service
+    health: 99.7
+    latency: 150
+    rps: 300
+    tech: "Python"
+    owner: "comms"
+
+  # Data Stores
+  - id: orders-db
+    name: "Orders DB"
+    type: database
+    health: 99.99
+    latency: 5
+    tech: "PostgreSQL"
+    owner: "platform"
+
+  - id: users-db
+    name: "Users DB"
+    type: database
+    health: 99.95
+    latency: 8
+    tech: "PostgreSQL"
+    owner: "platform"
+
+  - id: redis-cache
+    name: "Redis Cache"
+    type: cache
+    health: 99.99
+    latency: 2
+    tech: "Redis"
+    owner: "platform"
+
+  - id: event-queue
+    name: "Event Queue"
+    type: queue
+    health: 99.9
+    latency: 10
+    tech: "RabbitMQ"
+    owner: "platform"
+
+  # External
+  - id: stripe
+    name: "Stripe API"
+    type: external
+    health: 99.95
+    latency: 350
+
+  - id: sendgrid
+    name: "SendGrid"
+    type: external
+    health: 99.8
+    latency: 200
+
+dependencies:
+  # Gateway to services
+  - from: api-gateway
+    to: order-service
+    type: sync
+    criticality: critical
+    protocol: "gRPC"
+    latency: 120
+
+  - from: api-gateway
+    to: user-service
+    type: sync
+    criticality: high
+    protocol: "gRPC"
+
+  - from: api-gateway
+    to: inventory-service
+    type: sync
+    criticality: high
+    protocol: "REST"
+
+  # Order service dependencies
+  - from: order-service
+    to: orders-db
+    type: data
+    criticality: critical
+    protocol: "TCP"
+
+  - from: order-service
+    to: payment-service
+    type: sync
+    criticality: critical
+    protocol: "gRPC"
+
+  - from: order-service
+    to: inventory-service
+    type: sync
+    criticality: high
+    protocol: "gRPC"
+
+  - from: order-service
+    to: redis-cache
+    type: cache
+    criticality: medium
+    protocol: "TCP"
+
+  - from: order-service
+    to: event-queue
+    type: async
+    criticality: high
+    protocol: "AMQP"
+
+  # User service dependencies
+  - from: user-service
+    to: users-db
+    type: data
+    criticality: critical
+
+  - from: user-service
+    to: redis-cache
+    type: cache
+    criticality: low
+
+  # Payment service dependencies
+  - from: payment-service
+    to: stripe
+    type: sync
+    criticality: critical
+    protocol: "HTTPS"
+
+  - from: payment-service
+    to: event-queue
+    type: async
+    criticality: high
+
+  # Notification service
+  - from: notification-service
+    to: event-queue
+    type: async
+    criticality: medium
+    label: "consumes"
+
+  - from: notification-service
+    to: sendgrid
+    type: sync
+    criticality: high
+
+steps:
+  - title: "Service Health Overview"
+    description: "Current health status of all microservices"
+    zoomLevel: 0.85
+    duration: 4000
+
+  - title: "Entry Point"
+    description: "All traffic enters through the API Gateway"
+    focusNode: api-gateway
+    showDownstream: true
+    zoomLevel: 1.0
+    duration: 5000
+
+  - title: "Critical Path"
+    description: "Order → Payment → Stripe is our most critical path"
+    highlightNodes: [order-service, payment-service, stripe]
+    filterCriticality: critical
+    zoomLevel: 1.0
+    duration: 5000
+    narration:
+      speaker: "SRE"
+      message: "This path handles all revenue - needs 99.9% SLA"
+
+  - title: "⚠️ Payment Service Degraded"
+    description: "Payment Service is at 94.1% uptime - below SLA"
+    showUnhealthy: true
+    highlightNodes: [payment-service]
+    zoomLevel: 1.1
+    duration: 5000
+    narration:
+      speaker: "On-Call"
+      message: "Stripe API latency spike causing timeout errors"
+
+  - title: "Failure Cascade Simulation"
+    description: "If Payment Service fails completely, what's impacted?"
+    simulateFailure: payment-service
+    zoomLevel: 0.9
+    duration: 6000
+    narration:
+      speaker: "SRE"
+      message: "Order Service becomes degraded, checkout fails entirely"
+
+  - title: "Event-Driven Flow"
+    description: "Async events flow through RabbitMQ"
+    highlightNodes: [event-queue, notification-service]
+    zoomLevel: 1.0
+    duration: 5000
+
+  - title: "Data Layer"
+    description: "PostgreSQL and Redis provide persistence and caching"
+    highlightNodes: [orders-db, users-db, redis-cache]
+    zoomLevel: 1.0
+    duration: 5000
+
+  - title: "Full Dependency Map"
+    description: "Complete view of service dependencies"
+    zoomLevel: 0.75
+    duration: 4000
