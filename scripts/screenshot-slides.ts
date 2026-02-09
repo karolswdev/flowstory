@@ -87,8 +87,24 @@ async function selectStory(page: Page, storyId: string, outputDir: string): Prom
     const options = await selector.locator('option').allTextContents();
     console.log(`📋 Available stories: ${options.length}`);
     
-    // Try to select the story
-    await selector.selectOption(storyId);
+    // Try to select the story using multiple methods to trigger React
+    // Method 1: Click on selector to focus it
+    await selector.click();
+    await page.waitForTimeout(100);
+    
+    // Method 2: Use selectOption which should work with native selects
+    await selector.selectOption({ value: storyId });
+    
+    // Method 3: Trigger input event as well (React sometimes listens to this)
+    await page.evaluate((id) => {
+      const select = document.getElementById('story-select') as HTMLSelectElement;
+      if (select) {
+        select.value = id;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        select.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    }, storyId);
+    
     console.log(`✓ Selected: ${storyId}`);
     
     // Check if this is a BC Deployment story
@@ -99,9 +115,41 @@ async function selectStory(page: Page, storyId: string, outputDir: string): Prom
     
     if (isBCDeployment) {
       // For BC Deployment, wait for the canvas and step overlay
-      await page.waitForSelector('.bc-deployment-canvas', { timeout: 15000 });
-      await page.waitForSelector('.bc-step-overlay', { timeout: 10000 });
-      console.log('✓ BC Deployment canvas loaded');
+      console.log('⏳ Waiting for BC Deployment canvas...');
+      
+      // Debug: Check what's on the page
+      const html = await page.content();
+      const hasBCCanvas = html.includes('bc-deployment-canvas');
+      const hasStoryCanvas = html.includes('story-canvas');
+      console.log(`   Page state: bcCanvas=${hasBCCanvas}, storyCanvas=${hasStoryCanvas}`);
+      
+      // Check if bc-deployment-canvas element exists in DOM (regardless of visibility)
+      const bcCanvasCount = await page.locator('.bc-deployment-canvas').count();
+      console.log(`   BC canvas element count: ${bcCanvasCount}`);
+      
+      if (bcCanvasCount > 0) {
+        // Element exists - check its dimensions
+        const box = await page.locator('.bc-deployment-canvas').first().boundingBox();
+        console.log(`   BC canvas bounding box: ${JSON.stringify(box)}`);
+      }
+      
+      try {
+        // Wait for any element with this class (not just visible)
+        await page.waitForSelector('.bc-deployment-canvas', { timeout: 15000, state: 'attached' });
+        // Then wait for it to be visible
+        await page.waitForSelector('.bc-deployment-canvas', { timeout: 5000 });
+        await page.waitForSelector('.bc-step-overlay', { timeout: 10000 });
+        console.log('✓ BC Deployment canvas loaded');
+      } catch (canvasErr) {
+        // Take debug screenshot before failing
+        await page.screenshot({ path: join(outputDir, 'debug-bc-wait-error.png') });
+        
+        // Dump page HTML for debugging
+        const bodyHtml = await page.locator('main').innerHTML().catch(() => 'N/A');
+        console.log(`   Main content snippet: ${bodyHtml.slice(0, 300)}...`);
+        
+        throw canvasErr;
+      }
     } else {
       await waitForCanvasReady(page);
     }
@@ -145,29 +193,45 @@ async function runScreenshotPipeline(storyId?: string): Promise<void> {
 
   // Enable console logging from the page
   page.on('console', msg => {
+    const text = msg.text();
     if (msg.type() === 'error') {
-      console.log(`🔴 Page error: ${msg.text()}`);
+      console.log(`🔴 Page error: ${text}`);
+    } else if (text.includes('[FlowStory]')) {
+      console.log(`📋 ${text}`);
     }
   });
 
   try {
-    // Navigate to app
-    console.log(`🌐 Loading: ${DEV_SERVER_URL}`);
-    await page.goto(DEV_SERVER_URL, { waitUntil: 'networkidle' });
+    // Navigate directly to the story via URL parameter
+    const storyUrl = `${DEV_SERVER_URL}?story=${story}`;
+    console.log(`🌐 Loading: ${storyUrl}`);
+    await page.goto(storyUrl, { waitUntil: 'networkidle' });
     
     // Take initial debug screenshot
     await page.screenshot({ path: join(outputDir, 'debug-initial.png') });
     console.log('📸 Saved debug-initial.png');
     
-    await waitForCanvasReady(page);
-
-    // Select the story (if different from default)
-    if (story !== 'trf-new-submission') {
-      console.log(`📚 Selecting story: ${story}`);
-      const selected = await selectStory(page, story, outputDir);
-      if (!selected) {
-        console.log('⚠️ Using default story instead');
+    // Check if this is a BC Deployment story
+    const isBCDeployment = story.startsWith('bc-');
+    
+    if (isBCDeployment) {
+      // Wait for BC Deployment canvas
+      console.log('⏳ Waiting for BC Deployment canvas...');
+      // Give React time to: 1) fetch YAML, 2) parse it, 3) update state, 4) render
+      await page.waitForTimeout(5000);
+      
+      try {
+        await page.waitForSelector('.bc-deployment-canvas', { timeout: 15000 });
+        await page.waitForSelector('.bc-step-overlay', { timeout: 10000 });
+        console.log('✓ BC Deployment canvas loaded');
+      } catch {
+        console.log('⚠️ BC Deployment canvas not found, checking page state...');
+        const bcCount = await page.locator('.bc-deployment-canvas').count();
+        console.log(`   BC canvas count: ${bcCount}`);
+        await page.screenshot({ path: join(outputDir, 'debug-bc-error.png') });
       }
+    } else {
+      await waitForCanvasReady(page);
     }
 
     // Reset to step 1

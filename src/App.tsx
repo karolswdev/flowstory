@@ -522,7 +522,16 @@ function StoryLoader({
 }
 
 function App() {
-  const [currentStory, setCurrentStory] = useState('user-registration');
+  // Read initial story from URL or default
+  const getInitialStory = () => {
+    const params = new URLSearchParams(window.location.search);
+    const storyParam = params.get('story');
+    const story = storyParam && STORIES[storyParam] ? storyParam : 'user-registration';
+    console.log('[FlowStory] Initial story from URL:', storyParam, '-> Using:', story);
+    return story;
+  };
+
+  const [currentStory, setCurrentStory] = useState(getInitialStory);
   const [bcDeploymentStory, setBCDeploymentStory] = useState<BCDeploymentStory | null>(null);
   const [bcDeploymentStep, setBCDeploymentStep] = useState(0);
 
@@ -531,15 +540,23 @@ function App() {
     setCurrentStory(storyId);
     setBCDeploymentStory(null);
     setBCDeploymentStep(0);
+    // Update URL for bookmarking/sharing
+    const url = new URL(window.location.href);
+    url.searchParams.set('story', storyId);
+    window.history.replaceState({}, '', url.toString());
   }, []);
 
   // Handle BC Deployment story load
   const handleBCDeploymentLoad = useCallback((story: BCDeploymentStory | null) => {
+    console.log('[FlowStory] BC Deployment load:', story ? `"${story.title}"` : 'null');
     setBCDeploymentStory(story);
     setBCDeploymentStep(0);
   }, []);
 
   const isBCDeployment = bcDeploymentStory !== null;
+  
+  // Debug logging
+  console.log('[FlowStory] Render - currentStory:', currentStory, 'isBCDeployment:', isBCDeployment);
 
   // Keyboard navigation for BC Deployment
   useEffect(() => {
