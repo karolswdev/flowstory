@@ -1,31 +1,35 @@
-title: Node Effects Demo
-description: Demonstration of attachable node effects
+# Effects Demo Story
+# Showcases the node effects system
+
+title: "Node Effects Demo"
+description: "Demonstration of attachable node effects"
+
+camera:
+  center: [0, 0]
+  zoom: 1
+
 nodes:
   - id: start
     type: actor
-    label: User
-    position:
-      x: -320
-      y: -30
+    label: "User"
+    position: { x: -320, y: -30 }
+    
   - id: action-1
     type: action
-    label: Submit Form
-    position:
-      x: -120
-      y: -30
+    label: "Submit Form"
+    position: { x: -120, y: -30 }
     effects:
       - type: pulse
         trigger: on-focus
         params:
           scale: 1.15
           duration: 800
+    
   - id: process
     type: system
-    label: Process Request
-    description: Validate and process
-    position:
-      x: 80
-      y: -30
+    label: "Process Request"
+    description: "Validate and process"
+    position: { x: 80, y: -30 }
     effects:
       - type: glow
         trigger: on-focus
@@ -33,13 +37,12 @@ nodes:
           color: "#3b82f6"
           intensity: 0.6
           size: 25
+    
   - id: error
     type: state
-    label: Validation Error
+    label: "Validation Error"
     variant: danger
-    position:
-      x: 80
-      y: 120
+    position: { x: 80, y: 120 }
     effects:
       - type: shake
         trigger: on-focus
@@ -51,22 +54,17 @@ nodes:
         params:
           color: "#ef4444"
           intensity: 0.4
+    
   - id: success
     type: state
-    label: Success!
+    label: "Success!"
     variant: success
-    position:
-      x: 280
-      y: -30
+    position: { x: 280, y: -30 }
     effects:
       - type: emoji-explosion
         trigger: on-reveal
         params:
-          emojis:
-            - 🎉
-            - ✨
-            - ⭐
-            - 💫
+          emojis: ["🎉", "✨", "⭐", "💫"]
           count: 20
           duration: 1800
       - type: pulse
@@ -74,56 +72,56 @@ nodes:
         params:
           scale: 1.05
           color: "#22c55e"
+
 edges:
-  - source: start
+  - id: e1
+    source: start
     target: action-1
-    label: initiates
-  - source: action-1
+    label: "initiates"
+    
+  - id: e2
+    source: action-1
     target: process
-    label: submit
-  - source: process
+    label: "submit"
+    
+  - id: e3
+    source: process
     target: error
-    label: invalid
+    label: "invalid"
     type: error
-  - source: process
+    
+  - id: e4
+    source: process
     target: success
-    label: valid
-    type: success
+    label: "valid"
+
 steps:
   - id: step-1
-    title: User Initiates
-    description: The user starts the process
-    focusNodes:
-      - start
-      - action-1
-    activeEdges:
-      - start-action-1
+    title: "The User"
+    nodeIds: [start]
+    edgeIds: []
+    narrative: "A user enters the flow."
+
   - id: step-2
-    title: Form Submission
-    description: User submits the form for processing
-    focusNodes:
-      - action-1
-      - process
-    activeEdges:
-      - action-1-process
+    title: "Initiates Action"
+    nodeIds: [start, action-1]
+    edgeIds: [e1]
+    narrative: "User initiates the form submission process."
+
   - id: step-3
-    title: Validation Error
-    description: When validation fails, show error state
-    focusNodes:
-      - process
-      - error
-    activeEdges:
-      - process-error
+    title: "Form Submission"
+    nodeIds: [start, action-1, process]
+    edgeIds: [e1, e2]
+    narrative: "The form is submitted for processing."
+
   - id: step-4
-    title: Success!
-    description: When everything validates, celebrate!
-    focusNodes:
-      - process
-      - success
-    activeEdges:
-      - process-success
-camera:
-  center:
-    - 0
-    - 0
-  zoom: 1
+    title: "Validation Error Path"
+    nodeIds: [start, action-1, process, error]
+    edgeIds: [e1, e2, e3]
+    narrative: "When validation fails, the error state appears with shake effect."
+
+  - id: step-5
+    title: "Success Path"
+    nodeIds: [start, action-1, process, success]
+    edgeIds: [e1, e2, e4]
+    narrative: "When everything validates - celebration with emoji explosion!"

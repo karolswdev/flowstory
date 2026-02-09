@@ -3,6 +3,11 @@ title: The Translation Layer Problem
 description: Every feature touches three systems, compounding complexity
 version: "1.0"
 actors: []
+
+camera:
+  center: [0, 0]
+  zoom: 1
+
 nodes:
   - id: legacy
     type: system
@@ -18,6 +23,7 @@ nodes:
           color: "#ef4444"
           intensity: 0.4
           size: 20
+
   - id: translation
     type: system
     label: Translation Layer
@@ -37,6 +43,7 @@ nodes:
           color: "#f97316"
           intensity: 0.5
           size: 25
+
   - id: new-services
     type: system
     label: New Services
@@ -50,6 +57,7 @@ nodes:
         params:
           scale: 1.1
           color: "#22c55e"
+
   - id: pain-1
     type: state
     label: Data Sync Issues
@@ -63,6 +71,7 @@ nodes:
         params:
           intensity: 5
           duration: 400
+
   - id: pain-2
     type: state
     label: Complexity Compounds
@@ -76,6 +85,7 @@ nodes:
         params:
           intensity: 5
           duration: 400
+
   - id: velocity
     type: state
     label: Velocity ↓
@@ -89,73 +99,69 @@ nodes:
         params:
           color: "#ef4444"
           intensity: 0.6
+
 edges:
   - id: e1
     source: legacy
     target: translation
     type: flow
     label: sync
+
   - id: e2
     source: translation
     target: new-services
     type: flow
     label: map
+
   - id: e3
     source: translation
     target: pain-1
     type: error
     label: breaks
+
   - id: e4
     source: translation
     target: pain-2
     type: error
+
   - id: e5
     source: pain-2
     target: velocity
     type: error
+
 steps:
   - id: step-1
-    title: The Current Architecture
-    nodeIds:
-      - legacy
-      - translation
-      - new-services
-    edgeIds:
-      - e1
-      - e2
-    narrative: Every feature requires touching legacy, translation, AND new services.
+    title: The Legacy System
+    nodeIds: [legacy]
+    edgeIds: []
+    narrative: We start with the legacy monolith - PWS/Rhapsody.
+
   - id: step-2
-    title: Translation Layer Pain
-    nodeIds:
-      - legacy
-      - translation
-      - new-services
-      - pain-1
-      - pain-2
-    edgeIds:
-      - e1
-      - e2
-      - e3
-      - e4
-    narrative: The translation layer creates constant data sync issues and compounds complexity.
+    title: Enter the Translation Layer
+    nodeIds: [legacy, translation]
+    edgeIds: [e1]
+    narrative: Data must sync to a translation layer for mapping and state management.
+
   - id: step-3
+    title: Then to New Services
+    nodeIds: [legacy, translation, new-services]
+    edgeIds: [e1, e2]
+    narrative: Finally reaching our new microservices. Every feature touches all three.
+
+  - id: step-4
+    title: Data Sync Breaks
+    nodeIds: [legacy, translation, new-services, pain-1]
+    edgeIds: [e1, e2, e3]
+    narrative: The translation layer creates constant data sync issues.
+
+  - id: step-5
+    title: Complexity Compounds
+    nodeIds: [legacy, translation, new-services, pain-1, pain-2]
+    edgeIds: [e1, e2, e3, e4]
+    narrative: Each new feature adds more complexity to the translation layer.
+
+  - id: step-6
     title: Velocity Declines
-    nodeIds:
-      - legacy
-      - translation
-      - new-services
-      - pain-1
-      - pain-2
-      - velocity
-    edgeIds:
-      - e1
-      - e2
-      - e3
-      - e4
-      - e5
-    narrative: "Result: development velocity declines as the system grows."
-camera:
-  center:
-    - 0
-    - 0
-  zoom: 1
+    nodeIds: [legacy, translation, new-services, pain-1, pain-2, velocity]
+    edgeIds: [e1, e2, e3, e4, e5]
+    narrative: "Result: development velocity drops as the system grows."

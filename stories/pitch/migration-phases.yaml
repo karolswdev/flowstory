@@ -3,6 +3,11 @@ title: 12-Week Pilot Roadmap
 description: Proving event-driven architecture works
 version: "1.0"
 actors: []
+
+camera:
+  center: [0, 0]
+  zoom: 0.8
+
 nodes:
   - id: start
     type: start
@@ -15,6 +20,7 @@ nodes:
         trigger: on-focus
         params:
           scale: 1.15
+
   - id: phase-1
     type: system
     label: Foundation
@@ -28,18 +34,21 @@ nodes:
         params:
           color: "#3b82f6"
           intensity: 0.5
+
   - id: p1-task-1
     type: action
     label: Service Bus Setup
     position:
       x: -205
       y: -120
+
   - id: p1-task-2
     type: action
     label: Event Contracts
     position:
       x: -205
       y: 120
+
   - id: phase-2
     type: system
     label: First BC Live
@@ -53,12 +62,14 @@ nodes:
         params:
           color: "#8b5cf6"
           intensity: 0.5
+
   - id: p2-task-1
     type: action
     label: E&D Migration
     position:
       x: -5
       y: -120
+
   - id: checkpoint
     type: decision
     label: Week 8 Checkpoint
@@ -71,6 +82,7 @@ nodes:
         params:
           intensity: 3
           duration: 300
+
   - id: phase-3
     type: system
     label: Expansion
@@ -84,18 +96,21 @@ nodes:
         params:
           color: "#22c55e"
           intensity: 0.5
+
   - id: p3-task-1
     type: action
     label: Routing BC
     position:
       x: 195
       y: -120
+
   - id: p3-task-2
     type: action
     label: Playbook
     position:
       x: 195
       y: 120
+
   - id: success
     type: state
     label: Proof of Concept Complete
@@ -107,11 +122,7 @@ nodes:
       - type: emoji-explosion
         trigger: on-reveal
         params:
-          emojis:
-            - 🎉
-            - 🚀
-            - ✅
-            - 💪
+          emojis: ["🎉", "🚀", "✅", "💪"]
           count: 25
           duration: 2000
       - type: glow
@@ -119,137 +130,122 @@ nodes:
         params:
           color: "#22c55e"
           intensity: 0.6
+
 edges:
   - id: e1
     source: start
     target: phase-1
     type: flow
+
   - id: e2
     source: phase-1
     target: p1-task-1
     type: flow
+
   - id: e3
     source: phase-1
     target: p1-task-2
     type: flow
+
   - id: e4
     source: phase-1
     target: phase-2
     type: flow
+
   - id: e5
     source: phase-2
     target: p2-task-1
     type: flow
+
   - id: e6
     source: phase-2
     target: checkpoint
     type: flow
     label: Go/No-Go
+
   - id: e7
     source: phase-2
     target: phase-3
     type: flow
+
   - id: e8
     source: phase-3
     target: p3-task-1
     type: flow
+
   - id: e9
     source: phase-3
     target: p3-task-2
     type: flow
+
   - id: e10
     source: phase-3
     target: success
     type: flow
+
 steps:
   - id: step-1
     title: Starting Point
-    nodeIds:
-      - start
+    nodeIds: [start]
     edgeIds: []
     narrative: We start today with a focused 12-week pilot.
+
   - id: step-2
-    title: "Phase 1: Foundation (Weeks 1-4)"
-    nodeIds:
-      - start
-      - phase-1
-      - p1-task-1
-      - p1-task-2
-    edgeIds:
-      - e1
-      - e2
-      - e3
-    narrative: "Build event infrastructure: Service Bus, contracts, monitoring."
+    title: "Phase 1: Foundation"
+    nodeIds: [start, phase-1]
+    edgeIds: [e1]
+    narrative: "Weeks 1-4: Build event infrastructure."
+
   - id: step-3
-    title: "Phase 2: First BC (Weeks 5-8)"
-    nodeIds:
-      - start
-      - phase-1
-      - p1-task-1
-      - p1-task-2
-      - phase-2
-      - p2-task-1
-      - checkpoint
-    edgeIds:
-      - e1
-      - e2
-      - e3
-      - e4
-      - e5
-      - e6
-    narrative: "Migrate E&D bounded context. Week 8: Go/No-Go checkpoint."
+    title: Service Bus Setup
+    nodeIds: [start, phase-1, p1-task-1]
+    edgeIds: [e1, e2]
+    narrative: Set up Azure Service Bus and event routing.
+
   - id: step-4
-    title: "Phase 3: Expansion (Weeks 9-12)"
-    nodeIds:
-      - start
-      - phase-1
-      - p1-task-1
-      - p1-task-2
-      - phase-2
-      - p2-task-1
-      - checkpoint
-      - phase-3
-      - p3-task-1
-      - p3-task-2
-    edgeIds:
-      - e1
-      - e2
-      - e3
-      - e4
-      - e5
-      - e6
-      - e7
-      - e8
-      - e9
-    narrative: Add Routing BC, document patterns, build migration playbook.
+    title: Event Contracts
+    nodeIds: [start, phase-1, p1-task-1, p1-task-2]
+    edgeIds: [e1, e2, e3]
+    narrative: Define event schemas and contracts between services.
+
   - id: step-5
+    title: "Phase 2: First BC"
+    nodeIds: [start, phase-1, p1-task-1, p1-task-2, phase-2]
+    edgeIds: [e1, e2, e3, e4]
+    narrative: "Weeks 5-8: Migrate the first bounded context."
+
+  - id: step-6
+    title: E&D Migration
+    nodeIds: [start, phase-1, p1-task-1, p1-task-2, phase-2, p2-task-1]
+    edgeIds: [e1, e2, e3, e4, e5]
+    narrative: Migrate E&D bounded context to event-driven architecture.
+
+  - id: step-7
+    title: Week 8 Checkpoint
+    nodeIds: [start, phase-1, p1-task-1, p1-task-2, phase-2, p2-task-1, checkpoint]
+    edgeIds: [e1, e2, e3, e4, e5, e6]
+    narrative: "Critical decision point: Go/No-Go based on results."
+
+  - id: step-8
+    title: "Phase 3: Expansion"
+    nodeIds: [start, phase-1, p1-task-1, p1-task-2, phase-2, p2-task-1, checkpoint, phase-3]
+    edgeIds: [e1, e2, e3, e4, e5, e6, e7]
+    narrative: "Weeks 9-12: Expand the pattern."
+
+  - id: step-9
+    title: Routing BC
+    nodeIds: [start, phase-1, p1-task-1, p1-task-2, phase-2, p2-task-1, checkpoint, phase-3, p3-task-1]
+    edgeIds: [e1, e2, e3, e4, e5, e6, e7, e8]
+    narrative: Migrate second bounded context - Routing.
+
+  - id: step-10
+    title: Migration Playbook
+    nodeIds: [start, phase-1, p1-task-1, p1-task-2, phase-2, p2-task-1, checkpoint, phase-3, p3-task-1, p3-task-2]
+    edgeIds: [e1, e2, e3, e4, e5, e6, e7, e8, e9]
+    narrative: Document patterns, create playbook for future migrations.
+
+  - id: step-11
     title: Success!
-    nodeIds:
-      - start
-      - phase-1
-      - p1-task-1
-      - p1-task-2
-      - phase-2
-      - p2-task-1
-      - checkpoint
-      - phase-3
-      - p3-task-1
-      - p3-task-2
-      - success
-    edgeIds:
-      - e1
-      - e2
-      - e3
-      - e4
-      - e5
-      - e6
-      - e7
-      - e8
-      - e9
-      - e10
+    nodeIds: [start, phase-1, p1-task-1, p1-task-2, phase-2, p2-task-1, checkpoint, phase-3, p3-task-1, p3-task-2, success]
+    edgeIds: [e1, e2, e3, e4, e5, e6, e7, e8, e9, e10]
     narrative: "12 weeks: Event-driven architecture proven, ready to scale!"
-camera:
-  center:
-    - 0
-    - 0
-  zoom: 0.8
