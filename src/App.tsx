@@ -52,43 +52,43 @@ nodes:
     type: action
     actorId: user
     label: Visits Website
-    position: { x: 200, y: 200 }
+    position: { x: 250, y: 200 }
   - id: click-signup
     type: action
     actorId: user
     label: Clicks Sign Up
-    position: { x: 350, y: 200 }
+    position: { x: 450, y: 200 }
   - id: enter-details
     type: action
     actorId: user
     label: Enters Details
     description: Email, password, name
-    position: { x: 500, y: 200 }
+    position: { x: 650, y: 200 }
   - id: validate-form
     type: system
     label: Validate Form
-    position: { x: 650, y: 150 }
+    position: { x: 850, y: 120 }
   - id: create-account
     type: system
     label: Create Account
-    position: { x: 800, y: 150 }
+    position: { x: 1050, y: 120 }
   - id: account-created-event
     type: event
     label: AccountCreatedEvent
-    position: { x: 800, y: 300 }
+    position: { x: 1050, y: 320 }
   - id: send-welcome-email
     type: system
     label: Send Welcome Email
-    position: { x: 950, y: 300 }
+    position: { x: 1250, y: 320 }
   - id: redirect-dashboard
     type: action
     actorId: user
     label: Sees Dashboard
-    position: { x: 950, y: 150 }
+    position: { x: 1250, y: 120 }
   - id: success
     type: state
     label: Registration Complete
-    position: { x: 1100, y: 200 }
+    position: { x: 1450, y: 200 }
     data:
       variant: success
 
