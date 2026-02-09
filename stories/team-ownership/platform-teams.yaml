@@ -1,0 +1,245 @@
+title: "Platform Engineering - Team Ownership Map"
+version: 2
+type: team-ownership
+
+organization: "Acme Corp"
+
+teams:
+  - id: platform
+    name: "Platform Team"
+    icon: "🏗️"
+    color: "#3F51B5"
+    lead: "Sarah Chen"
+    headcount: 6
+    slack: "#platform-eng"
+    description: "Core infrastructure and developer experience"
+    services:
+      - kubernetes
+      - ci-cd
+      - monitoring
+      - api-gateway
+
+  - id: orders
+    name: "Order Squad"
+    icon: "🛒"
+    color: "#4CAF50"
+    lead: "Mike Johnson"
+    headcount: 5
+    slack: "#order-squad"
+    description: "Order lifecycle management"
+    services:
+      - order-api
+      - order-worker
+      - order-db
+
+  - id: payments
+    name: "Payments Team"
+    icon: "💳"
+    color: "#FF9800"
+    lead: "Lisa Park"
+    headcount: 4
+    slack: "#payments"
+    description: "Payment processing and billing"
+    services:
+      - payment-api
+      - billing-service
+
+  - id: frontend
+    name: "Frontend Guild"
+    icon: "🎨"
+    color: "#E91E63"
+    lead: "Alex Rivera"
+    headcount: 7
+    slack: "#frontend"
+    description: "Web and mobile applications"
+    services:
+      - web-app
+      - mobile-app
+      - design-system
+
+services:
+  # Platform Services
+  - id: kubernetes
+    name: "Kubernetes"
+    team: platform
+    type: infrastructure
+    criticality: critical
+    tech: ["AKS", "Helm"]
+    
+  - id: ci-cd
+    name: "CI/CD Pipeline"
+    team: platform
+    type: infrastructure
+    criticality: high
+    tech: ["GitHub Actions", "ArgoCD"]
+    
+  - id: monitoring
+    name: "Observability"
+    team: platform
+    type: infrastructure
+    criticality: high
+    tech: ["Prometheus", "Grafana"]
+    
+  - id: api-gateway
+    name: "API Gateway"
+    team: platform
+    type: gateway
+    criticality: critical
+    tech: ["Kong", "NGINX"]
+
+  # Order Services
+  - id: order-api
+    name: "Order API"
+    team: orders
+    type: api
+    criticality: high
+    tech: [".NET", "PostgreSQL"]
+    
+  - id: order-worker
+    name: "Order Worker"
+    team: orders
+    type: worker
+    criticality: medium
+    tech: [".NET", "RabbitMQ"]
+    
+  - id: order-db
+    name: "Orders DB"
+    team: orders
+    type: database
+    criticality: critical
+    tech: ["PostgreSQL"]
+
+  # Payment Services
+  - id: payment-api
+    name: "Payment API"
+    team: payments
+    type: api
+    criticality: critical
+    tech: [".NET", "Stripe"]
+    
+  - id: billing-service
+    name: "Billing Service"
+    team: payments
+    type: worker
+    criticality: high
+    tech: [".NET", "SQL Server"]
+
+  # Frontend Services
+  - id: web-app
+    name: "Web App"
+    team: frontend
+    type: webapp
+    criticality: high
+    tech: ["React", "TypeScript"]
+    
+  - id: mobile-app
+    name: "Mobile App"
+    team: frontend
+    type: mobile
+    criticality: high
+    tech: ["React Native"]
+    
+  - id: design-system
+    name: "Design System"
+    team: frontend
+    type: library
+    criticality: medium
+    tech: ["Storybook"]
+    shared: true
+    contributors: ["platform"]
+
+  # Ownership Gap!
+  - id: legacy-reports
+    name: "Legacy Reports"
+    team: null
+    type: monolith
+    criticality: high
+    tech: ["SSRS", "SQL Server"]
+    description: "Nobody wants to own this"
+
+handoffs:
+  - from: orders
+    to: payments
+    via: "order-api -> payment-api"
+    frequency: "~5000/day"
+    description: "Payment initiation"
+    
+  - from: frontend
+    to: orders
+    via: "web-app -> order-api"
+    frequency: "~10000/day"
+    description: "Order submission"
+    
+  - from: payments
+    to: platform
+    via: "payment-api -> monitoring"
+    frequency: "continuous"
+    description: "Metrics & alerts"
+    friction: true
+
+dependencies:
+  - source: order-api
+    target: order-db
+    type: data
+    critical: true
+    
+  - source: order-api
+    target: payment-api
+    type: sync
+    
+  - source: web-app
+    target: api-gateway
+    type: sync
+    critical: true
+    
+  - source: api-gateway
+    target: order-api
+    type: sync
+    
+  - source: order-worker
+    target: order-db
+    type: data
+
+steps:
+  - title: "The Platform Foundation"
+    description: "Platform Team provides the core infrastructure that all other teams depend on"
+    focusTeam: platform
+    showServices: true
+    zoomLevel: 1.2
+    duration: 5000
+
+  - title: "Order Squad"
+    description: "The Order Squad owns the complete order lifecycle - API, workers, and database"
+    focusTeam: orders
+    showServices: true
+    zoomLevel: 1.2
+    duration: 5000
+
+  - title: "Payment Integration"
+    description: "Orders flow to Payments - this is a critical cross-team handoff"
+    focusTeams: [orders, payments]
+    showHandoffs: [orders-payments]
+    zoomLevel: 1.0
+    duration: 5000
+
+  - title: "Frontend Delivery"
+    description: "Frontend Guild delivers web and mobile, sharing the design system with Platform"
+    focusTeam: frontend
+    showServices: true
+    zoomLevel: 1.2
+    duration: 5000
+
+  - title: "⚠️ Ownership Gap"
+    description: "Legacy Reports has no owner - this is a risk that needs addressing"
+    focusServices: [legacy-reports]
+    showGaps: true
+    zoomLevel: 1.3
+    duration: 5000
+    narration:
+      speaker: "CTO"
+      message: "We need to assign ownership or sunset this system"
+
+  - title: "Full Organization View"
+    description: "Complete view of team structure and service ownership"
+    zoomLevel: 0.7
+    duration: 5000
