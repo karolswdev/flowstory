@@ -13,9 +13,8 @@ nodes:
     type: system
     label: Legacy System
     description: Monolithic PWS/Rhapsody
-    position:
-      x: -292
-      y: -25
+    size: l
+    position: { x: -300, y: 0 }
     effects:
       - type: glow
         trigger: continuous
@@ -28,9 +27,8 @@ nodes:
     type: system
     label: Translation Layer
     description: Complex mapping, data sync, state management
-    position:
-      x: -42
-      y: -25
+    size: l
+    position: { x: 0, y: 0 }
     effects:
       - type: shake
         trigger: on-focus
@@ -48,9 +46,8 @@ nodes:
     type: system
     label: New Services
     description: Re-Catalyst microservices
-    position:
-      x: 208
-      y: -25
+    size: l
+    position: { x: 300, y: 0 }
     effects:
       - type: pulse
         trigger: on-focus
@@ -62,9 +59,8 @@ nodes:
     type: state
     label: Data Sync Issues
     variant: danger
-    position:
-      x: -42
-      y: -175
+    size: s
+    position: { x: 0, y: -120 }
     effects:
       - type: shake
         trigger: on-reveal
@@ -76,9 +72,8 @@ nodes:
     type: state
     label: Complexity Compounds
     variant: danger
-    position:
-      x: -42
-      y: 125
+    size: s
+    position: { x: 0, y: 120 }
     effects:
       - type: shake
         trigger: on-reveal
@@ -90,9 +85,8 @@ nodes:
     type: state
     label: Velocity ↓
     variant: danger
-    position:
-      x: 208
-      y: 125
+    size: m
+    position: { x: 300, y: 120 }
     effects:
       - type: glow
         trigger: continuous
@@ -101,33 +95,46 @@ nodes:
           intensity: 0.6
 
 edges:
+  # Main horizontal flow: Legacy → Translation → New Services
   - id: e1
     source: legacy
     target: translation
     type: flow
     label: sync
+    sourceAnchor: right
+    targetAnchor: left
 
   - id: e2
     source: translation
     target: new-services
     type: flow
     label: map
+    sourceAnchor: right
+    targetAnchor: left
 
+  # Pain points emerge from translation layer
   - id: e3
     source: translation
     target: pain-1
     type: error
     label: breaks
+    sourceAnchor: top
+    targetAnchor: bottom
 
   - id: e4
     source: translation
     target: pain-2
     type: error
+    sourceAnchor: bottom
+    targetAnchor: top
 
+  # Velocity impact
   - id: e5
     source: pain-2
     target: velocity
     type: error
+    sourceAnchor: right
+    targetAnchor: left
 
 steps:
   - id: step-1

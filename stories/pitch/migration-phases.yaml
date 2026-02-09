@@ -12,22 +12,21 @@ nodes:
   - id: start
     type: start
     label: Today
-    position:
-      x: -355
-      y: 0
+    size: xs
+    position: { x: -400, y: 0 }
     effects:
       - type: pulse
         trigger: on-focus
         params:
           scale: 1.15
 
+  # Phase 1: Foundation
   - id: phase-1
     type: system
     label: Foundation
     description: "Weeks 1-4: Event infrastructure"
-    position:
-      x: -205
-      y: 0
+    size: l
+    position: { x: -220, y: 0 }
     effects:
       - type: glow
         trigger: on-focus
@@ -38,24 +37,22 @@ nodes:
   - id: p1-task-1
     type: action
     label: Service Bus Setup
-    position:
-      x: -205
-      y: -120
+    size: s
+    position: { x: -220, y: -100 }
 
   - id: p1-task-2
     type: action
     label: Event Contracts
-    position:
-      x: -205
-      y: 120
+    size: s
+    position: { x: -220, y: 100 }
 
+  # Phase 2: First BC
   - id: phase-2
     type: system
     label: First BC Live
     description: "Weeks 5-8: E&D migrated"
-    position:
-      x: -5
-      y: 0
+    size: l
+    position: { x: 0, y: 0 }
     effects:
       - type: glow
         trigger: on-focus
@@ -66,16 +63,14 @@ nodes:
   - id: p2-task-1
     type: action
     label: E&D Migration
-    position:
-      x: -5
-      y: -120
+    size: s
+    position: { x: 0, y: -100 }
 
   - id: checkpoint
     type: decision
     label: Week 8 Checkpoint
-    position:
-      x: -5
-      y: 120
+    size: m
+    position: { x: 0, y: 100 }
     effects:
       - type: shake
         trigger: on-focus
@@ -83,13 +78,13 @@ nodes:
           intensity: 3
           duration: 300
 
+  # Phase 3: Expansion
   - id: phase-3
     type: system
     label: Expansion
     description: "Weeks 9-12: Second BC + patterns"
-    position:
-      x: 195
-      y: 0
+    size: l
+    position: { x: 220, y: 0 }
     effects:
       - type: glow
         trigger: on-focus
@@ -100,24 +95,22 @@ nodes:
   - id: p3-task-1
     type: action
     label: Routing BC
-    position:
-      x: 195
-      y: -120
+    size: s
+    position: { x: 220, y: -100 }
 
   - id: p3-task-2
     type: action
     label: Playbook
-    position:
-      x: 195
-      y: 120
+    size: s
+    position: { x: 220, y: 100 }
 
+  # Success
   - id: success
     type: state
-    label: Proof of Concept Complete
+    label: PoC Complete
     variant: success
-    position:
-      x: 395
-      y: 0
+    size: l
+    position: { x: 400, y: 0 }
     effects:
       - type: emoji-explosion
         trigger: on-reveal
@@ -132,56 +125,80 @@ nodes:
           intensity: 0.6
 
 edges:
+  # Main timeline flow (horizontal)
   - id: e1
     source: start
     target: phase-1
     type: flow
-
-  - id: e2
-    source: phase-1
-    target: p1-task-1
-    type: flow
-
-  - id: e3
-    source: phase-1
-    target: p1-task-2
-    type: flow
+    sourceAnchor: right
+    targetAnchor: left
 
   - id: e4
     source: phase-1
     target: phase-2
     type: flow
+    sourceAnchor: right
+    targetAnchor: left
 
+  - id: e7
+    source: phase-2
+    target: phase-3
+    type: flow
+    sourceAnchor: right
+    targetAnchor: left
+
+  - id: e10
+    source: phase-3
+    target: success
+    type: flow
+    sourceAnchor: right
+    targetAnchor: left
+
+  # Phase 1 tasks (vertical)
+  - id: e2
+    source: phase-1
+    target: p1-task-1
+    type: flow
+    sourceAnchor: top
+    targetAnchor: bottom
+
+  - id: e3
+    source: phase-1
+    target: p1-task-2
+    type: flow
+    sourceAnchor: bottom
+    targetAnchor: top
+
+  # Phase 2 tasks (vertical)
   - id: e5
     source: phase-2
     target: p2-task-1
     type: flow
+    sourceAnchor: top
+    targetAnchor: bottom
 
   - id: e6
     source: phase-2
     target: checkpoint
     type: flow
     label: Go/No-Go
+    sourceAnchor: bottom
+    targetAnchor: top
 
-  - id: e7
-    source: phase-2
-    target: phase-3
-    type: flow
-
+  # Phase 3 tasks (vertical)
   - id: e8
     source: phase-3
     target: p3-task-1
     type: flow
+    sourceAnchor: top
+    targetAnchor: bottom
 
   - id: e9
     source: phase-3
     target: p3-task-2
     type: flow
-
-  - id: e10
-    source: phase-3
-    target: success
-    type: flow
+    sourceAnchor: bottom
+    targetAnchor: top
 
 steps:
   - id: step-1
