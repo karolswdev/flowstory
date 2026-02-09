@@ -1,0 +1,248 @@
+title: "Cloud Cost Review - January 2026"
+version: 2
+type: cloud-cost
+
+organization: "Acme Corp"
+period: "2026-01"
+provider: aws
+
+totalBudget: 150000
+totalSpend: 125000
+
+categories:
+  - id: compute
+    name: "Compute"
+    category: compute
+    spend: 65000
+    budget: 70000
+
+  - id: storage
+    name: "Storage"
+    category: storage
+    spend: 25000
+    budget: 30000
+
+  - id: database
+    name: "Databases"
+    category: database
+    spend: 18000
+    budget: 20000
+
+  - id: network
+    name: "Network"
+    category: network
+    spend: 12000
+    budget: 15000
+
+  - id: monitoring
+    name: "Monitoring"
+    category: monitoring
+    spend: 5000
+    budget: 5000
+
+resources:
+  # Compute
+  - id: k8s-prod
+    name: "Production K8s"
+    category: compute
+    service: "EKS"
+    spend: 35000
+    trend: up
+    trendPct: 15
+    team: "platform"
+    environment: production
+    notes: "Scaled for holiday traffic"
+
+  - id: k8s-staging
+    name: "Staging K8s"
+    category: compute
+    service: "EKS"
+    spend: 8000
+    trend: stable
+    team: "platform"
+    environment: staging
+
+  - id: ec2-legacy
+    name: "Legacy VMs"
+    category: compute
+    service: "EC2"
+    spend: 12000
+    trend: down
+    trendPct: 8
+    team: "migration"
+    environment: production
+    optimize: true
+    notes: "Migration in progress"
+
+  - id: lambda
+    name: "Lambda Functions"
+    category: compute
+    service: "Lambda"
+    spend: 10000
+    trend: up
+    trendPct: 25
+    team: "api"
+    environment: production
+
+  # Storage
+  - id: s3-primary
+    name: "S3 Primary"
+    category: storage
+    service: "S3"
+    spend: 15000
+    trend: stable
+    team: "platform"
+
+  - id: s3-backup
+    name: "S3 Backups"
+    category: storage
+    service: "S3 Glacier"
+    spend: 3000
+    trend: stable
+    team: "platform"
+
+  - id: ebs
+    name: "EBS Volumes"
+    category: storage
+    service: "EBS"
+    spend: 7000
+    trend: up
+    trendPct: 10
+    team: "platform"
+    optimize: true
+    notes: "Unused snapshots detected"
+
+  # Database
+  - id: rds-prod
+    name: "RDS Production"
+    category: database
+    service: "RDS"
+    spend: 12000
+    trend: stable
+    team: "data"
+    environment: production
+
+  - id: dynamodb
+    name: "DynamoDB"
+    category: database
+    service: "DynamoDB"
+    spend: 4000
+    trend: up
+    trendPct: 20
+    team: "api"
+
+  - id: elasticache
+    name: "ElastiCache"
+    category: database
+    service: "ElastiCache"
+    spend: 2000
+    trend: stable
+    team: "platform"
+
+  # Network
+  - id: cloudfront
+    name: "CloudFront CDN"
+    category: network
+    service: "CloudFront"
+    spend: 5000
+    trend: stable
+    team: "platform"
+
+  - id: data-transfer
+    name: "Data Transfer"
+    category: network
+    service: "Data Transfer"
+    spend: 7000
+    trend: up
+    trendPct: 30
+    team: "platform"
+    optimize: true
+    notes: "Cross-AZ traffic review needed"
+
+  # Monitoring
+  - id: cloudwatch
+    name: "CloudWatch"
+    category: monitoring
+    service: "CloudWatch"
+    spend: 3000
+    trend: stable
+    team: "platform"
+
+  - id: datadog
+    name: "Datadog"
+    category: monitoring
+    service: "Datadog"
+    spend: 2000
+    trend: stable
+    team: "platform"
+
+teams:
+  - id: platform
+    name: "Platform Team"
+    spend: 85000
+    budget: 90000
+
+  - id: api
+    name: "API Team"
+    spend: 14000
+    budget: 15000
+
+  - id: data
+    name: "Data Team"
+    spend: 12000
+    budget: 15000
+
+  - id: migration
+    name: "Migration Team"
+    spend: 14000
+    budget: 20000
+
+steps:
+  - title: "January 2026 Cloud Spend"
+    description: "Total spend: $125K of $150K budget (83% utilization)"
+    zoomLevel: 0.8
+    duration: 4000
+
+  - title: "Cost by Category"
+    description: "Compute leads at $65K (52% of total)"
+    highlightResources: []
+    zoomLevel: 0.9
+    duration: 5000
+
+  - title: "Compute Deep Dive"
+    description: "Kubernetes clusters are the primary driver"
+    focusCategory: compute
+    zoomLevel: 1.0
+    duration: 5000
+    narration:
+      speaker: "FinOps"
+      message: "Production K8s up 15% due to holiday scaling"
+
+  - title: "Cost Trending Up ↑"
+    description: "Resources with increasing costs"
+    filterTrend: up
+    zoomLevel: 0.95
+    duration: 5000
+    narration:
+      speaker: "CTO"
+      message: "Lambda and data transfer need attention"
+
+  - title: "Optimization Opportunities"
+    description: "Identified savings potential"
+    showOptimizations: true
+    zoomLevel: 1.0
+    duration: 6000
+    narration:
+      speaker: "FinOps"
+      message: "~$8K potential monthly savings identified"
+
+  - title: "Team Allocation"
+    description: "Spend by engineering team"
+    showByTeam: true
+    zoomLevel: 0.9
+    duration: 5000
+
+  - title: "Summary"
+    description: "On track for budget, 3 optimization actions identified"
+    zoomLevel: 0.85
+    duration: 4000

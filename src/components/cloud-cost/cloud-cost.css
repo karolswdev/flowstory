@@ -1,0 +1,220 @@
+/* ============================================
+   Cloud Cost Map Styles
+   ============================================ */
+
+/* ============================================
+   Cost Block (Category & Resource)
+   ============================================ */
+.cc-block {
+  background: white;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 12px;
+  font-family: 'Inter', system-ui, sans-serif;
+  position: relative;
+  overflow: hidden;
+  min-width: 120px;
+}
+
+.cc-block:hover {
+  border-color: var(--block-color, #2196F3);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* Color bar at top */
+.cc-color-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+}
+
+/* Category block (larger) */
+.cc-category {
+  min-width: 160px;
+  min-height: 100px;
+  background: var(--block-color-light, #f5f5f5);
+}
+
+.cc-category .cc-name {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.cc-category .cc-spend {
+  font-size: 24px;
+}
+
+/* Resource block */
+.cc-resource {
+  min-width: 130px;
+}
+
+/* Name */
+.cc-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #333;
+  margin-top: 4px;
+  margin-bottom: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Spend amount */
+.cc-spend {
+  font-size: 18px;
+  font-weight: 700;
+  color: #333;
+}
+
+.cc-over-budget {
+  color: #F44336;
+}
+
+/* Budget */
+.cc-budget {
+  font-size: 11px;
+  color: #666;
+  margin-top: 2px;
+}
+
+.cc-over {
+  margin-left: 4px;
+}
+
+/* Trend indicator */
+.cc-trend {
+  font-size: 12px;
+  font-weight: 600;
+  margin-top: 6px;
+}
+
+/* Team */
+.cc-team {
+  font-size: 10px;
+  color: #999;
+  margin-top: 6px;
+}
+
+/* Optimization opportunity */
+.cc-optimize {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font-size: 10px;
+  background: #FFF3E0;
+  color: #E65100;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+/* ============================================
+   State Classes
+   ============================================ */
+.cc-dimmed {
+  opacity: 0.4;
+}
+
+.cc-highlighted {
+  border-color: var(--block-color, #2196F3);
+  box-shadow: 0 0 0 3px var(--block-color-light, rgba(33, 150, 243, 0.2)), 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 100;
+}
+
+.cc-active {
+  border-color: var(--block-color, #2196F3);
+  box-shadow: 0 0 0 3px var(--block-color-light, rgba(33, 150, 243, 0.3)), 0 8px 24px rgba(0, 0, 0, 0.2);
+  z-index: 100;
+}
+
+.node-selected {
+  outline: 3px solid #FFD700;
+  outline-offset: 2px;
+}
+
+/* ============================================
+   Handles
+   ============================================ */
+.cc-handle {
+  width: 8px;
+  height: 8px;
+  background: #B0BEC5;
+  border: 2px solid white;
+  opacity: 0;
+}
+
+.cc-block:hover .cc-handle {
+  opacity: 1;
+  background: var(--block-color, #2196F3);
+}
+
+/* ============================================
+   Summary Card
+   ============================================ */
+.cc-summary {
+  background: linear-gradient(135deg, #1976D2 0%, #1565C0 100%);
+  color: white;
+  padding: 16px 20px;
+  border-radius: 12px;
+  min-width: 200px;
+}
+
+.cc-summary-label {
+  font-size: 11px;
+  opacity: 0.8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.cc-summary-value {
+  font-size: 32px;
+  font-weight: 700;
+  margin: 4px 0;
+}
+
+.cc-summary-budget {
+  font-size: 14px;
+  opacity: 0.9;
+}
+
+.cc-summary-period {
+  font-size: 11px;
+  opacity: 0.7;
+  margin-top: 8px;
+}
+
+/* ============================================
+   Dark Mode
+   ============================================ */
+[data-theme="dark"] .cc-block {
+  background: #2d2d2d;
+  border-color: #444;
+}
+
+[data-theme="dark"] .cc-category {
+  background: var(--block-color-light, #1a1a1a);
+}
+
+[data-theme="dark"] .cc-name {
+  color: #e0e0e0;
+}
+
+[data-theme="dark"] .cc-spend {
+  color: #fff;
+}
+
+[data-theme="dark"] .cc-budget {
+  color: #aaa;
+}
+
+[data-theme="dark"] .cc-team {
+  color: #888;
+}
+
+[data-theme="dark"] .cc-optimize {
+  background: #3d2a1a;
+}
