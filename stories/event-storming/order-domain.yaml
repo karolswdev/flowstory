@@ -1,0 +1,254 @@
+title: "Order Domain - Event Storming"
+version: 2
+type: event-storming
+
+domain: "Order Management"
+
+actors:
+  - id: customer
+    name: "Customer"
+    icon: "👤"
+    description: "Places and tracks orders"
+    
+  - id: warehouse
+    name: "Warehouse"
+    icon: "🏭"
+    description: "Fulfills orders"
+    external: true
+    
+  - id: payment-system
+    name: "Payment System"
+    icon: "💳"
+    description: "Processes payments"
+    external: true
+
+aggregates:
+  - id: order
+    name: "Order"
+    description: "Order aggregate root"
+    events: [order-placed, order-confirmed, order-paid, order-shipped, order-delivered]
+    commands: [place-order, confirm-order, ship-order]
+    
+  - id: cart
+    name: "Shopping Cart"
+    description: "Temporary cart before order"
+    events: [item-added, item-removed, cart-cleared]
+    commands: [add-item, remove-item, checkout]
+
+events:
+  # Cart Events
+  - id: item-added
+    name: "ItemAddedToCart"
+    aggregate: cart
+    triggeredBy: add-item
+    data: [cartId, productId, quantity, price]
+    order: 1
+
+  - id: cart-checked-out
+    name: "CartCheckedOut"
+    aggregate: cart
+    triggeredBy: checkout
+    data: [cartId, customerId, totalAmount]
+    order: 2
+
+  # Order Events
+  - id: order-placed
+    name: "OrderPlaced"
+    aggregate: order
+    triggeredBy: place-order
+    data: [orderId, customerId, items, totalAmount]
+    order: 3
+
+  - id: payment-requested
+    name: "PaymentRequested"
+    aggregate: order
+    data: [orderId, amount, customerId]
+    order: 4
+
+  - id: payment-completed
+    name: "PaymentCompleted"
+    aggregate: order
+    data: [orderId, transactionId, amount]
+    order: 5
+
+  - id: order-confirmed
+    name: "OrderConfirmed"
+    aggregate: order
+    triggeredBy: confirm-order
+    data: [orderId, confirmedAt]
+    order: 6
+
+  - id: inventory-reserved
+    name: "InventoryReserved"
+    aggregate: order
+    data: [orderId, items, warehouseId]
+    order: 7
+
+  - id: order-shipped
+    name: "OrderShipped"
+    aggregate: order
+    triggeredBy: ship-order
+    data: [orderId, trackingNumber, carrier]
+    order: 8
+
+  - id: order-delivered
+    name: "OrderDelivered"
+    aggregate: order
+    data: [orderId, deliveredAt, signature]
+    order: 9
+
+commands:
+  - id: add-item
+    name: "AddItemToCart"
+    actor: customer
+    aggregate: cart
+    produces: [item-added]
+
+  - id: checkout
+    name: "Checkout"
+    actor: customer
+    aggregate: cart
+    produces: [cart-checked-out]
+
+  - id: place-order
+    name: "PlaceOrder"
+    actor: customer
+    aggregate: order
+    produces: [order-placed]
+
+  - id: confirm-order
+    name: "ConfirmOrder"
+    aggregate: order
+    produces: [order-confirmed]
+
+  - id: ship-order
+    name: "ShipOrder"
+    actor: warehouse
+    aggregate: order
+    produces: [order-shipped]
+
+policies:
+  - id: request-payment
+    name: "When OrderPlaced, request payment"
+    trigger: order-placed
+    action: request-payment-command
+
+  - id: confirm-after-payment
+    name: "When PaymentCompleted, confirm order"
+    trigger: payment-completed
+    action: confirm-order
+
+  - id: reserve-inventory
+    name: "When OrderConfirmed, reserve inventory"
+    trigger: order-confirmed
+    action: reserve-inventory-command
+
+  - id: notify-customer
+    name: "When OrderShipped, notify customer"
+    trigger: order-shipped
+    action: send-tracking-email
+
+readModels:
+  - id: order-summary
+    name: "Order Summary"
+    description: "Customer-facing order view"
+    updatedBy: [order-placed, order-confirmed, order-shipped, order-delivered]
+    consumedBy: [customer]
+
+  - id: warehouse-queue
+    name: "Warehouse Queue"
+    description: "Orders pending fulfillment"
+    updatedBy: [order-confirmed, order-shipped]
+    consumedBy: [warehouse]
+
+externalSystems:
+  - id: stripe
+    name: "Stripe"
+    description: "Payment processing"
+    produces: [payment-completed]
+    consumes: [payment-requested]
+
+  - id: warehouse-api
+    name: "Warehouse API"
+    description: "Inventory and fulfillment"
+    produces: [inventory-reserved, order-shipped]
+
+hotspots:
+  - id: payment-timing
+    note: "When exactly should we charge? At checkout or confirmation?"
+    type: question
+    near: payment-requested
+    raisedBy: "Product Owner"
+
+  - id: inventory-failure
+    note: "What if inventory reservation fails after payment?"
+    type: risk
+    near: inventory-reserved
+    raisedBy: "Tech Lead"
+
+  - id: partial-ship
+    note: "Should we support partial shipments?"
+    type: opportunity
+    near: order-shipped
+    raisedBy: "Business Analyst"
+
+steps:
+  - title: "Order Domain Overview"
+    description: "Event storming for the Order Management domain"
+    zoomLevel: 0.8
+    duration: 4000
+
+  - title: "The Happy Path"
+    description: "Customer adds items, checks out, order is placed, paid, confirmed, shipped, and delivered"
+    showEventSequence: true
+    highlightEvents: [item-added, cart-checked-out, order-placed, payment-completed, order-confirmed, order-shipped, order-delivered]
+    zoomLevel: 0.9
+    duration: 6000
+
+  - title: "Customer Journey Start"
+    description: "Customer adds items to cart and initiates checkout"
+    focusAggregate: cart
+    highlightCommands: [add-item, checkout]
+    highlightEvents: [item-added, cart-checked-out]
+    zoomLevel: 1.1
+    duration: 5000
+
+  - title: "Order Placement"
+    description: "Cart becomes an Order - the key domain event"
+    highlightEvents: [order-placed]
+    highlightCommands: [place-order]
+    zoomLevel: 1.2
+    duration: 5000
+    narration:
+      speaker: "Domain Expert"
+      message: "OrderPlaced is our pivotal event - everything flows from here"
+
+  - title: "Payment Flow"
+    description: "Order triggers payment request, external system confirms"
+    highlightEvents: [payment-requested, payment-completed]
+    showPolicies: true
+    zoomLevel: 1.1
+    duration: 5000
+
+  - title: "Fulfillment Chain"
+    description: "Confirmation triggers inventory, then shipping"
+    highlightEvents: [order-confirmed, inventory-reserved, order-shipped]
+    showPolicies: true
+    zoomLevel: 1.0
+    duration: 5000
+
+  - title: "Open Questions"
+    description: "Hotspots from our event storming session"
+    showHotspots: true
+    zoomLevel: 1.0
+    duration: 6000
+    narration:
+      speaker: "Facilitator"
+      message: "These questions need resolution before implementation"
+
+  - title: "Full Event Storm"
+    description: "Complete domain model with all events, commands, and policies"
+    showPolicies: true
+    showHotspots: true
+    zoomLevel: 0.7
+    duration: 5000
