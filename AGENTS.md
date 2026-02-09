@@ -9,7 +9,7 @@ FlowStory creates animated flow diagrams from YAML. It supports:
 - **HTTP Flows** — REST API sequences  
 - **Service Flows** — Microservice architecture
 - **Pipelines** — CI/CD workflows
-
+- **BC Composition** — Progressive reveal of any concept's constituents
 - **BC Deployments** — Kubernetes/DevOps topology
 
 ## Quick Commands
@@ -134,7 +134,53 @@ steps:
     narrative: "API queries database."
 ```
 
-### BC Deployment
+### BC Composition (Progressive Reveal)
+```yaml
+title: "Order Service Composition"
+version: 1
+type: bc-composition
+
+layout:
+  mode: radial  # radial | hierarchical | layered
+  spacing: 200
+
+core:
+  id: order-service
+  name: "Order Service"
+  icon: "🛒"
+  description: "Handles order lifecycle"
+
+elements:
+  - id: order-api
+    name: "Order API"
+    type: "api"
+    icon: "🌐"
+    layer: 1
+  - id: order-db
+    name: "Orders DB"
+    type: "database"
+    icon: "🗃️"
+    layer: 2
+
+edges:
+  - source: order-service
+    target: order-api
+    type: exposes
+  - source: order-api
+    target: order-db
+    type: depends
+
+steps:
+  - id: step-1
+    title: "Core"
+    reveal: [order-service]  # Start with ONLY the center
+  - id: step-2
+    title: "API"
+    reveal: [order-api]      # Reveal one at a time
+    activeEdges: [order-service-order-api]
+```
+
+### BC Deployment (DevOps View)
 ```yaml
 title: My Service - Deployment
 version: 2
