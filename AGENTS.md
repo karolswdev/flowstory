@@ -10,6 +10,8 @@ FlowStory creates animated flow diagrams from YAML. It supports:
 - **Service Flows** — Microservice architecture
 - **Pipelines** — CI/CD workflows
 
+- **BC Deployments** — Kubernetes/DevOps topology
+
 ## Quick Commands
 
 ```bash
@@ -132,6 +134,52 @@ steps:
     narrative: "API queries database."
 ```
 
+### BC Deployment
+```yaml
+title: My Service - Deployment
+version: 2
+type: bc-deployment
+
+layout:
+  mode: radial  # or: hierarchical, layered
+
+bc:
+  id: my-service
+  name: "My Service"
+  icon: "📦"
+  events:
+    publishes: [OrderCreatedEvent]
+
+artifacts:
+  - id: helm-chart
+    artifactType: helm-chart
+    name: "my-service"
+    layer: 1
+    children:
+      - id: deployment
+        type: deployment
+        name: "my-api"
+
+  - id: database
+    artifactType: database
+    name: "my-db"
+    layer: 2
+    annotations:
+      type: PostgreSQL
+
+edges:
+  - source: deployment
+    target: database
+    type: depends
+    label: "persists to"
+
+steps:
+  - title: "Overview"
+    focusNodes: [helm-chart]
+    expandNodes: [helm-chart]
+    description: "Helm chart with deployments"
+```
+
 ## Node Types
 
 | Type | Use |
@@ -143,7 +191,7 @@ steps:
 | `decision` | Branch point (◇) |
 | `state` | End state |
 
-## Edge Types
+## Edge Types (Story Flow)
 
 | Type | When to Use |
 |------|-------------|
@@ -151,6 +199,31 @@ steps:
 | `event` | Publishing events |
 | `async` | Background/eventual |
 | `error` | Error paths |
+
+## Artifact Types (BC Deployment)
+
+| Type | Icon | Use |
+|------|------|-----|
+| `helm-chart` | 📦 | Helm package |
+| `deployment` | 🚀 | K8s Deployment |
+| `service` | 🔌 | K8s Service |
+| `configmap` | 📋 | K8s ConfigMap |
+| `secret` | 🔐 | K8s Secret |
+| `ingress` | 🌐 | K8s Ingress |
+| `database` | 🗃️ | Database |
+| `queue` | 📬 | Message queue |
+| `cache` | ⚡ | Redis/cache |
+| `external` | 🔗 | External service |
+
+## BC Edge Types
+
+| Type | Use |
+|------|-----|
+| `contains` | Chart contains artifact |
+| `configures` | Config relationship |
+| `depends` | Runtime dependency |
+| `mounts` | Mounts secret/configmap |
+| `exposes` | Service exposes deployment |
 
 ## File Structure
 

@@ -37,10 +37,12 @@ Document build pipelines with stages, jobs, gates, and status indicators.
   - HTTP Flows - REST API request/response sequences
   - Service Flows - Microservice communication diagrams
   - Pipelines - CI/CD and workflow visualizations
+  - **BC Deployments** - Kubernetes/DevOps topology views
 - **Step-by-step playback** - Walk through flows one step at a time
 - **Export options** - PNG, SVG, PDF, and animated GIF
 - **Keyboard navigation** - Space, arrows, Home/End for playback
 - **React Flow powered** - Smooth, interactive diagrams
+- **Three layout modes** - Radial, hierarchical, and layered (BC Deployment)
 
 ## Quick Start
 
