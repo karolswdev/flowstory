@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { ReactFlowProvider } from '@xyflow/react';
+import YAML from 'yaml';
 import { StoryProvider, useStory } from './context';
 import { ThemeProvider } from './themes';
 import { StoryCanvas } from './components/StoryCanvas';
@@ -9,7 +10,18 @@ import { ThemeToggle } from './components/ThemeToggle';
 import { ExportButton } from './components/ExportButton';
 import { parseStory } from './utils/parser';
 import { assignSimplePositions } from './utils/layout/simpleLayout';
+import { BCDeploymentCanvas } from './components/bc-deployment';
+import { validateBCDeploymentStory, type BCDeploymentStory } from './schemas/bc-deployment';
 import './styles/global.css';
+
+/** Detect story type from YAML content */
+function detectStoryType(content: string): 'bc-deployment' | 'story-flow' {
+  try {
+    const parsed = YAML.parse(content);
+    if (parsed?.type === 'bc-deployment') return 'bc-deployment';
+  } catch { /* ignore parse errors, fall through */ }
+  return 'story-flow';
+}
 
 // All available stories
 const STORIES: Record<string, { title: string; category: string; yaml?: string; file?: string }> = {
@@ -385,6 +397,19 @@ steps:
     category: 'Pipelines',
     yaml: '',
     file: '/stories/pipeline/ci-cd-deploy.yaml'
+  },
+  // BC Deployment Examples
+  'bc-order-service': {
+    title: 'Order Service Deployment',
+    category: 'BC Deployments',
+    yaml: '',
+    file: '/stories/bc-deployment/order-service.yaml'
+  },
+  'bc-api-gateway': {
+    title: 'API Gateway Pattern',
+    category: 'BC Deployments',
+    yaml: '',
+    file: '/stories/bc-deployment/api-gateway.yaml'
   }
 };
 
@@ -436,8 +461,14 @@ function StorySelector({
   );
 }
 
-/** Story loader component */
-function StoryLoader({ storyId }: { storyId: string }) {
+/** Story loader component - handles both story-flow and bc-deployment */
+function StoryLoader({ 
+  storyId, 
+  onBCDeploymentLoad 
+}: { 
+  storyId: string;
+  onBCDeploymentLoad?: (story: BCDeploymentStory | null) => void;
+}) {
   const { loadStory, reset } = useStory();
 
   useEffect(() => {
@@ -445,17 +476,34 @@ function StoryLoader({ storyId }: { storyId: string }) {
     if (!storyData) return;
 
     const loadFromYaml = (yaml: string) => {
-      const { story, validation } = parseStory(yaml);
-      if (story && validation.valid) {
-        // Auto-assign positions if nodes don't have them
-        const needsPositions = story.nodes.some(n => !n.position || (n.position.x === 0 && n.position.y === 0));
-        if (needsPositions) {
-          story.nodes = assignSimplePositions(story.nodes);
+      const storyType = detectStoryType(yaml);
+      
+      if (storyType === 'bc-deployment') {
+        // Parse as BC Deployment
+        try {
+          const parsed = YAML.parse(yaml);
+          const bcStory = validateBCDeploymentStory(parsed);
+          reset();
+          onBCDeploymentLoad?.(bcStory);
+        } catch (err) {
+          console.error('Failed to parse BC Deployment story:', err);
+          onBCDeploymentLoad?.(null);
         }
-        reset();
-        setTimeout(() => loadStory(story), 50);
       } else {
-        console.error('Failed to parse story:', validation.errors);
+        // Parse as story-flow
+        onBCDeploymentLoad?.(null);
+        const { story, validation } = parseStory(yaml);
+        if (story && validation.valid) {
+          // Auto-assign positions if nodes don't have them
+          const needsPositions = story.nodes.some(n => !n.position || (n.position.x === 0 && n.position.y === 0));
+          if (needsPositions) {
+            story.nodes = assignSimplePositions(story.nodes);
+          }
+          reset();
+          setTimeout(() => loadStory(story), 50);
+        } else {
+          console.error('Failed to parse story:', validation.errors);
+        }
       }
     };
 
@@ -468,13 +516,30 @@ function StoryLoader({ storyId }: { storyId: string }) {
     } else if (storyData.yaml) {
       loadFromYaml(storyData.yaml);
     }
-  }, [storyId, loadStory, reset]);
+  }, [storyId, loadStory, reset, onBCDeploymentLoad]);
 
   return null;
 }
 
 function App() {
   const [currentStory, setCurrentStory] = useState('user-registration');
+  const [bcDeploymentStory, setBCDeploymentStory] = useState<BCDeploymentStory | null>(null);
+  const [bcDeploymentStep, setBCDeploymentStep] = useState(0);
+
+  // Reset BC Deployment state when story changes
+  const handleStoryChange = useCallback((storyId: string) => {
+    setCurrentStory(storyId);
+    setBCDeploymentStory(null);
+    setBCDeploymentStep(0);
+  }, []);
+
+  // Handle BC Deployment story load
+  const handleBCDeploymentLoad = useCallback((story: BCDeploymentStory | null) => {
+    setBCDeploymentStory(story);
+    setBCDeploymentStep(0);
+  }, []);
+
+  const isBCDeployment = bcDeploymentStory !== null;
 
   return (
     <div className="app" style={{ 
@@ -502,18 +567,80 @@ function App() {
           }}>
             FlowStory
           </h1>
-          <StorySelector currentStory={currentStory} onStoryChange={setCurrentStory} />
+          <StorySelector currentStory={currentStory} onStoryChange={handleStoryChange} />
         </div>
         <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-          <ExportButton showLabels />
+          {!isBCDeployment && <ExportButton showLabels />}
           <ThemeToggle showLabel />
         </div>
       </header>
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-        <StoryLoader storyId={currentStory} />
-        <StoryCanvas showMinimap showControls showBackground showNavigation={false} />
-        <StoryPanel showHeader showNextPreview showStepBadge />
-        <PlaybackControls showHints />
+        <StoryLoader storyId={currentStory} onBCDeploymentLoad={handleBCDeploymentLoad} />
+        
+        {isBCDeployment ? (
+          <ReactFlowProvider>
+            <div style={{ flex: 1, position: 'relative' }}>
+              <BCDeploymentCanvas 
+                story={bcDeploymentStory} 
+                currentStepIndex={bcDeploymentStep}
+                onStepChange={setBCDeploymentStep}
+              />
+              {/* Simple step controls for BC Deployment */}
+              <div style={{
+                position: 'absolute',
+                bottom: 16,
+                left: '50%',
+                transform: 'translateX(-50%)',
+                display: 'flex',
+                gap: 8,
+                zIndex: 200,
+              }}>
+                <button
+                  onClick={() => setBCDeploymentStep(s => Math.max(0, s - 1))}
+                  disabled={bcDeploymentStep === 0}
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: 8,
+                    border: '1px solid var(--color-surface-border)',
+                    background: 'var(--color-surface-primary)',
+                    cursor: bcDeploymentStep === 0 ? 'not-allowed' : 'pointer',
+                    opacity: bcDeploymentStep === 0 ? 0.5 : 1,
+                  }}
+                >
+                  ← Previous
+                </button>
+                <span style={{
+                  padding: '8px 12px',
+                  background: 'var(--color-surface-primary)',
+                  borderRadius: 8,
+                  fontWeight: 600,
+                }}>
+                  {bcDeploymentStep + 1} / {bcDeploymentStory.steps.length}
+                </span>
+                <button
+                  onClick={() => setBCDeploymentStep(s => Math.min(bcDeploymentStory.steps.length - 1, s + 1))}
+                  disabled={bcDeploymentStep >= bcDeploymentStory.steps.length - 1}
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: 8,
+                    border: '1px solid var(--color-surface-border)',
+                    background: 'var(--color-surface-primary)',
+                    cursor: bcDeploymentStep >= bcDeploymentStory.steps.length - 1 ? 'not-allowed' : 'pointer',
+                    opacity: bcDeploymentStep >= bcDeploymentStory.steps.length - 1 ? 0.5 : 1,
+                  }}
+                >
+                  Next →
+                </button>
+              </div>
+            </div>
+          </ReactFlowProvider>
+        ) : (
+          <>
+            <StoryCanvas showMinimap showControls showBackground showNavigation={false} />
+            <StoryPanel showHeader showNextPreview showStepBadge />
+            <PlaybackControls showHints />
+          </>
+        )}
       </main>
     </div>
   );
