@@ -1,0 +1,243 @@
+/* ============================================
+   Tech Radar Container
+   ============================================ */
+.tech-radar {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tech-radar svg {
+  overflow: visible;
+}
+
+/* ============================================
+   Radar Rings
+   ============================================ */
+.radar-ring {
+  pointer-events: none;
+}
+
+.ring-background {
+  transition: opacity 0.3s ease;
+}
+
+.ring-border {
+  transition: opacity 0.3s ease;
+}
+
+.ring-label {
+  font-family: 'Inter', system-ui, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.ring-dimmed .ring-background,
+.ring-dimmed .ring-border,
+.ring-dimmed .ring-label {
+  opacity: 0.3 !important;
+}
+
+.ring-active .ring-background {
+  opacity: 1;
+}
+
+/* ============================================
+   Quadrant Labels
+   ============================================ */
+.quadrant-label {
+  pointer-events: none;
+}
+
+.quadrant-label text {
+  font-family: 'Inter', system-ui, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.quadrant-dimmed text,
+.quadrant-dimmed rect {
+  opacity: 0.3 !important;
+}
+
+/* ============================================
+   Tech Blips
+   ============================================ */
+.tech-blip {
+  cursor: pointer;
+}
+
+.blip-circle {
+  transition: transform 0.2s ease;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
+}
+
+.tech-blip:hover .blip-circle {
+  transform: scale(1.2);
+}
+
+.blip-label {
+  font-family: 'Inter', system-ui, sans-serif;
+  pointer-events: none;
+  text-shadow: 
+    -1px -1px 0 white,
+    1px -1px 0 white,
+    -1px 1px 0 white,
+    1px 1px 0 white;
+}
+
+.blip-new {
+  filter: drop-shadow(0 0 4px rgba(255, 215, 0, 0.5));
+}
+
+.blip-movement {
+  font-weight: bold;
+}
+
+.blip-glow {
+  pointer-events: none;
+}
+
+/* Blip States */
+.blip-dimmed {
+  opacity: 0.3;
+}
+
+.blip-highlighted .blip-circle {
+  stroke-width: 3;
+}
+
+.blip-active .blip-circle {
+  stroke-width: 3;
+  filter: drop-shadow(0 0 8px rgba(33, 150, 243, 0.5));
+}
+
+/* ============================================
+   Legend
+   ============================================ */
+.radar-legend {
+  position: absolute;
+  bottom: 20px;
+  left: 20px;
+  background: white;
+  padding: 12px 16px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 12px;
+}
+
+.legend-title {
+  font-weight: 700;
+  margin-bottom: 8px;
+  color: #333;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.legend-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+
+.legend-label {
+  color: #666;
+}
+
+.legend-new {
+  color: #FFD700;
+  font-size: 10px;
+}
+
+.legend-moved-up {
+  color: #4CAF50;
+  font-size: 10px;
+}
+
+.legend-moved-down {
+  color: #F44336;
+  font-size: 10px;
+}
+
+/* ============================================
+   Axis Lines
+   ============================================ */
+.radar-axis {
+  stroke: #e0e0e0;
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+}
+
+/* ============================================
+   Dark Mode
+   ============================================ */
+[data-theme="dark"] .radar-legend {
+  background: #2d2d2d;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+[data-theme="dark"] .legend-title {
+  color: #e0e0e0;
+}
+
+[data-theme="dark"] .legend-label {
+  color: #aaa;
+}
+
+[data-theme="dark"] .blip-label {
+  fill: #e0e0e0;
+  text-shadow: 
+    -1px -1px 0 #1e1e1e,
+    1px -1px 0 #1e1e1e,
+    -1px 1px 0 #1e1e1e,
+    1px 1px 0 #1e1e1e;
+}
+
+[data-theme="dark"] .ring-label {
+  fill-opacity: 0.9;
+}
+
+[data-theme="dark"] .quadrant-label rect {
+  fill-opacity: 0.2;
+}
+
+[data-theme="dark"] .radar-axis {
+  stroke: #444;
+}
+
+/* ============================================
+   Animations
+   ============================================ */
+@keyframes blip-pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.1);
+  }
+}
+
+.blip-active .blip-circle {
+  animation: blip-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes ring-sweep {
+  0% {
+    stroke-dashoffset: 1000;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+.ring-active .ring-border {
+  animation: ring-sweep 2s ease-out;
+}
