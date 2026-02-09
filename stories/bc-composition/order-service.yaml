@@ -1,0 +1,191 @@
+title: "Order Service - What Constitutes It"
+version: 1
+type: bc-composition
+
+layout:
+  mode: radial
+  centerSize: 160
+  spacing: 200
+
+# The central concept we're explaining
+core:
+  id: order-service
+  name: "Order Service"
+  icon: "🛒"
+  description: "Handles order lifecycle"
+  color: "#4CAF50"
+
+# What constitutes this bounded context
+elements:
+  # Layer 1 - Direct constituents
+  - id: order-api
+    name: "Order API"
+    type: "api"
+    icon: "🌐"
+    description: "REST endpoints for order operations"
+    layer: 1
+    effect:
+      type: grow
+      duration: 500
+
+  - id: order-db
+    name: "Orders Database"
+    type: "database"
+    icon: "🗄️"
+    description: "PostgreSQL persistence"
+    layer: 1
+    effect:
+      type: slide
+      direction: up
+    children:
+      - id: orders-table
+        name: "orders"
+        type: "table"
+        icon: "📋"
+      - id: line-items-table
+        name: "line_items"
+        type: "table"
+        icon: "📋"
+
+  - id: order-events
+    name: "Domain Events"
+    type: "event-bus"
+    icon: "📨"
+    description: "Order lifecycle events"
+    layer: 1
+    effect:
+      type: pulse
+    children:
+      - id: order-created
+        name: "OrderCreated"
+        type: "event"
+      - id: order-shipped
+        name: "OrderShipped"
+        type: "event"
+      - id: order-cancelled
+        name: "OrderCancelled"
+        type: "event"
+
+  - id: order-worker
+    name: "Order Worker"
+    type: "worker"
+    icon: "⚙️"
+    description: "Background processing"
+    layer: 1
+    effect:
+      type: fade
+
+  # Layer 2 - External dependencies
+  - id: payment-service
+    name: "Payment Service"
+    type: "external"
+    icon: "💳"
+    description: "External payment processor"
+    layer: 2
+    effect:
+      type: radiate
+
+  - id: inventory-service
+    name: "Inventory Service"
+    type: "external"
+    icon: "📦"
+    description: "Stock management"
+    layer: 2
+    effect:
+      type: radiate
+
+# Relationships
+edges:
+  - id: api-to-db
+    source: order-api
+    target: order-db
+    type: depends
+    label: "persists to"
+
+  - id: api-to-events
+    source: order-api
+    target: order-events
+    type: publishes
+    label: "publishes"
+
+  - id: worker-to-events
+    source: order-worker
+    target: order-events
+    type: subscribes
+    label: "subscribes"
+
+  - id: api-to-payment
+    source: order-api
+    target: payment-service
+    type: uses
+    label: "calls"
+    style: dashed
+
+  - id: worker-to-inventory
+    source: order-worker
+    target: inventory-service
+    type: uses
+    label: "queries"
+    style: dashed
+
+# Progressive reveal sequence
+steps:
+  - id: step-1
+    title: "The Order Service"
+    description: "Let's explore what constitutes the Order Service bounded context."
+    reveal: []  # Only core is visible
+    focus: [order-service]
+    narration:
+      speaker: "Architect"
+      message: "This is the Order Service - the heart of our e-commerce platform."
+
+  - id: step-2
+    title: "The API Layer"
+    description: "Orders are created and managed through a REST API."
+    reveal: [order-api]
+    focus: [order-api]
+    narration:
+      message: "The API exposes endpoints for creating, updating, and querying orders."
+
+  - id: step-3
+    title: "Persistence"
+    description: "Order data is stored in a PostgreSQL database."
+    reveal: [order-db]
+    focus: [order-db]
+    expand: [order-db]
+    narration:
+      message: "The database stores orders and their line items in normalized tables."
+
+  - id: step-4
+    title: "Domain Events"
+    description: "The service publishes events for downstream consumers."
+    reveal: [order-events]
+    focus: [order-events]
+    expand: [order-events]
+    narration:
+      message: "OrderCreated, OrderShipped, and OrderCancelled events drive other services."
+
+  - id: step-5
+    title: "Background Processing"
+    description: "A worker handles async operations."
+    reveal: [order-worker]
+    focus: [order-worker]
+    narration:
+      message: "The worker processes events and handles long-running tasks."
+
+  - id: step-6
+    title: "External Dependencies"
+    description: "The service integrates with external systems."
+    reveal: [payment-service, inventory-service]
+    focus: [payment-service, inventory-service]
+    narration:
+      message: "Payment processing and inventory checks are handled by separate services."
+
+  - id: step-7
+    title: "Complete Picture"
+    description: "All constituents of the Order Service."
+    focus: []  # Show everything
+    zoomLevel: 0.8
+    narration:
+      speaker: "Architect"
+      message: "This is the full composition of the Order Service bounded context."
