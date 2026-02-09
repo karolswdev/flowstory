@@ -1,4 +1,4 @@
-import { useMemo, useCallback, useEffect, useRef } from 'react';
+import { useMemo, useCallback, useEffect, useRef, useState } from 'react';
 import { 
   ReactFlow, 
   Background, 
@@ -13,6 +13,7 @@ import { nodeTypes } from './nodes';
 import { edgeTypes, EdgeMarkers } from './edges';
 import { useStory, useStoryNavigation } from '../context/StoryContext';
 import type { UserStory, StoryNode, StoryEdge } from '../types/story';
+import { useStoryLayout } from '../layout';
 import '@xyflow/react/dist/style.css';
 import './nodes/nodes.css';
 import './edges/edges.css';
@@ -30,6 +31,8 @@ export interface StoryCanvasProps {
   showBackground?: boolean;
   /** Show navigation controls */
   showNavigation?: boolean;
+  /** Use new camera-centric layout system */
+  useNewLayout?: boolean;
 }
 
 /** Convert story node to React Flow node format */
@@ -228,23 +231,59 @@ export function StoryCanvas({
   showControls = true,
   showBackground = true,
   showNavigation = true,
+  useNewLayout = false,
 }: StoryCanvasProps) {
-  const { story, activeNodeIds, activeEdgeIds, completedNodeIds, completedEdgeIds, isLoaded, error } = useStory();
+  const { story, activeNodeIds, activeEdgeIds, completedNodeIds, completedEdgeIds, isLoaded, error, currentStep } = useStory();
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [viewport, setViewport] = useState({ width: 800, height: 600 });
 
-  // Convert story data to React Flow format
-  const nodes = useMemo(() => {
-    if (!story) return [];
+  // Track container size for layout system
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const updateSize = () => {
+      if (containerRef.current) {
+        setViewport({
+          width: containerRef.current.clientWidth,
+          height: containerRef.current.clientHeight,
+        });
+      }
+    };
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  // New layout system
+  const layoutResult = useStoryLayout({
+    story,
+    currentStep: currentStep || null,
+    activeNodeIds,
+    completedNodeIds,
+    activeEdgeIds,
+    completedEdgeIds,
+    viewport,
+    enabled: useNewLayout,
+  });
+
+  // Convert story data to React Flow format (legacy mode)
+  const legacyNodes = useMemo(() => {
+    if (!story || useNewLayout) return [];
     return story.nodes.map(node =>
       toReactFlowNode(node, story, activeNodeIds, completedNodeIds)
     );
-  }, [story, activeNodeIds, completedNodeIds]);
+  }, [story, activeNodeIds, completedNodeIds, useNewLayout]);
 
-  const edges = useMemo(() => {
-    if (!story) return [];
+  const legacyEdges = useMemo(() => {
+    if (!story || useNewLayout) return [];
     return story.edges.map(edge =>
       toReactFlowEdge(edge, activeEdgeIds, completedEdgeIds)
     );
-  }, [story, activeEdgeIds, completedEdgeIds]);
+  }, [story, activeEdgeIds, completedEdgeIds, useNewLayout]);
+
+  // Use layout system results or legacy conversion
+  const nodes = useNewLayout ? layoutResult.nodes : legacyNodes;
+  const edges = useNewLayout ? layoutResult.edges : legacyEdges;
 
   if (error) {
     return (
@@ -263,8 +302,23 @@ export function StoryCanvas({
   }
 
   return (
-    <div className={`story-canvas ${className}`} data-testid="story-canvas">
+    <div className={`story-canvas ${className}`} data-testid="story-canvas" ref={containerRef}>
       {showNavigation && <NavigationControls />}
+      {useNewLayout && layoutResult.overlaps.length > 0 && (
+        <div className="layout-overlap-warning" style={{
+          position: 'absolute',
+          top: 8,
+          right: 8,
+          background: 'var(--color-status-warning)',
+          color: 'white',
+          padding: '4px 8px',
+          borderRadius: 4,
+          fontSize: 12,
+          zIndex: 10,
+        }}>
+          ⚠️ {layoutResult.overlaps.length} overlap(s) adjusted
+        </div>
+      )}
       <div className="story-canvas-flow">
         <CanvasContent
           story={story}

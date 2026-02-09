@@ -66,3 +66,10 @@ export {
   type UseLayoutOptions,
   type UseLayoutResult,
 } from './useLayout';
+
+// Story integration
+export {
+  useStoryLayout,
+  type UseStoryLayoutOptions,
+  type UseStoryLayoutResult,
+} from './useStoryLayout';
