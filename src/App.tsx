@@ -625,13 +625,12 @@ function App() {
         <StoryLoader storyId={currentStory} onBCDeploymentLoad={handleBCDeploymentLoad} />
         
         {isBCDeployment ? (
-          <ReactFlowProvider>
-            <div style={{ flex: 1, position: 'relative' }}>
-              <BCDeploymentCanvas 
-                story={bcDeploymentStory} 
-                currentStepIndex={bcDeploymentStep}
-                onStepChange={setBCDeploymentStep}
-              />
+          <div style={{ flex: 1, position: 'relative' }}>
+            <BCDeploymentCanvas 
+              story={bcDeploymentStory} 
+              currentStepIndex={bcDeploymentStep}
+              onStepChange={setBCDeploymentStep}
+            />
               {/* Simple step controls for BC Deployment */}
               <div style={{
                 position: 'absolute',
@@ -684,7 +683,6 @@ function App() {
                 </button>
               </div>
             </div>
-          </ReactFlowProvider>
         ) : (
           <>
             <StoryCanvas showMinimap showControls showBackground showNavigation={false} />
