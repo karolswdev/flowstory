@@ -1,0 +1,114 @@
+# Effects Demo Story
+# Showcases the node effects system
+
+title: "Node Effects Demo"
+description: "Demonstration of attachable node effects"
+
+nodes:
+  - id: start
+    type: actor
+    label: "User"
+    position: { x: 100, y: 200 }
+    
+  - id: action-1
+    type: action
+    label: "Submit Form"
+    position: { x: 300, y: 200 }
+    effects:
+      - type: pulse
+        trigger: on-focus
+        params:
+          scale: 1.15
+          duration: 800
+    
+  - id: process
+    type: system
+    label: "Process Request"
+    description: "Validate and process"
+    position: { x: 500, y: 200 }
+    effects:
+      - type: glow
+        trigger: on-focus
+        params:
+          color: "#3b82f6"
+          intensity: 0.6
+          size: 25
+    
+  - id: error
+    type: state
+    label: "Validation Error"
+    variant: danger
+    position: { x: 500, y: 350 }
+    effects:
+      - type: shake
+        trigger: on-focus
+        params:
+          intensity: 8
+          duration: 600
+      - type: glow
+        trigger: continuous
+        params:
+          color: "#ef4444"
+          intensity: 0.4
+    
+  - id: success
+    type: state
+    label: "Success!"
+    variant: success
+    position: { x: 700, y: 200 }
+    effects:
+      - type: emoji-explosion
+        trigger: on-reveal
+        params:
+          emojis: ["🎉", "✨", "⭐", "💫"]
+          count: 20
+          duration: 1800
+      - type: pulse
+        trigger: continuous
+        params:
+          scale: 1.05
+          color: "#22c55e"
+
+edges:
+  - source: start
+    target: action-1
+    label: "initiates"
+    
+  - source: action-1
+    target: process
+    label: "submit"
+    
+  - source: process
+    target: error
+    label: "invalid"
+    type: error
+    
+  - source: process
+    target: success
+    label: "valid"
+    type: success
+
+steps:
+  - id: step-1
+    title: "User Initiates"
+    description: "The user starts the process"
+    focusNodes: [start, action-1]
+    activeEdges: [start-action-1]
+    
+  - id: step-2
+    title: "Form Submission"
+    description: "User submits the form for processing"
+    focusNodes: [action-1, process]
+    activeEdges: [action-1-process]
+    
+  - id: step-3
+    title: "Validation Error"
+    description: "When validation fails, show error state"
+    focusNodes: [process, error]
+    activeEdges: [process-error]
+    
+  - id: step-4
+    title: "Success!"
+    description: "When everything validates, celebrate!"
+    focusNodes: [process, success]
+    activeEdges: [process-success]

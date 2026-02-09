@@ -420,6 +420,13 @@ steps:
     category: 'BC Composition',
     yaml: '',
     file: '/stories/bc-composition/order-service.yaml'
+  },
+  // Effects Demo
+  'effects-demo': {
+    title: 'Node Effects Demo',
+    category: 'Effects',
+    yaml: '',
+    file: '/stories/effects-demo.yaml'
   }
 };
 
