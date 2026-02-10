@@ -5,6 +5,7 @@ import { DEFAULT_RINGS, DEFAULT_QUADRANTS, TECH_RADAR_LAYOUT } from '../../schem
 import { TechBlip } from './TechBlip';
 import { RadarRing } from './RadarRing';
 import { QuadrantLabel } from './QuadrantLabel';
+import { fadeUp, TRANSITION } from '../../animation';
 import './tech-radar.css';
 
 interface TechRadarCanvasProps {
@@ -198,8 +199,11 @@ export function TechRadarCanvas({
       {currentStep && (
         <motion.div 
           className="tech-radar-info"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
+          variants={fadeUp}
+          initial="initial"
+          animate="animate"
+          exit="exit"
+          transition={TRANSITION.default}
           key={currentStepIndex}
         >
           <h3>{currentStep.title}</h3>
