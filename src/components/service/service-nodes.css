@@ -1,69 +1,83 @@
-/* Service Flow Canvas */
+/* ============================================
+   Service Flow Node Styles
+   Uses FlowStory Design System tokens
+   ============================================ */
+
+/* ============================================
+   Service Flow Canvas
+   ============================================ */
 .service-flow-canvas {
   width: 100%;
   height: 100%;
   position: relative;
-  background: #fafafa;
+  background: var(--node-system-bg);
 }
 
-/* Step Info Overlay */
+/* ============================================
+   Step Info Overlay
+   ============================================ */
 .service-flow-step-info {
   position: absolute;
-  bottom: 20px;
-  left: 20px;
-  right: 20px;
+  bottom: var(--space-5);
+  left: var(--space-5);
+  right: var(--space-5);
   background: rgba(255, 255, 255, 0.95);
-  border-radius: 8px;
-  padding: 16px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  box-shadow: var(--shadow-lg);
   max-width: 500px;
   z-index: 10;
+  border: var(--node-border-width) solid var(--edge-default);
 }
 
 .service-flow-step-info .step-badge {
   display: inline-block;
-  background: #2196F3;
+  background: var(--node-system-border);
   color: white;
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 10px;
-  margin-bottom: 8px;
+  font-family: var(--font-family);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-full);
+  margin-bottom: var(--space-2);
 }
 
 .service-flow-step-info .step-title {
-  font-weight: 600;
-  font-size: 15px;
-  color: #333;
-  margin-bottom: 4px;
+  font-family: var(--font-family);
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-lg);
+  color: var(--node-system-text);
+  margin-bottom: var(--space-1);
+  line-height: var(--line-height-tight);
 }
 
 .service-flow-step-info .step-narrative {
-  font-size: 13px;
-  color: #666;
-  line-height: 1.5;
+  font-family: var(--font-family);
+  font-size: var(--font-size-md);
+  color: var(--node-actor-text);
+  line-height: var(--line-height-relaxed);
 }
 
-/* ============================================================================
-   Service Node
-   ============================================================================ */
-
+/* ============================================
+   Service Node - Base
+   ============================================ */
 .service-node {
   min-width: 180px;
   background: white;
-  border: 2px solid #ddd;
-  border-radius: 8px;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  transition: all 0.2s ease;
+  border: var(--node-border-width) solid var(--edge-default);
+  border-radius: var(--radius-lg);
+  font-family: var(--font-family);
+  transition: all var(--transition-normal);
+  box-shadow: var(--shadow-sm);
 }
 
 .service-node--active {
-  border-color: #2196F3;
-  box-shadow: 0 0 12px rgba(33, 150, 243, 0.4);
+  border-color: var(--node-system-border);
+  box-shadow: var(--shadow-focus);
 }
 
 .service-node--complete {
-  border-color: #4CAF50;
+  border-color: var(--node-action-border);
   opacity: 0.85;
 }
 
@@ -74,98 +88,117 @@
 .service-node__header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  background: #f5f5f5;
-  border-radius: 6px 6px 0 0;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--node-system-bg);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
 }
 
 .service-node__icon {
-  font-size: 18px;
+  font-size: var(--font-size-xl);
+  flex-shrink: 0;
 }
 
 .service-node__name {
-  font-weight: 600;
-  font-size: 13px;
-  color: #333;
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-md);
+  color: var(--node-system-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  line-height: var(--line-height-tight);
 }
 
 .service-node__divider {
   height: 1px;
-  background: #e0e0e0;
+  background: var(--edge-default);
+  opacity: 0.3;
 }
 
 .service-node__details {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 8px 12px;
-  font-size: 11px;
-  color: #666;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-size-xs);
+  color: var(--node-actor-text);
 }
 
 .service-node__sep {
-  color: #ccc;
+  color: var(--edge-default);
 }
 
 .service-node__type {
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   text-transform: lowercase;
 }
 
 .service-node__tech {
-  color: #888;
+  color: var(--node-actor-text);
+  opacity: 0.7;
 }
 
 .service-node__instances {
-  color: #2196F3;
-  font-weight: 600;
+  color: var(--node-system-border);
+  font-weight: var(--font-weight-semibold);
 }
 
 .service-node__status {
-  padding: 6px 12px;
-  border-top: 1px solid #f0f0f0;
+  padding: var(--space-2) var(--space-3);
+  border-top: var(--node-border-width) solid var(--edge-default);
+  opacity: 0.2;
 }
 
 .service-status {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  font-weight: 500;
+  gap: var(--space-2);
+  font-family: var(--font-family);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
 }
 
 .status-dot {
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  border-radius: var(--radius-full);
+}
+
+.status-dot--healthy {
+  background: var(--node-action-border);
+}
+
+.status-dot--warning {
+  background: var(--node-event-border);
+}
+
+.status-dot--error {
+  background: var(--edge-error);
 }
 
 .service-handle {
   width: 8px;
   height: 8px;
-  background: #2196F3;
+  background: var(--node-system-border);
   border: 2px solid white;
+  border-radius: var(--radius-full);
 }
 
-/* ============================================================================
+/* ============================================
    Queue Node
-   ============================================================================ */
-
+   ============================================ */
 .queue-node {
   min-width: 160px;
-  background: #f3e5f5;
-  border: 2px solid #9C27B0;
-  border-radius: 8px;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  transition: all 0.2s ease;
+  background: var(--node-actor-bg);
+  border: var(--node-border-width) solid var(--node-actor-border);
+  border-radius: var(--radius-lg);
+  font-family: var(--font-family);
+  transition: all var(--transition-normal);
+  box-shadow: var(--shadow-sm);
 }
 
 .queue-node--active {
-  box-shadow: 0 0 12px rgba(156, 39, 176, 0.4);
+  box-shadow: var(--shadow-focus);
 }
 
 .queue-node--complete {
@@ -179,99 +212,209 @@
 .queue-node__header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  background: rgba(156, 39, 176, 0.1);
-  border-radius: 6px 6px 0 0;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: rgba(168, 85, 247, 0.08);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
 }
 
 .queue-node__icon {
-  font-size: 16px;
+  font-size: var(--font-size-lg);
+  flex-shrink: 0;
 }
 
 .queue-node__name {
-  font-weight: 600;
-  font-size: 12px;
-  color: #7B1FA2;
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-sm);
+  color: var(--node-actor-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  line-height: var(--line-height-tight);
 }
 
 .queue-node__divider {
   height: 1px;
-  background: rgba(156, 39, 176, 0.2);
+  background: var(--node-actor-border);
+  opacity: 0.2;
 }
 
 .queue-node__details {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 6px 12px;
-  font-size: 10px;
-  color: #7B1FA2;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-size-xs);
+  color: var(--node-actor-text);
 }
 
 .queue-node__sep {
-  color: rgba(156, 39, 176, 0.4);
+  color: var(--node-actor-border);
+  opacity: 0.4;
 }
 
 .queue-node__type {
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
 }
 
 .queue-node__broker {
-  color: #9C27B0;
+  color: var(--node-actor-border);
 }
 
 .queue-node__metrics {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 12px 8px;
-  font-size: 10px;
-  color: #666;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3) var(--space-2);
+  font-size: var(--font-size-xs);
+  color: var(--node-actor-text);
+  opacity: 0.8;
 }
 
 .queue-node__depth {
-  color: #7B1FA2;
+  color: var(--node-actor-text);
+  font-weight: var(--font-weight-medium);
 }
 
 .queue-node__consumers {
-  color: #4CAF50;
+  color: var(--node-action-text);
+  font-weight: var(--font-weight-medium);
 }
 
 .queue-handle {
   width: 8px;
   height: 8px;
-  background: #9C27B0;
+  background: var(--node-actor-border);
   border: 2px solid white;
+  border-radius: var(--radius-full);
 }
 
-/* ============================================================================
-   Type-specific colors
-   ============================================================================ */
+/* ============================================
+   Database Node
+   ============================================ */
+.database-node {
+  min-width: 160px;
+  background: var(--node-event-bg);
+  border: var(--node-border-width) solid var(--node-event-border);
+  border-radius: var(--radius-lg);
+  font-family: var(--font-family);
+  transition: all var(--transition-normal);
+  box-shadow: var(--shadow-sm);
+}
 
+.database-node--active {
+  box-shadow: var(--shadow-focus);
+}
+
+.database-node__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: rgba(245, 158, 11, 0.08);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+.database-node__name {
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-sm);
+  color: var(--node-event-text);
+  line-height: var(--line-height-tight);
+}
+
+/* ============================================
+   Type-specific header backgrounds
+   ============================================ */
 .service-node--api .service-node__header {
-  background: rgba(33, 150, 243, 0.1);
+  background: var(--node-system-bg);
+}
+
+.service-node--api .service-node__name {
+  color: var(--node-system-text);
 }
 
 .service-node--worker .service-node__header {
-  background: rgba(156, 39, 176, 0.1);
+  background: var(--node-actor-bg);
+}
+
+.service-node--worker .service-node__name {
+  color: var(--node-actor-text);
 }
 
 .service-node--gateway .service-node__header {
-  background: rgba(255, 152, 0, 0.1);
+  background: var(--node-decision-bg);
+}
+
+.service-node--gateway .service-node__name {
+  color: var(--node-decision-text);
 }
 
 .service-node--database .service-node__header {
-  background: rgba(121, 85, 72, 0.1);
+  background: var(--node-event-bg);
+}
+
+.service-node--database .service-node__name {
+  color: var(--node-event-text);
 }
 
 .service-node--cache .service-node__header {
-  background: rgba(0, 188, 212, 0.1);
+  background: var(--node-state-info-bg);
+}
+
+.service-node--cache .service-node__name {
+  color: var(--node-state-info-text);
 }
 
 .service-node--external .service-node__header {
-  background: rgba(96, 125, 139, 0.1);
+  background: rgba(148, 163, 184, 0.1);
+}
+
+.service-node--external .service-node__name {
+  color: var(--edge-default);
+}
+
+/* ============================================
+   Dark Mode Overrides
+   ============================================ */
+[data-theme="dark"] .service-flow-canvas {
+  background: #1a1a2e;
+}
+
+[data-theme="dark"] .service-flow-step-info {
+  background: rgba(30, 30, 46, 0.95);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme="dark"] .service-flow-step-info .step-title {
+  color: var(--node-system-text);
+}
+
+[data-theme="dark"] .service-flow-step-info .step-narrative {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+[data-theme="dark"] .service-node {
+  background: #1e1e2e;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme="dark"] .service-node__header {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+[data-theme="dark"] .service-node__divider {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme="dark"] .queue-node {
+  background: #1e1e2e;
+}
+
+[data-theme="dark"] .queue-node__header {
+  background: rgba(168, 85, 247, 0.15);
+}
+
+[data-theme="dark"] .service-handle,
+[data-theme="dark"] .queue-handle {
+  border-color: #1e1e2e;
 }

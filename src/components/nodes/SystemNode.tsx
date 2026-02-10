@@ -1,5 +1,6 @@
 import { NodeHandles } from './NodeHandles';
 import { getNodeSize, getSizeStyles } from './sizes';
+import { GearIcon } from './icons';
 import { motion, AnimatePresence } from 'motion/react';
 import type { SystemNodeProps } from './types';
 import { nodeVariants, spinVariants, pulseVariants, getNodeAnimationState } from '../../animations/nodeVariants';
@@ -37,13 +38,13 @@ export function SystemNode({ data, selected }: SystemNodeProps) {
         animate={animationState}
       />
 
-      {/* Spinning gear icon */}
+      {/* Gear icon */}
       <motion.div 
         className="system-icon-container"
         variants={spinVariants}
         animate={isActive ? 'active' : 'inactive'}
       >
-        <span className="system-icon">⚙️</span>
+        <GearIcon size={18} className="system-icon" />
       </motion.div>
 
       {/* Label with staggered entrance */}

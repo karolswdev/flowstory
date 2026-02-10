@@ -1,5 +1,6 @@
 /* ============================================
    Event Storming - Sticky Note Styles
+   FlowStory Design System
    Based on standard Event Storming colors
    ============================================ */
 
@@ -9,14 +10,13 @@
 .es-note {
   width: 140px;
   min-height: 80px;
-  padding: 10px;
-  border-radius: 2px;
-  font-family: 'Patrick Hand', 'Comic Sans MS', cursive, sans-serif;
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-family);
   position: relative;
-  box-shadow: 
-    2px 2px 4px rgba(0, 0, 0, 0.2),
-    0 0 1px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow-md);
   cursor: pointer;
+  transition: box-shadow var(--transition-fast);
 }
 
 .es-note::before {
@@ -24,58 +24,58 @@
   position: absolute;
   top: 0;
   right: 0;
-  border-width: 0 12px 12px 0;
+  border-width: 0 var(--space-3) var(--space-3) 0;
   border-style: solid;
 }
 
 .es-icon {
-  font-size: 16px;
+  font-size: var(--font-size-lg);
   display: block;
-  margin-bottom: 4px;
+  margin-bottom: var(--space-1);
 }
 
 .es-note-name {
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1.2;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--line-height-tight);
   word-break: break-word;
 }
 
 .es-note-desc {
-  font-size: 10px;
-  margin-top: 4px;
+  font-size: var(--font-size-xs);
+  margin-top: var(--space-1);
   opacity: 0.8;
-  line-height: 1.3;
+  line-height: var(--line-height-tight);
 }
 
 .es-note-text {
-  font-size: 12px;
-  line-height: 1.3;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-tight);
 }
 
 /* ============================================
    Domain Event (Orange)
    ============================================ */
 .es-event-note {
-  background: #FF9800;
+  background: var(--node-event-border);
   color: #000;
 }
 
 .es-event-note::before {
-  border-color: transparent #E65100 transparent transparent;
+  border-color: transparent var(--node-decision-text) transparent transparent;
 }
 
 .es-event-data {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 6px;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
 }
 
 .es-data-field {
   background: rgba(0, 0, 0, 0.1);
-  padding: 2px 6px;
-  border-radius: 2px;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
   font-size: 9px;
   font-family: 'JetBrains Mono', monospace;
 }
@@ -87,12 +87,12 @@
 
 .es-lightning {
   position: absolute;
-  top: 4px;
-  right: 16px;
-  width: 12px;
-  height: 12px;
-  background: #FFE082;
-  border-radius: 50%;
+  top: var(--space-1);
+  right: var(--space-4);
+  width: var(--space-3);
+  height: var(--space-3);
+  background: var(--node-event-bg);
+  border-radius: var(--radius-full);
   filter: blur(4px);
 }
 
@@ -100,12 +100,12 @@
    Command (Blue)
    ============================================ */
 .es-command-note {
-  background: #2196F3;
+  background: var(--node-system-border);
   color: #fff;
 }
 
 .es-command-note::before {
-  border-color: transparent #1565C0 transparent transparent;
+  border-color: transparent var(--node-system-text) transparent transparent;
 }
 
 /* ============================================
@@ -123,15 +123,15 @@
 }
 
 .es-actor-icon {
-  font-size: 24px;
+  font-size: var(--font-size-xl);
   display: block;
   text-align: center;
-  margin-bottom: 4px;
+  margin-bottom: var(--space-1);
 }
 
 .es-actor-name {
-  font-size: 12px;
-  font-weight: 700;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
   text-align: center;
 }
 
@@ -139,24 +139,24 @@
    Policy (Lilac)
    ============================================ */
 .es-policy-note {
-  background: #CE93D8;
+  background: var(--node-actor-border);
   color: #000;
 }
 
 .es-policy-note::before {
-  border-color: transparent #AB47BC transparent transparent;
+  border-color: transparent var(--node-actor-text) transparent transparent;
 }
 
 /* ============================================
    Read Model (Green)
    ============================================ */
 .es-readmodel-note {
-  background: #81C784;
+  background: var(--edge-success);
   color: #000;
 }
 
 .es-readmodel-note::before {
-  border-color: transparent #4CAF50 transparent transparent;
+  border-color: transparent var(--node-action-text) transparent transparent;
 }
 
 /* ============================================
@@ -175,27 +175,27 @@
    Hotspot (Red)
    ============================================ */
 .es-hotspot-note {
-  background: #EF5350;
+  background: var(--edge-error);
   color: #fff;
   transform: rotate(-3deg);
 }
 
 .es-hotspot-note::before {
-  border-color: transparent #C62828 transparent transparent;
+  border-color: transparent var(--node-state-error-text) transparent transparent;
 }
 
 .es-hotspot-by {
   font-size: 9px;
   font-style: italic;
-  margin-top: 6px;
+  margin-top: var(--space-2);
   opacity: 0.8;
 }
 
 .es-hotspot-pulse {
   position: absolute;
   inset: -3px;
-  border: 2px solid #EF5350;
-  border-radius: 4px;
+  border: 2px solid var(--edge-error);
+  border-radius: var(--radius-sm);
   pointer-events: none;
 }
 
@@ -204,9 +204,9 @@
    ============================================ */
 .es-aggregate {
   background: rgba(255, 193, 7, 0.15);
-  border: 2px dashed #FFC107;
-  border-radius: 8px;
-  padding: 16px;
+  border: var(--node-border-width) dashed var(--node-event-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
   min-width: 200px;
   min-height: 150px;
 }
@@ -214,31 +214,31 @@
 .es-aggregate-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
-  padding-bottom: 8px;
-  border-bottom: 1px dashed #FFC107;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: var(--node-border-width) dashed var(--node-event-border);
 }
 
 .es-aggregate-name {
-  font-family: 'Inter', sans-serif;
-  font-size: 14px;
-  font-weight: 700;
-  color: #F57F17;
+  font-family: var(--font-family);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  color: var(--node-event-text);
 }
 
 /* ============================================
    Handles
    ============================================ */
 .es-handle {
-  width: 8px;
-  height: 8px;
+  width: var(--space-2);
+  height: var(--space-2);
   background: rgba(0, 0, 0, 0.3);
   border: 2px solid white;
 }
 
 .es-note:hover .es-handle {
-  background: #333;
+  background: var(--node-system-text);
 }
 
 /* ============================================
@@ -249,22 +249,17 @@
 }
 
 .es-highlighted {
-  box-shadow: 
-    0 0 0 3px rgba(255, 255, 255, 0.8),
-    4px 4px 8px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--shadow-lg);
   z-index: 100;
 }
 
 .es-active {
-  box-shadow: 
-    0 0 0 3px rgba(255, 255, 255, 0.9),
-    0 0 20px rgba(255, 255, 255, 0.5),
-    4px 4px 8px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--shadow-lg), 0 0 0 3px rgba(255, 255, 255, 0.5);
   z-index: 100;
 }
 
 .node-selected {
-  outline: 3px solid #FFD700;
+  outline: 3px solid var(--node-event-border);
   outline-offset: 2px;
 }
 
@@ -274,13 +269,13 @@
 .es-timeline {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .es-timeline-arrow {
   width: 40px;
   height: 2px;
-  background: linear-gradient(90deg, #9E9E9E, #616161);
+  background: var(--edge-default);
   position: relative;
 }
 
@@ -291,16 +286,14 @@
   top: -4px;
   border-width: 5px 0 5px 8px;
   border-style: solid;
-  border-color: transparent transparent transparent #616161;
+  border-color: transparent transparent transparent var(--edge-default);
 }
 
 /* ============================================
    Dark Mode
    ============================================ */
 [data-theme="dark"] .es-note {
-  box-shadow: 
-    2px 2px 4px rgba(0, 0, 0, 0.4),
-    0 0 1px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--shadow-md);
 }
 
 [data-theme="dark"] .es-aggregate {
@@ -309,4 +302,101 @@
 
 [data-theme="dark"] .es-aggregate-name {
   color: #FFD54F;
+}
+
+/* ============================================
+   Event Storming Canvas (SVG-based)
+   ============================================ */
+.es-canvas {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg);
+  overflow: auto;
+}
+
+.es-svg {
+  min-width: 100%;
+  height: auto;
+  max-height: calc(100vh - 200px);
+}
+
+.es-note-title {
+  font-size: 11px;
+  font-weight: 600;
+  fill: #333;
+}
+
+.es-note-subtitle {
+  font-size: 9px;
+  fill: #666;
+}
+
+.es-timeline-label {
+  font-size: 12px;
+  fill: var(--color-text-secondary);
+}
+
+.es-info {
+  position: absolute;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 16px 24px;
+  max-width: 500px;
+  box-shadow: var(--shadow-lg);
+}
+
+.es-info h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.es-info p {
+  margin: 0;
+  font-size: 14px;
+  color: var(--color-text-secondary);
+}
+
+.es-nav {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 16px;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 24px;
+  box-shadow: var(--shadow-md);
+}
+
+.es-nav button {
+  padding: 6px 12px;
+  border: none;
+  background: var(--color-primary);
+  color: white;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.es-nav button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.es-nav span {
+  font-size: 13px;
+  color: var(--color-text-secondary);
 }

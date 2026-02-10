@@ -1,4 +1,5 @@
 export { TeamNode } from './TeamNode';
+export { TeamOwnershipCanvas } from './TeamOwnershipCanvas';
 export { ServiceNode } from './ServiceNode';
 
 import type { NodeTypes } from '@xyflow/react';

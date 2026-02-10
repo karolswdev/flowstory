@@ -161,45 +161,77 @@ steps:
     nodeIds: [ed-bc]
     edgeIds: []
     narrative: Start with the E&D bounded context - owning its domain completely.
+    camera:
+      center: [-250, -120]
+      zoom: 1.2
+      transition: 400
 
   - id: step-2
     title: Route Optimization
     nodeIds: [ed-bc, routing-bc]
     edgeIds: []
     narrative: Add the Routing BC - independent, focused on route optimization.
+    camera:
+      center: [-125, -120]
+      zoom: 1
+      transition: 400
 
   - id: step-3
     title: Trip Management
     nodeIds: [ed-bc, routing-bc, trip-bc]
     edgeIds: []
     narrative: And the Trip BC - managing the full trip lifecycle.
+    camera:
+      center: [0, -120]
+      zoom: 0.85
+      transition: 400
 
   - id: step-4
     title: The Event Bus
     nodeIds: [ed-bc, routing-bc, trip-bc, event-bus]
     edgeIds: [e1, e2]
     narrative: Bounded contexts publish domain events to Azure Service Bus.
+    camera:
+      center: [0, -60]
+      zoom: 0.75
+      transition: 500
 
   - id: step-5
     title: Subscribe to Events
     nodeIds: [ed-bc, routing-bc, trip-bc, event-bus]
     edgeIds: [e1, e2, e3]
     narrative: Other services subscribe to events they care about. No direct coupling.
+    camera:
+      center: [0, -40]
+      zoom: 0.75
+      transition: 400
 
   - id: step-6
     title: Decoupled
     nodeIds: [ed-bc, routing-bc, trip-bc, event-bus, decoupled]
     edgeIds: [e1, e2, e3, e4]
     narrative: Services are fully decoupled - change one without touching others.
+    camera:
+      center: [-80, 0]
+      zoom: 0.7
+      transition: 400
 
   - id: step-7
     title: Scalable
     nodeIds: [ed-bc, routing-bc, trip-bc, event-bus, decoupled, scalable]
     edgeIds: [e1, e2, e3, e4, e5]
     narrative: Scale each service independently based on demand.
+    camera:
+      center: [0, 0]
+      zoom: 0.65
+      transition: 400
 
   - id: step-8
     title: Velocity Up!
     nodeIds: [ed-bc, routing-bc, trip-bc, event-bus, decoupled, scalable, velocity-up]
     edgeIds: [e1, e2, e3, e4, e5, e6]
     narrative: "Result: teams move fast, ship independently, velocity goes up!"
+    camera:
+      center: [0, 0]
+      zoom: 0.6
+      transition: 500

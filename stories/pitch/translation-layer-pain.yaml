@@ -26,9 +26,9 @@ nodes:
   - id: translation
     type: system
     label: Translation Layer
-    description: Complex mapping, data sync, state management
+    description: Complex mapping & sync
     size: l
-    position: { x: 0, y: 0 }
+    position: { x: 100, y: 0 }
     effects:
       - type: shake
         trigger: on-focus
@@ -47,7 +47,7 @@ nodes:
     label: New Services
     description: Re-Catalyst microservices
     size: l
-    position: { x: 300, y: 0 }
+    position: { x: 500, y: 0 }
     effects:
       - type: pulse
         trigger: on-focus
@@ -57,10 +57,10 @@ nodes:
 
   - id: pain-1
     type: state
-    label: Data Sync Issues
+    label: Sync Breaks
     variant: danger
-    size: s
-    position: { x: 0, y: -120 }
+    size: m
+    position: { x: 100, y: -180 }
     effects:
       - type: shake
         trigger: on-reveal
@@ -70,10 +70,10 @@ nodes:
 
   - id: pain-2
     type: state
-    label: Complexity Compounds
+    label: Complexity ↑
     variant: danger
-    size: s
-    position: { x: 0, y: 120 }
+    size: m
+    position: { x: -50, y: 180 }
     effects:
       - type: shake
         trigger: on-reveal
@@ -86,7 +86,7 @@ nodes:
     label: Velocity ↓
     variant: danger
     size: m
-    position: { x: 300, y: 120 }
+    position: { x: 500, y: 180 }
     effects:
       - type: glow
         trigger: continuous
@@ -95,7 +95,6 @@ nodes:
           intensity: 0.6
 
 edges:
-  # Main horizontal flow: Legacy → Translation → New Services
   - id: e1
     source: legacy
     target: translation
@@ -112,7 +111,6 @@ edges:
     sourceAnchor: right
     targetAnchor: left
 
-  # Pain points emerge from translation layer
   - id: e3
     source: translation
     target: pain-1
@@ -128,7 +126,6 @@ edges:
     sourceAnchor: bottom
     targetAnchor: top
 
-  # Velocity impact
   - id: e5
     source: pain-2
     target: velocity
@@ -142,33 +139,57 @@ steps:
     nodeIds: [legacy]
     edgeIds: []
     narrative: We start with the legacy monolith - PWS/Rhapsody.
+    camera:
+      center: [-200, 0]
+      zoom: 1.1
+      transition: 400
 
   - id: step-2
     title: Enter the Translation Layer
     nodeIds: [legacy, translation]
     edgeIds: [e1]
     narrative: Data must sync to a translation layer for mapping and state management.
+    camera:
+      center: [-50, 0]
+      zoom: 0.8
+      transition: 500
 
   - id: step-3
     title: Then to New Services
     nodeIds: [legacy, translation, new-services]
     edgeIds: [e1, e2]
     narrative: Finally reaching our new microservices. Every feature touches all three.
+    camera:
+      center: [150, 0]
+      zoom: 0.6
+      transition: 500
 
   - id: step-4
     title: Data Sync Breaks
     nodeIds: [legacy, translation, new-services, pain-1]
     edgeIds: [e1, e2, e3]
     narrative: The translation layer creates constant data sync issues.
+    camera:
+      center: [150, -40]
+      zoom: 0.55
+      transition: 400
 
   - id: step-5
     title: Complexity Compounds
     nodeIds: [legacy, translation, new-services, pain-1, pain-2]
     edgeIds: [e1, e2, e3, e4]
     narrative: Each new feature adds more complexity to the translation layer.
+    camera:
+      center: [100, 20]
+      zoom: 0.5
+      transition: 400
 
   - id: step-6
     title: Velocity Declines
     nodeIds: [legacy, translation, new-services, pain-1, pain-2, velocity]
     edgeIds: [e1, e2, e3, e4, e5]
     narrative: "Result: development velocity drops as the system grows."
+    camera:
+      center: [150, 40]
+      zoom: 0.45
+      transition: 500

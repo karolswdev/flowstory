@@ -1,5 +1,6 @@
 import { NodeHandles } from './NodeHandles';
 import { getNodeSize, getSizeStyles } from './sizes';
+import { CheckIcon, XIcon, AlertIcon, InfoIcon, CircleIcon } from './icons';
 import { motion, AnimatePresence } from 'motion/react';
 import type { StateNodeProps } from './types';
 import { nodeVariants, celebrateVariants, getNodeAnimationState, getStateVariant } from '../../animations/nodeVariants';
@@ -21,12 +22,13 @@ export function StateNode({ data, selected }: StateNodeProps) {
   const sizeClass = size ? `node-size-${size}` : '';
 
   // Variant-specific icons
-  const variantIcon = {
-    success: '✓',
-    error: '✕',
-    warning: '⚠',
-    info: 'ℹ',
-  }[variant || 'info'] || '●';
+  const IconComponent = {
+    success: CheckIcon,
+    error: XIcon,
+    warning: AlertIcon,
+    info: InfoIcon,
+    danger: XIcon,
+  }[variant || 'info'] || CircleIcon;
 
   return (
     <motion.div
@@ -68,7 +70,7 @@ export function StateNode({ data, selected }: StateNodeProps) {
             delay: 0.1,
           }}
         >
-          {variantIcon}
+          <IconComponent size={14} />
         </motion.span>
 
         {/* Label */}

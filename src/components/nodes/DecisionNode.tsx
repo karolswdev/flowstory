@@ -29,7 +29,7 @@ export function DecisionNode({ data, selected }: DecisionNodeProps) {
       initial="hidden"
       animate={animationState}
       layout
-      style={{ perspective: 800, width: diamondSize, height: diamondSize, fontSize: sizeConfig.fontSize }}
+      style={{ perspective: 800, fontSize: sizeConfig.fontSize }}
     >
       {/* Glow layer behind diamond */}
       <motion.div
@@ -38,34 +38,31 @@ export function DecisionNode({ data, selected }: DecisionNodeProps) {
         animate={animationState}
       />
 
-      {/* 3D rotating diamond */}
+      {/* Diamond badge */}
       <motion.div
         className="decision-node"
         variants={decisionVariants}
         animate={isActive ? 'active' : 'inactive'}
-        style={{ transformStyle: 'preserve-3d' }}
       >
-        {/* Question mark icon */}
         <motion.div 
           className="decision-icon"
           animate={isActive ? {
-            scale: [1, 1.2, 1],
-            rotate: [0, 5, -5, 0],
+            scale: [1, 1.1, 1],
           } : {}}
-          transition={{ duration: 1.5, repeat: Infinity }}
+          transition={{ duration: 1, repeat: Infinity }}
         >
           ?
         </motion.div>
+      </motion.div>
 
-        {/* Label */}
-        <motion.div 
-          className="decision-label"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.2 }}
-        >
-          {label}
-        </motion.div>
+      {/* Label inline with badge */}
+      <motion.div 
+        className="decision-label"
+        initial={{ opacity: 0, x: -5 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ delay: 0.1 }}
+      >
+        {label}
       </motion.div>
 
       {/* Thinking dots animation when active */}

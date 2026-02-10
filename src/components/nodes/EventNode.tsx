@@ -1,5 +1,6 @@
 import { NodeHandles } from './NodeHandles';
 import { getNodeSize, getSizeStyles } from './sizes';
+import { BoltIcon } from './icons';
 import { motion, AnimatePresence } from 'motion/react';
 import type { EventNodeProps } from './types';
 import { nodeVariants, flashVariants, getNodeAnimationState } from '../../animations/nodeVariants';
@@ -51,7 +52,7 @@ export function EventNode({ data, selected }: EventNodeProps) {
         variants={flashVariants}
         animate={isActive ? 'active' : 'inactive'}
       >
-        <span className="event-icon">⚡</span>
+        <BoltIcon size={14} className="event-icon" />
       </motion.div>
 
       {/* Label */}

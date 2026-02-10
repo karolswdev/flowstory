@@ -1,4 +1,5 @@
 export { ServiceNode } from './ServiceNode';
+export { DependencyGraphCanvas } from './DependencyGraphCanvas';
 
 import type { NodeTypes } from '@xyflow/react';
 import { ServiceNode } from './ServiceNode';

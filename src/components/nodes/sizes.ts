@@ -16,43 +16,44 @@ export interface SizeConfig {
 }
 
 /**
- * Size presets
+ * Size presets - clean, proportional sizing
+ * Based on 8px grid with clear hierarchy
  */
 export const SIZE_PRESETS: Record<NodeSize, SizeConfig> = {
   xs: {
-    width: 70,
-    height: 35,
-    fontSize: 10,
-    iconSize: 12,
-    padding: 4,
-  },
-  s: {
-    width: 100,
-    height: 45,
-    fontSize: 12,
+    width: 96,
+    height: 40,
+    fontSize: 11,
     iconSize: 14,
-    padding: 6,
-  },
-  m: {
-    width: 140,
-    height: 55,
-    fontSize: 14,
-    iconSize: 16,
     padding: 8,
   },
-  l: {
-    width: 180,
-    height: 70,
-    fontSize: 16,
-    iconSize: 20,
+  s: {
+    width: 144,
+    height: 48,
+    fontSize: 12,
+    iconSize: 16,
     padding: 10,
   },
-  xl: {
-    width: 220,
-    height: 90,
-    fontSize: 18,
-    iconSize: 24,
+  m: {
+    width: 192,
+    height: 56,
+    fontSize: 13,
+    iconSize: 18,
     padding: 12,
+  },
+  l: {
+    width: 240,
+    height: 64,
+    fontSize: 14,
+    iconSize: 20,
+    padding: 14,
+  },
+  xl: {
+    width: 320,
+    height: 80,
+    fontSize: 16,
+    iconSize: 24,
+    padding: 16,
   },
 };
 
@@ -60,23 +61,23 @@ export const SIZE_PRESETS: Record<NodeSize, SizeConfig> = {
  * Default sizes by node type
  */
 export const DEFAULT_NODE_SIZES: Record<string, NodeSize> = {
-  // Actors are medium-small (circular, avatar)
+  // Actors are medium (circular, avatar + name)
   actor: 'm',
   
   // Actions are medium
   action: 'm',
   
-  // Systems are large (important)
+  // Systems are large (important, often have descriptions)
   system: 'l',
   
-  // Events are small (badges)
-  event: 's',
+  // Events are medium (names like "AccountCreatedEvent" need space)
+  event: 'm',
   
   // Decisions are medium (diamonds)
   decision: 'm',
   
-  // States are small-medium
-  state: 's',
+  // States are medium (need room for labels)
+  state: 'm',
   
   // Start/end are tiny
   start: 'xs',

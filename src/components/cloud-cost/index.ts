@@ -1,4 +1,5 @@
 export { CostBlock } from './CostBlock';
+export { CloudCostCanvas } from './CloudCostCanvas';
 
 import type { NodeTypes } from '@xyflow/react';
 import { CostBlock } from './CostBlock';

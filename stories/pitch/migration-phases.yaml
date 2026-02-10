@@ -206,63 +206,107 @@ steps:
     nodeIds: [start]
     edgeIds: []
     narrative: We start today with a focused 12-week pilot.
+    camera:
+      center: [-400, 0]
+      zoom: 1.3
+      transition: 400
 
   - id: step-2
     title: "Phase 1: Foundation"
     nodeIds: [start, phase-1]
     edgeIds: [e1]
     narrative: "Weeks 1-4: Build event infrastructure."
+    camera:
+      center: [-310, 0]
+      zoom: 1
+      transition: 400
 
   - id: step-3
     title: Service Bus Setup
     nodeIds: [start, phase-1, p1-task-1]
     edgeIds: [e1, e2]
     narrative: Set up Azure Service Bus and event routing.
+    camera:
+      center: [-220, -30]
+      zoom: 0.9
+      transition: 400
 
   - id: step-4
     title: Event Contracts
     nodeIds: [start, phase-1, p1-task-1, p1-task-2]
     edgeIds: [e1, e2, e3]
     narrative: Define event schemas and contracts between services.
+    camera:
+      center: [-220, 0]
+      zoom: 0.85
+      transition: 400
 
   - id: step-5
     title: "Phase 2: First BC"
     nodeIds: [start, phase-1, p1-task-1, p1-task-2, phase-2]
     edgeIds: [e1, e2, e3, e4]
     narrative: "Weeks 5-8: Migrate the first bounded context."
+    camera:
+      center: [-110, 0]
+      zoom: 0.75
+      transition: 500
 
   - id: step-6
     title: E&D Migration
     nodeIds: [start, phase-1, p1-task-1, p1-task-2, phase-2, p2-task-1]
     edgeIds: [e1, e2, e3, e4, e5]
     narrative: Migrate E&D bounded context to event-driven architecture.
+    camera:
+      center: [0, -30]
+      zoom: 0.8
+      transition: 400
 
   - id: step-7
     title: Week 8 Checkpoint
     nodeIds: [start, phase-1, p1-task-1, p1-task-2, phase-2, p2-task-1, checkpoint]
     edgeIds: [e1, e2, e3, e4, e5, e6]
     narrative: "Critical decision point: Go/No-Go based on results."
+    camera:
+      center: [0, 0]
+      zoom: 0.75
+      transition: 400
 
   - id: step-8
     title: "Phase 3: Expansion"
     nodeIds: [start, phase-1, p1-task-1, p1-task-2, phase-2, p2-task-1, checkpoint, phase-3]
     edgeIds: [e1, e2, e3, e4, e5, e6, e7]
     narrative: "Weeks 9-12: Expand the pattern."
+    camera:
+      center: [110, 0]
+      zoom: 0.7
+      transition: 500
 
   - id: step-9
     title: Routing BC
     nodeIds: [start, phase-1, p1-task-1, p1-task-2, phase-2, p2-task-1, checkpoint, phase-3, p3-task-1]
     edgeIds: [e1, e2, e3, e4, e5, e6, e7, e8]
     narrative: Migrate second bounded context - Routing.
+    camera:
+      center: [220, -30]
+      zoom: 0.75
+      transition: 400
 
   - id: step-10
     title: Migration Playbook
     nodeIds: [start, phase-1, p1-task-1, p1-task-2, phase-2, p2-task-1, checkpoint, phase-3, p3-task-1, p3-task-2]
     edgeIds: [e1, e2, e3, e4, e5, e6, e7, e8, e9]
     narrative: Document patterns, create playbook for future migrations.
+    camera:
+      center: [220, 0]
+      zoom: 0.7
+      transition: 400
 
   - id: step-11
     title: Success!
     nodeIds: [start, phase-1, p1-task-1, p1-task-2, phase-2, p2-task-1, checkpoint, phase-3, p3-task-1, p3-task-2, success]
     edgeIds: [e1, e2, e3, e4, e5, e6, e7, e8, e9, e10]
     narrative: "12 weeks: Event-driven architecture proven, ready to scale!"
+    camera:
+      center: [0, 0]
+      zoom: 0.55
+      transition: 600

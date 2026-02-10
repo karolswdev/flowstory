@@ -1,6 +1,7 @@
 export { EventNote } from './EventNote';
 export { CommandNote } from './CommandNote';
 export { HotspotNote } from './HotspotNote';
+export { EventStormingCanvas } from './EventStormingCanvas';
 
 import type { NodeTypes } from '@xyflow/react';
 import { EventNote } from './EventNote';

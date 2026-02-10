@@ -1,5 +1,6 @@
 import { NodeHandles } from './NodeHandles';
 import { getNodeSize, getSizeStyles } from './sizes';
+import { UserIcon } from './icons';
 import { motion, AnimatePresence } from 'motion/react';
 import type { ActorNodeProps } from './types';
 import { nodeVariants, floatVariants, pulseVariants, getNodeAnimationState } from '../../animations/nodeVariants';
@@ -61,7 +62,7 @@ export function ActorNode({ data, selected }: ActorNodeProps) {
             delay: 0.15,
           }}
         >
-          {avatar || '👤'}
+          {avatar || <UserIcon size={28} />}
         </motion.span>
       </motion.div>
 

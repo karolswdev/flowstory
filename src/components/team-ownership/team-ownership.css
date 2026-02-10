@@ -1,16 +1,18 @@
 /* ============================================
    Team Node - Container for team's services
+   FlowStory Design System
    ============================================ */
 .team-node {
   min-width: 200px;
   min-height: 120px;
-  background: linear-gradient(135deg, #ffffff 0%, #f5f5f5 100%);
-  border: 3px solid var(--team-color, #2196F3);
-  border-radius: 16px;
+  background: white;
+  border: var(--node-border-width) solid var(--team-color, var(--node-system-border));
+  border-radius: var(--radius-xl);
   padding: 0;
   position: relative;
   overflow: hidden;
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--font-family);
+  transition: box-shadow var(--transition-fast);
 }
 
 .team-node.node-active {
@@ -18,54 +20,54 @@
 }
 
 .team-node.node-selected {
-  outline: 3px solid var(--color-brand-primary, #2196F3);
-  outline-offset: 4px;
+  outline: 3px solid var(--node-system-border);
+  outline-offset: var(--space-1);
 }
 
 /* Team Header */
 .team-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: var(--node-border-width) solid var(--node-system-bg);
 }
 
 .team-icon {
-  font-size: 20px;
+  font-size: var(--font-size-xl);
 }
 
 .team-name {
-  font-weight: 700;
-  font-size: 14px;
-  color: #1a1a1a;
+  font-weight: var(--font-weight-bold);
+  font-size: var(--font-size-md);
+  color: var(--node-system-text);
   flex: 1;
 }
 
 .team-headcount {
-  background: white;
-  padding: 4px 8px;
-  border-radius: 12px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #666;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  background: var(--node-system-bg);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-lg);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--edge-default);
+  box-shadow: var(--shadow-sm);
 }
 
 /* Team Info */
 .team-info {
-  padding: 12px 16px;
-  font-size: 12px;
-  color: #666;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--font-size-sm);
+  color: var(--edge-default);
 }
 
 .team-info > div {
-  margin-bottom: 4px;
+  margin-bottom: var(--space-1);
 }
 
 .info-label {
-  font-weight: 600;
-  color: #999;
+  font-weight: var(--font-weight-semibold);
+  color: var(--edge-default);
 }
 
 /* Team Pulse */
@@ -73,17 +75,17 @@
   position: absolute;
   inset: -3px;
   border: 3px solid;
-  border-radius: 18px;
+  border-radius: calc(var(--radius-xl) + 2px);
   pointer-events: none;
 }
 
 /* Team Handle */
 .team-handle {
-  width: 12px;
-  height: 12px;
-  background: var(--team-color, #2196F3);
+  width: var(--space-3);
+  height: var(--space-3);
+  background: var(--team-color, var(--node-system-border));
   border: 2px solid white;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  box-shadow: var(--shadow-sm);
 }
 
 /* ============================================
@@ -93,35 +95,36 @@
   min-width: 100px;
   max-width: 140px;
   background: white;
-  border: 2px solid #e0e0e0;
-  border-radius: 12px;
-  padding: 8px 12px;
+  border: var(--node-border-width) solid var(--edge-default);
+  border-radius: var(--radius-lg);
+  padding: var(--space-2) var(--space-3);
   text-align: center;
   position: relative;
   overflow: hidden;
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--font-family);
   cursor: pointer;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .service-node:hover {
-  border-color: #2196F3;
-  box-shadow: 0 4px 12px rgba(33, 150, 243, 0.2);
+  border-color: var(--node-system-border);
+  box-shadow: var(--shadow-md);
 }
 
 .service-node.node-active {
-  border-color: #2196F3;
+  border-color: var(--node-system-border);
   z-index: 100;
 }
 
 .service-node.node-selected {
-  outline: 2px solid var(--color-brand-primary, #2196F3);
+  outline: 2px solid var(--node-system-border);
   outline-offset: 2px;
 }
 
 /* Ownership Gap Styling */
 .service-node.service-gap {
-  border: 2px dashed #F44336;
-  background: linear-gradient(135deg, #fff5f5 0%, #ffebee 100%);
+  border: var(--node-border-width) dashed var(--edge-error);
+  background: var(--node-state-error-bg);
 }
 
 .service-node.service-gap .service-icon {
@@ -131,7 +134,7 @@
 /* Shared Service Styling */
 .service-node.service-shared {
   border-style: dashed;
-  border-color: #9C27B0;
+  border-color: var(--node-actor-border);
 }
 
 /* Criticality Bar */
@@ -140,20 +143,20 @@
   top: 0;
   left: 0;
   height: 3px;
-  border-radius: 12px 12px 0 0;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
 }
 
 /* Service Icon */
 .service-icon {
-  font-size: 24px;
-  margin-bottom: 4px;
+  font-size: var(--font-size-xl);
+  margin-bottom: var(--space-1);
 }
 
 /* Service Name */
 .service-name {
-  font-weight: 600;
-  font-size: 12px;
-  color: #333;
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-sm);
+  color: var(--node-system-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -162,18 +165,18 @@
 /* Tech Tags */
 .service-tech {
   display: flex;
-  gap: 4px;
+  gap: var(--space-1);
   justify-content: center;
-  margin-top: 6px;
+  margin-top: var(--space-2);
   flex-wrap: wrap;
 }
 
 .tech-tag {
-  background: #f0f0f0;
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 10px;
-  color: #666;
+  background: var(--node-system-bg);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  color: var(--edge-default);
 }
 
 /* Gap Warning */
@@ -181,13 +184,13 @@
   position: absolute;
   top: -8px;
   right: -8px;
-  background: #F44336;
+  background: var(--edge-error);
   color: white;
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 10px;
-  font-weight: 600;
-  box-shadow: 0 2px 4px rgba(244, 67, 54, 0.3);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  box-shadow: var(--shadow-sm);
 }
 
 /* Shared Indicator */
@@ -195,74 +198,74 @@
   position: absolute;
   bottom: -6px;
   right: -6px;
-  font-size: 14px;
+  font-size: var(--font-size-md);
 }
 
 /* Service Glow */
 .service-glow {
   position: absolute;
   inset: -2px;
-  border-radius: 14px;
+  border-radius: calc(var(--radius-lg) + 2px);
   pointer-events: none;
 }
 
 /* Service Handle */
 .service-handle {
-  width: 8px;
-  height: 8px;
-  background: #B0BEC5;
+  width: var(--space-2);
+  height: var(--space-2);
+  background: var(--edge-default);
   border: 2px solid white;
 }
 
 .service-node:hover .service-handle,
 .service-node.node-active .service-handle {
-  background: #2196F3;
+  background: var(--node-system-border);
 }
 
 /* ============================================
    Handoff Edge Styling
    ============================================ */
 .handoff-edge .react-flow__edge-path {
-  stroke: #9C27B0;
+  stroke: var(--node-actor-border);
   stroke-width: 3;
   stroke-dasharray: 8 4;
 }
 
 .handoff-edge.edge-active .react-flow__edge-path {
-  stroke: #7B1FA2;
-  filter: drop-shadow(0 0 4px rgba(156, 39, 176, 0.5));
+  stroke: var(--node-actor-text);
+  filter: drop-shadow(0 0 4px rgba(168, 85, 247, 0.5));
 }
 
 .handoff-edge.friction .react-flow__edge-path {
-  stroke: #F44336;
+  stroke: var(--edge-error);
 }
 
 .handoff-label {
   background: white;
-  padding: 4px 8px;
-  border-radius: 6px;
-  font-size: 11px;
-  font-weight: 500;
-  color: #9C27B0;
-  border: 1px solid #9C27B0;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--node-actor-border);
+  border: var(--node-border-width) solid var(--node-actor-border);
+  box-shadow: var(--shadow-sm);
 }
 
 /* ============================================
    Dependency Edge Styling
    ============================================ */
 .dependency-edge .react-flow__edge-path {
-  stroke: #607D8B;
+  stroke: var(--edge-default);
   stroke-width: 2;
 }
 
 .dependency-edge.critical .react-flow__edge-path {
-  stroke: #F44336;
+  stroke: var(--edge-error);
   stroke-width: 3;
 }
 
 .dependency-edge.edge-active .react-flow__edge-path {
-  stroke: #455A64;
+  stroke: var(--node-system-text);
   filter: drop-shadow(0 0 3px rgba(69, 90, 100, 0.4));
 }
 
@@ -270,7 +273,7 @@
    Dark Mode
    ============================================ */
 [data-theme="dark"] .team-node {
-  background: linear-gradient(135deg, #2d2d2d 0%, #1e1e1e 100%);
+  background: #2d2d2d;
 }
 
 [data-theme="dark"] .team-name {
@@ -305,9 +308,28 @@
 }
 
 [data-theme="dark"] .service-node.service-gap {
-  background: linear-gradient(135deg, #3d2a2a 0%, #2d1e1e 100%);
+  background: #3d2a2a;
 }
 
 [data-theme="dark"] .handoff-label {
   background: #2d2d2d;
 }
+
+.team-ownership-canvas { position: relative; padding: 24px; height: 100%; background: var(--color-bg); overflow: auto; }
+.team-ownership-canvas h2 { margin: 0 0 24px; }
+.teams-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+.team-card { padding: 16px; background: var(--color-bg-elevated); border: 1px solid var(--color-border); border-top-width: 4px; border-radius: 8px; }
+.team-card.highlighted { box-shadow: var(--shadow-lg); }
+.team-header { display: flex; justify-content: space-between; margin-bottom: 4px; }
+.team-name { font-weight: 600; }
+.team-lead { font-size: 12px; color: var(--color-text-secondary); }
+.team-size { font-size: 12px; color: var(--color-text-secondary); margin-bottom: 12px; }
+.team-services { display: flex; flex-direction: column; gap: 4px; }
+.service-item { font-size: 12px; display: flex; align-items: center; gap: 4px; }
+.sla-badge { font-size: 10px; background: var(--color-primary); color: white; padding: 1px 4px; border-radius: 3px; }
+.team-info { position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%); background: var(--color-bg-elevated); border: 1px solid var(--color-border); border-radius: 8px; padding: 16px 24px; max-width: 500px; }
+.team-info h3 { margin: 0 0 8px; }
+.team-info p { margin: 0; color: var(--color-text-secondary); }
+.team-nav { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 16px; padding: 8px 16px; background: var(--color-bg-elevated); border: 1px solid var(--color-border); border-radius: 24px; }
+.team-nav button { padding: 6px 12px; border: none; background: var(--color-primary); color: white; border-radius: 4px; cursor: pointer; }
+.team-nav button:disabled { opacity: 0.5; cursor: not-allowed; }

@@ -14,15 +14,53 @@ import { BCDeploymentCanvas } from './components/bc-deployment';
 import { validateBCDeploymentStory, type BCDeploymentStory } from './schemas/bc-deployment';
 import { BCCompositionCanvas } from './components/bc-composition';
 import { BCCompositionStorySchema, type BCCompositionStory } from './schemas/bc-composition';
+import { TechRadarCanvas } from './components/tech-radar';
+import { TechRadarStorySchema, type TechRadarStory } from './schemas/tech-radar';
+import { C4ContextCanvas } from './components/c4-context';
+import { C4ContextStorySchema, type C4ContextStory } from './schemas/c4-context';
+import { EventStormingCanvas } from './components/event-storming';
+import { EventStormingStorySchema, type EventStormingStory } from './schemas/event-storming';
+import { ADRTimelineCanvas } from './components/adr-timeline';
+import { ADRTimelineStorySchema, type ADRTimelineStory } from './schemas/adr-timeline';
+import { CloudCostCanvas } from './components/cloud-cost';
+import { CloudCostStorySchema, type CloudCostStory } from './schemas/cloud-cost';
+import { DependencyGraphCanvas } from './components/dependency-graph';
+import { DependencyGraphStorySchema, type DependencyGraphStory } from './schemas/dependency-graph';
+import { MigrationRoadmapCanvas } from './components/migration-roadmap';
+import { MigrationRoadmapStorySchema, type MigrationRoadmapStory } from './schemas/migration-roadmap';
+import { TeamOwnershipCanvas } from './components/team-ownership';
+import { TeamOwnershipStorySchema, type TeamOwnershipStory } from './schemas/team-ownership';
 import { EffectsProvider } from './effects';
 import './styles/global.css';
 
 /** Detect story type from YAML content */
-function detectStoryType(content: string): 'bc-composition' | 'bc-deployment' | 'story-flow' {
+type StoryType = 
+  | 'bc-composition' 
+  | 'bc-deployment' 
+  | 'story-flow'
+  | 'tech-radar'
+  | 'c4-context'
+  | 'adr-timeline'
+  | 'cloud-cost'
+  | 'dependency-graph'
+  | 'event-storming'
+  | 'migration-roadmap'
+  | 'team-ownership';
+
+function detectStoryType(content: string): StoryType {
   try {
     const parsed = YAML.parse(content);
-    if (parsed?.type === 'bc-composition') return 'bc-composition';
-    if (parsed?.type === 'bc-deployment') return 'bc-deployment';
+    const type = parsed?.type;
+    if (type === 'bc-composition') return 'bc-composition';
+    if (type === 'bc-deployment') return 'bc-deployment';
+    if (type === 'tech-radar') return 'tech-radar';
+    if (type === 'c4-context') return 'c4-context';
+    if (type === 'adr-timeline') return 'adr-timeline';
+    if (type === 'cloud-cost') return 'cloud-cost';
+    if (type === 'dependency-graph') return 'dependency-graph';
+    if (type === 'event-storming') return 'event-storming';
+    if (type === 'migration-roadmap') return 'migration-roadmap';
+    if (type === 'team-ownership') return 'team-ownership';
   } catch { /* ignore parse errors, fall through */ }
   return 'story-flow';
 }
@@ -447,6 +485,55 @@ steps:
     category: 'Pitch',
     yaml: '',
     file: '/stories/pitch/migration-phases.yaml'
+  },
+  // Specialized Renderers
+  'adr-timeline': {
+    title: 'ADR Timeline',
+    category: 'Governance',
+    yaml: '',
+    file: '/stories/adr-timeline/api-decisions.yaml'
+  },
+  'c4-context': {
+    title: 'C4 Context Diagram',
+    category: 'Architecture',
+    yaml: '',
+    file: '/stories/c4-context/ecommerce-platform.yaml'
+  },
+  'cloud-cost': {
+    title: 'Cloud Cost Review',
+    category: 'FinOps',
+    yaml: '',
+    file: '/stories/cloud-cost/monthly-review.yaml'
+  },
+  'dependency-graph': {
+    title: 'Dependency Graph',
+    category: 'Architecture',
+    yaml: '',
+    file: '/stories/dependency-graph/microservices.yaml'
+  },
+  'event-storming': {
+    title: 'Event Storming',
+    category: 'DDD',
+    yaml: '',
+    file: '/stories/event-storming/order-domain.yaml'
+  },
+  'migration-roadmap': {
+    title: 'Migration Roadmap',
+    category: 'Strategy',
+    yaml: '',
+    file: '/stories/migration-roadmap/monolith-to-microservices.yaml'
+  },
+  'team-ownership': {
+    title: 'Team Ownership',
+    category: 'Organization',
+    yaml: '',
+    file: '/stories/team-ownership/platform-teams.yaml'
+  },
+  'tech-radar': {
+    title: 'Tech Radar',
+    category: 'Strategy',
+    yaml: '',
+    file: '/stories/tech-radar/modern-stack.yaml'
   }
 };
 
@@ -498,17 +585,42 @@ function StorySelector({
   );
 }
 
-/** Story loader component - handles both story-flow and bc-deployment */
+/** Story loader component - handles story-flow, bc-deployment, bc-composition, and specialized renderers */
 function StoryLoader({ 
   storyId, 
   onBCDeploymentLoad,
-  onBCCompositionLoad 
+  onBCCompositionLoad,
+  onTechRadarLoad,
+  onC4ContextLoad,
+  onEventStormingLoad,
 }: { 
   storyId: string;
   onBCDeploymentLoad?: (story: BCDeploymentStory | null) => void;
   onBCCompositionLoad?: (story: BCCompositionStory | null) => void;
+  onTechRadarLoad?: (story: TechRadarStory | null) => void;
+  onC4ContextLoad?: (story: C4ContextStory | null) => void;
+  onEventStormingLoad?: (story: EventStormingStory | null) => void;
+  onADRTimelineLoad?: (story: ADRTimelineStory | null) => void;
+  onCloudCostLoad?: (story: CloudCostStory | null) => void;
+  onDepGraphLoad?: (story: DependencyGraphStory | null) => void;
+  onMigrationLoad?: (story: MigrationRoadmapStory | null) => void;
+  onTeamOwnershipLoad?: (story: TeamOwnershipStory | null) => void;
 }) {
   const { loadStory, reset } = useStory();
+
+  // Clear all specialized story states
+  const clearAllSpecialized = useCallback(() => {
+    onBCDeploymentLoad?.(null);
+    onBCCompositionLoad?.(null);
+    onTechRadarLoad?.(null);
+    onC4ContextLoad?.(null);
+    onEventStormingLoad?.(null);
+    onADRTimelineLoad?.(null);
+    onCloudCostLoad?.(null);
+    onDepGraphLoad?.(null);
+    onMigrationLoad?.(null);
+    onTeamOwnershipLoad?.(null);
+  }, [onBCDeploymentLoad, onBCCompositionLoad, onTechRadarLoad, onC4ContextLoad, onEventStormingLoad, onADRTimelineLoad, onCloudCostLoad, onDepGraphLoad, onMigrationLoad, onTeamOwnershipLoad]);
 
   useEffect(() => {
     const storyData = STORIES[storyId];
@@ -523,11 +635,10 @@ function StoryLoader({
           const parsed = YAML.parse(yaml);
           const bcStory = BCCompositionStorySchema.parse(parsed);
           reset();
+          clearAllSpecialized();
           onBCCompositionLoad?.(bcStory);
-          onBCDeploymentLoad?.(null);
         } catch (err) {
           console.error('Failed to parse BC Composition story:', err);
-          onBCCompositionLoad?.(null);
         }
       } else if (storyType === 'bc-deployment') {
         // Parse as BC Deployment (legacy)
@@ -535,16 +646,82 @@ function StoryLoader({
           const parsed = YAML.parse(yaml);
           const bcStory = validateBCDeploymentStory(parsed);
           reset();
+          clearAllSpecialized();
           onBCDeploymentLoad?.(bcStory);
-          onBCCompositionLoad?.(null);
         } catch (err) {
           console.error('Failed to parse BC Deployment story:', err);
-          onBCDeploymentLoad?.(null);
         }
+      } else if (storyType === 'tech-radar') {
+        // Parse as Tech Radar
+        try {
+          const parsed = YAML.parse(yaml);
+          const radarStory = TechRadarStorySchema.parse(parsed);
+          reset();
+          clearAllSpecialized();
+          onTechRadarLoad?.(radarStory);
+        } catch (err) {
+          console.error('Failed to parse Tech Radar story:', err);
+        }
+      } else if (storyType === 'c4-context') {
+        // Parse as C4 Context
+        try {
+          const parsed = YAML.parse(yaml);
+          const c4Story = C4ContextStorySchema.parse(parsed);
+          reset();
+          clearAllSpecialized();
+          onC4ContextLoad?.(c4Story);
+        } catch (err) {
+          console.error('Failed to parse C4 Context story:', err);
+        }
+      } else if (storyType === 'event-storming') {
+        // Parse as Event Storming
+        try {
+          const parsed = YAML.parse(yaml);
+          const esStory = EventStormingStorySchema.parse(parsed);
+          reset();
+          clearAllSpecialized();
+          onEventStormingLoad?.(esStory);
+        } catch (err) {
+          console.error('Failed to parse Event Storming story:', err);
+        }
+      } else if (storyType === 'adr-timeline') {
+        // Parse as ADR Timeline
+        try {
+          const parsed = YAML.parse(yaml);
+          const adrStory = ADRTimelineStorySchema.parse(parsed);
+          reset();
+          clearAllSpecialized();
+          onADRTimelineLoad?.(adrStory);
+        } catch (err) {
+          console.error('Failed to parse ADR Timeline story:', err);
+        }
+      } else if (storyType === 'cloud-cost') {
+        try {
+          const parsed = YAML.parse(yaml);
+          const ccStory = CloudCostStorySchema.parse(parsed);
+          reset(); clearAllSpecialized(); onCloudCostLoad?.(ccStory);
+        } catch (err) { console.error('Failed to parse Cloud Cost story:', err); }
+      } else if (storyType === 'dependency-graph') {
+        try {
+          const parsed = YAML.parse(yaml);
+          const dgStory = DependencyGraphStorySchema.parse(parsed);
+          reset(); clearAllSpecialized(); onDepGraphLoad?.(dgStory);
+        } catch (err) { console.error('Failed to parse Dependency Graph story:', err); }
+      } else if (storyType === 'migration-roadmap') {
+        try {
+          const parsed = YAML.parse(yaml);
+          const mrStory = MigrationRoadmapStorySchema.parse(parsed);
+          reset(); clearAllSpecialized(); onMigrationLoad?.(mrStory);
+        } catch (err) { console.error('Failed to parse Migration Roadmap story:', err); }
+      } else if (storyType === 'team-ownership') {
+        try {
+          const parsed = YAML.parse(yaml);
+          const toStory = TeamOwnershipStorySchema.parse(parsed);
+          reset(); clearAllSpecialized(); onTeamOwnershipLoad?.(toStory);
+        } catch (err) { console.error('Failed to parse Team Ownership story:', err); }
       } else {
-        // Parse as story-flow
-        onBCDeploymentLoad?.(null);
-        onBCCompositionLoad?.(null);
+        // Parse as story-flow (default)
+        clearAllSpecialized();
         const { story, validation } = parseStory(yaml);
         if (story && validation.valid) {
           // Auto-assign positions if nodes don't have them
@@ -569,7 +746,7 @@ function StoryLoader({
     } else if (storyData.yaml) {
       loadFromYaml(storyData.yaml);
     }
-  }, [storyId, loadStory, reset, onBCDeploymentLoad, onBCCompositionLoad]);
+  }, [storyId, loadStory, reset, clearAllSpecialized, onBCDeploymentLoad, onBCCompositionLoad, onTechRadarLoad, onC4ContextLoad, onEventStormingLoad, onADRTimelineLoad, onCloudCostLoad, onDepGraphLoad, onMigrationLoad, onTeamOwnershipLoad]);
 
   return null;
 }
@@ -589,6 +766,22 @@ function App() {
   const [bcDeploymentStep, setBCDeploymentStep] = useState(0);
   const [bcCompositionStory, setBCCompositionStory] = useState<BCCompositionStory | null>(null);
   const [bcCompositionStep, setBCCompositionStep] = useState(0);
+  const [techRadarStory, setTechRadarStory] = useState<TechRadarStory | null>(null);
+  const [techRadarStep, setTechRadarStep] = useState(0);
+  const [c4ContextStory, setC4ContextStory] = useState<C4ContextStory | null>(null);
+  const [c4ContextStep, setC4ContextStep] = useState(0);
+  const [eventStormingStory, setEventStormingStory] = useState<EventStormingStory | null>(null);
+  const [eventStormingStep, setEventStormingStep] = useState(0);
+  const [adrTimelineStory, setADRTimelineStory] = useState<ADRTimelineStory | null>(null);
+  const [adrTimelineStep, setADRTimelineStep] = useState(0);
+  const [cloudCostStory, setCloudCostStory] = useState<CloudCostStory | null>(null);
+  const [cloudCostStep, setCloudCostStep] = useState(0);
+  const [depGraphStory, setDepGraphStory] = useState<DependencyGraphStory | null>(null);
+  const [depGraphStep, setDepGraphStep] = useState(0);
+  const [migrationStory, setMigrationStory] = useState<MigrationRoadmapStory | null>(null);
+  const [migrationStep, setMigrationStep] = useState(0);
+  const [teamOwnershipStory, setTeamOwnershipStory] = useState<TeamOwnershipStory | null>(null);
+  const [teamOwnershipStep, setTeamOwnershipStep] = useState(0);
 
   // Reset special story states when story changes
   const handleStoryChange = useCallback((storyId: string) => {
@@ -597,6 +790,22 @@ function App() {
     setBCDeploymentStep(0);
     setBCCompositionStory(null);
     setBCCompositionStep(0);
+    setTechRadarStory(null);
+    setTechRadarStep(0);
+    setC4ContextStory(null);
+    setC4ContextStep(0);
+    setEventStormingStory(null);
+    setEventStormingStep(0);
+    setADRTimelineStory(null);
+    setADRTimelineStep(0);
+    setCloudCostStory(null);
+    setCloudCostStep(0);
+    setDepGraphStory(null);
+    setDepGraphStep(0);
+    setMigrationStory(null);
+    setMigrationStep(0);
+    setTeamOwnershipStory(null);
+    setTeamOwnershipStep(0);
     // Update URL for bookmarking/sharing
     const url = new URL(window.location.href);
     url.searchParams.set('story', storyId);
@@ -608,7 +817,6 @@ function App() {
     console.log('[FlowStory] BC Deployment load:', story ? `"${story.title}"` : 'null');
     setBCDeploymentStory(story);
     setBCDeploymentStep(0);
-    if (story) setBCCompositionStory(null); // Only clear if setting a real story
   }, []);
 
   // Handle BC Composition story load
@@ -616,11 +824,66 @@ function App() {
     console.log('[FlowStory] BC Composition load:', story ? `"${story.title}"` : 'null');
     setBCCompositionStory(story);
     setBCCompositionStep(0);
-    if (story) setBCDeploymentStory(null); // Only clear if setting a real story
+  }, []);
+
+  // Handle Tech Radar story load
+  const handleTechRadarLoad = useCallback((story: TechRadarStory | null) => {
+    console.log('[FlowStory] Tech Radar load:', story ? `"${story.title}"` : 'null');
+    setTechRadarStory(story);
+    setTechRadarStep(0);
+  }, []);
+
+  // Handle C4 Context story load
+  const handleC4ContextLoad = useCallback((story: C4ContextStory | null) => {
+    console.log('[FlowStory] C4 Context load:', story ? `"${story.title}"` : 'null');
+    setC4ContextStory(story);
+    setC4ContextStep(0);
+  }, []);
+
+  // Handle Event Storming story load
+  const handleEventStormingLoad = useCallback((story: EventStormingStory | null) => {
+    console.log('[FlowStory] Event Storming load:', story ? `"${story.title}"` : 'null');
+    setEventStormingStory(story);
+    setEventStormingStep(0);
+  }, []);
+
+  // Handle ADR Timeline story load
+  const handleADRTimelineLoad = useCallback((story: ADRTimelineStory | null) => {
+    console.log('[FlowStory] ADR Timeline load:', story ? `"${story.title}"` : 'null');
+    setADRTimelineStory(story);
+    setADRTimelineStep(0);
+  }, []);
+  
+  const handleCloudCostLoad = useCallback((story: CloudCostStory | null) => {
+    setCloudCostStory(story);
+    setCloudCostStep(0);
+  }, []);
+  
+  const handleDepGraphLoad = useCallback((story: DependencyGraphStory | null) => {
+    setDepGraphStory(story);
+    setDepGraphStep(0);
+  }, []);
+  
+  const handleMigrationLoad = useCallback((story: MigrationRoadmapStory | null) => {
+    setMigrationStory(story);
+    setMigrationStep(0);
+  }, []);
+  
+  const handleTeamOwnershipLoad = useCallback((story: TeamOwnershipStory | null) => {
+    setTeamOwnershipStory(story);
+    setTeamOwnershipStep(0);
   }, []);
 
   const isBCDeployment = bcDeploymentStory !== null;
   const isBCComposition = bcCompositionStory !== null;
+  const isTechRadar = techRadarStory !== null;
+  const isC4Context = c4ContextStory !== null;
+  const isEventStorming = eventStormingStory !== null;
+  const isADRTimeline = adrTimelineStory !== null;
+  const isCloudCost = cloudCostStory !== null;
+  const isDepGraph = depGraphStory !== null;
+  const isMigration = migrationStory !== null;
+  const isTeamOwnership = teamOwnershipStory !== null;
   
   // Debug logging
   console.log('[FlowStory] Render - currentStory:', currentStory, 'isBCDeployment:', isBCDeployment, 'isBCComposition:', isBCComposition);
@@ -714,7 +977,7 @@ function App() {
           <StorySelector currentStory={currentStory} onStoryChange={handleStoryChange} />
         </div>
         <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-          {!isBCDeployment && !isBCComposition && <ExportButton showLabels />}
+          {!isBCDeployment && !isBCComposition && !isTechRadar && !isC4Context && !isEventStorming && !isADRTimeline && !isCloudCost && !isDepGraph && !isMigration && !isTeamOwnership && <ExportButton showLabels />}
           <ThemeToggle showLabel />
         </div>
       </header>
@@ -723,6 +986,14 @@ function App() {
           storyId={currentStory} 
           onBCDeploymentLoad={handleBCDeploymentLoad}
           onBCCompositionLoad={handleBCCompositionLoad}
+          onTechRadarLoad={handleTechRadarLoad}
+          onC4ContextLoad={handleC4ContextLoad}
+          onEventStormingLoad={handleEventStormingLoad}
+          onADRTimelineLoad={handleADRTimelineLoad}
+          onCloudCostLoad={handleCloudCostLoad}
+          onDepGraphLoad={handleDepGraphLoad}
+          onMigrationLoad={handleMigrationLoad}
+          onTeamOwnershipLoad={handleTeamOwnershipLoad}
         />
         
         {isBCComposition ? (
@@ -847,6 +1118,54 @@ function App() {
               </div>
             </div>
           </ReactFlowProvider>
+        ) : isTechRadar ? (
+          <div style={{ flex: 1, position: 'relative' }}>
+            <TechRadarCanvas 
+              story={techRadarStory} 
+              currentStepIndex={techRadarStep}
+              onStepChange={setTechRadarStep}
+            />
+          </div>
+        ) : isC4Context ? (
+          <div style={{ flex: 1, position: 'relative' }}>
+            <C4ContextCanvas 
+              story={c4ContextStory} 
+              currentStepIndex={c4ContextStep}
+              onStepChange={setC4ContextStep}
+            />
+          </div>
+        ) : isEventStorming ? (
+          <div style={{ flex: 1, position: 'relative' }}>
+            <EventStormingCanvas 
+              story={eventStormingStory} 
+              currentStepIndex={eventStormingStep}
+              onStepChange={setEventStormingStep}
+            />
+          </div>
+        ) : isADRTimeline ? (
+          <div style={{ flex: 1, position: 'relative' }}>
+            <ADRTimelineCanvas 
+              story={adrTimelineStory} 
+              currentStepIndex={adrTimelineStep}
+              onStepChange={setADRTimelineStep}
+            />
+          </div>
+        ) : isCloudCost ? (
+          <div style={{ flex: 1, position: 'relative' }}>
+            <CloudCostCanvas story={cloudCostStory} currentStepIndex={cloudCostStep} onStepChange={setCloudCostStep} />
+          </div>
+        ) : isDepGraph ? (
+          <div style={{ flex: 1, position: 'relative' }}>
+            <DependencyGraphCanvas story={depGraphStory} currentStepIndex={depGraphStep} onStepChange={setDepGraphStep} />
+          </div>
+        ) : isMigration ? (
+          <div style={{ flex: 1, position: 'relative' }}>
+            <MigrationRoadmapCanvas story={migrationStory} currentStepIndex={migrationStep} onStepChange={setMigrationStep} />
+          </div>
+        ) : isTeamOwnership ? (
+          <div style={{ flex: 1, position: 'relative' }}>
+            <TeamOwnershipCanvas story={teamOwnershipStory} currentStepIndex={teamOwnershipStep} onStepChange={setTeamOwnershipStep} />
+          </div>
         ) : (
           <>
             <StoryCanvas showMinimap showControls showBackground showNavigation={false} useNewLayout />

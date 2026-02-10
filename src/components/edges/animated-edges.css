@@ -1,5 +1,6 @@
 /* ============================================
    Animated Event Edge Styles
+   Uses FlowStory Design System tokens
    ============================================ */
 
 /* Animated overlay container */
@@ -33,7 +34,7 @@
 
 /* Emitting phase - source node emphasis */
 .edge-phase-emitting .event-edge-icon {
-  animation: icon-pulse-emit 0.15s ease-out;
+  animation: icon-pulse-emit var(--transition-fast);
 }
 
 @keyframes icon-pulse-emit {
@@ -54,7 +55,7 @@
 
 /* Receiving phase - target emphasis */
 .edge-phase-receiving .event-edge-icon {
-  animation: icon-pulse-receive 0.15s ease-in;
+  animation: icon-pulse-receive var(--transition-fast);
 }
 
 @keyframes icon-pulse-receive {
@@ -65,7 +66,6 @@
 /* ============================================
    Reduced Motion
    ============================================ */
-
 @media (prefers-reduced-motion: reduce) {
   .animated-event-edge-overlays * {
     animation: none !important;
@@ -79,20 +79,39 @@
 
 /* ============================================
    Event Type Color Variants
+   Using design tokens
    ============================================ */
-
 .animated-edge-published .react-flow__edge-path {
-  stroke: #22c55e;
+  stroke: var(--edge-success);
 }
 
 .animated-edge-subscribed .react-flow__edge-path {
-  stroke: #3b82f6;
+  stroke: var(--edge-flow);
 }
 
 .animated-edge-command .react-flow__edge-path {
-  stroke: #f59e0b;
+  stroke: var(--node-event-border);
 }
 
 .animated-edge-query .react-flow__edge-path {
-  stroke: #8b5cf6;
+  stroke: var(--edge-async);
+}
+
+/* ============================================
+   Dark Mode
+   ============================================ */
+[data-theme="dark"] .animated-edge-published .react-flow__edge-path {
+  stroke: var(--node-action-border);
+}
+
+[data-theme="dark"] .animated-edge-subscribed .react-flow__edge-path {
+  stroke: var(--edge-flow);
+}
+
+[data-theme="dark"] .animated-edge-command .react-flow__edge-path {
+  stroke: var(--node-event-border);
+}
+
+[data-theme="dark"] .animated-edge-query .react-flow__edge-path {
+  stroke: var(--edge-async);
 }

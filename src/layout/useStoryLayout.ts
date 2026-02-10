@@ -170,7 +170,8 @@ export function useStoryLayout({
           actorId: storyNode.actorId,
           avatar: actor?.avatar,
           color: actor?.color,
-          variant: storyNode.data?.variant,
+          // Check top-level variant first, then data.variant
+          variant: (storyNode as any).variant || storyNode.data?.variant,
           size: storyNode.size,
           effects: storyNode.effects,
         },
@@ -272,38 +273,38 @@ export function useStoryLayout({
     setCamera(newCamera);
   }, [adjustedNodes, activeNodeIds, completedNodeIds, viewport]);
 
-  // Update camera when step changes (if step has camera override)
+  // Update camera when step changes (only if step has explicit camera override)
   useEffect(() => {
     if (!enabled || !currentStep) return;
 
     const stepCamera = (currentStep as any)?.camera;
-    if (stepCamera) {
-      const targetCamera: Camera = {
-        center: stepCamera.center || camera.center,
-        zoom: stepCamera.zoom ?? camera.zoom,
-        bounds: stepCamera.bounds || camera.bounds,
-      };
+    if (!stepCamera) return; // No camera override = don't move camera
 
-      // Animate to new camera position
-      const duration = stepCamera.transition || 300;
-      const startCamera = camera;
-      const startTime = performance.now();
+    const targetCamera: Camera = {
+      center: stepCamera.center || camera.center,
+      zoom: stepCamera.zoom ?? camera.zoom,
+      bounds: stepCamera.bounds || camera.bounds,
+    };
 
-      const animate = () => {
-        const elapsed = performance.now() - startTime;
-        const progress = Math.min(1, elapsed / duration);
+    // Animate to new camera position
+    const duration = stepCamera.transition || 300;
+    const startCamera = { ...camera };
+    const startTime = performance.now();
 
-        if (progress < 1) {
-          const interpolated = interpolateCamera(startCamera, targetCamera, progress, 'ease-out');
-          setCamera(interpolated);
-          requestAnimationFrame(animate);
-        } else {
-          setCamera(targetCamera);
-        }
-      };
+    const animate = () => {
+      const elapsed = performance.now() - startTime;
+      const progress = Math.min(1, elapsed / duration);
 
-      requestAnimationFrame(animate);
-    }
+      if (progress < 1) {
+        const interpolated = interpolateCamera(startCamera, targetCamera, progress, 'ease-out');
+        setCamera(interpolated);
+        requestAnimationFrame(animate);
+      } else {
+        setCamera(targetCamera);
+      }
+    };
+
+    requestAnimationFrame(animate);
   }, [currentStep, enabled]);
 
   return {

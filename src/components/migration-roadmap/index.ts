@@ -1,4 +1,5 @@
 export { PhaseNode } from './PhaseNode';
+export { MigrationRoadmapCanvas } from './MigrationRoadmapCanvas';
 export { TaskNode } from './TaskNode';
 
 import type { NodeTypes } from '@xyflow/react';

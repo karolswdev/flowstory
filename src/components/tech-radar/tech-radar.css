@@ -1,243 +1,207 @@
+/**
+ * Tech Radar Canvas Styles
+ * 
+ * Uses design tokens from styles/tokens.css
+ * Uses shared patterns from styles/canvas-common.css
+ */
+
 /* ============================================
-   Tech Radar Container
+   Canvas Container (extends .canvas-container)
    ============================================ */
-.tech-radar {
+
+.tech-radar-canvas {
+  position: relative;
   width: 100%;
   height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
+  background: var(--color-bg);
 }
 
-.tech-radar svg {
+.tech-radar-svg {
+  max-width: 100%;
+  max-height: calc(100vh - 200px);
   overflow: visible;
 }
 
 /* ============================================
    Radar Rings
    ============================================ */
+
 .radar-ring {
-  pointer-events: none;
+  fill: none;
+  stroke-width: var(--border-width);
+  transition: opacity var(--transition-normal);
 }
 
-.ring-background {
-  transition: opacity 0.3s ease;
+.radar-ring-fill {
+  transition: opacity var(--transition-normal);
 }
 
-.ring-border {
-  transition: opacity 0.3s ease;
-}
-
-.ring-label {
-  font-family: 'Inter', system-ui, sans-serif;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.ring-dimmed .ring-background,
-.ring-dimmed .ring-border,
-.ring-dimmed .ring-label {
-  opacity: 0.3 !important;
-}
-
-.ring-active .ring-background {
-  opacity: 1;
+.radar-ring-label {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  fill: var(--color-text-secondary);
+  text-anchor: middle;
 }
 
 /* ============================================
    Quadrant Labels
    ============================================ */
+
 .quadrant-label {
-  pointer-events: none;
-}
-
-.quadrant-label text {
-  font-family: 'Inter', system-ui, sans-serif;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.quadrant-dimmed text,
-.quadrant-dimmed rect {
-  opacity: 0.3 !important;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  fill: var(--color-text);
+  text-anchor: middle;
+  dominant-baseline: middle;
+  transition: opacity var(--transition-normal);
 }
 
 /* ============================================
-   Tech Blips
+   Technology Blips
    ============================================ */
+
 .tech-blip {
   cursor: pointer;
+  transition: transform var(--transition-fast);
 }
 
-.blip-circle {
-  transition: transform 0.2s ease;
-  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
-}
-
-.tech-blip:hover .blip-circle {
+.tech-blip:hover {
   transform: scale(1.2);
 }
 
-.blip-label {
-  font-family: 'Inter', system-ui, sans-serif;
+.tech-blip-circle {
+  stroke: white;
+  stroke-width: var(--border-width-thick);
+  transition: all var(--transition-fast);
+}
+
+.tech-blip.highlighted .tech-blip-circle {
+  stroke-width: 3px;
+  filter: drop-shadow(0 0 8px currentColor);
+}
+
+.tech-blip.hovered .tech-blip-circle {
+  transform: scale(1.3);
+}
+
+.tech-blip-label {
+  font-size: var(--fs-xs);
+  fill: var(--color-text);
+  text-anchor: middle;
   pointer-events: none;
-  text-shadow: 
-    -1px -1px 0 white,
-    1px -1px 0 white,
-    -1px 1px 0 white,
-    1px 1px 0 white;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
 }
 
-.blip-new {
-  filter: drop-shadow(0 0 4px rgba(255, 215, 0, 0.5));
+.tech-blip:hover .tech-blip-label,
+.tech-blip.highlighted .tech-blip-label {
+  opacity: 1;
 }
 
-.blip-movement {
-  font-weight: bold;
+.tech-blip-new {
+  fill: white;
+  stroke: none;
 }
 
-.blip-glow {
-  pointer-events: none;
-}
-
-/* Blip States */
-.blip-dimmed {
-  opacity: 0.3;
-}
-
-.blip-highlighted .blip-circle {
-  stroke-width: 3;
-}
-
-.blip-active .blip-circle {
-  stroke-width: 3;
-  filter: drop-shadow(0 0 8px rgba(33, 150, 243, 0.5));
+.tech-blip-moved {
+  font-size: 8px;
+  fill: white;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  font-weight: var(--fw-bold);
 }
 
 /* ============================================
-   Legend
+   Info Panel (extends .canvas-info)
    ============================================ */
-.radar-legend {
+
+.tech-radar-info {
   position: absolute;
-  bottom: 20px;
-  left: 20px;
-  background: white;
-  padding: 12px 16px;
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  font-family: 'Inter', system-ui, sans-serif;
-  font-size: 12px;
+  bottom: calc(var(--space-16) + var(--space-6));
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--color-bg-elevated);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4) var(--space-6);
+  max-width: 500px;
+  box-shadow: var(--shadow-lg);
 }
 
-.legend-title {
-  font-weight: 700;
-  margin-bottom: 8px;
-  color: #333;
+.tech-radar-info h3 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text);
 }
 
-.legend-item {
+.tech-radar-info p {
+  margin: 0;
+  font-size: var(--fs-md);
+  color: var(--color-text-secondary);
+}
+
+.tech-radar-info blockquote {
+  margin: var(--space-3) 0 0;
+  padding-left: var(--space-3);
+  border-left: 3px solid var(--color-primary);
+  font-style: italic;
+  color: var(--color-text-secondary);
+}
+
+.tech-radar-info cite {
+  display: block;
+  font-weight: var(--fw-medium);
+  font-style: normal;
+  color: var(--color-text);
+}
+
+/* ============================================
+   Navigation (extends .canvas-nav)
+   ============================================ */
+
+.tech-radar-nav {
+  position: absolute;
+  bottom: var(--space-5);
+  left: 50%;
+  transform: translateX(-50%);
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 4px;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-4);
+  background: var(--color-bg-elevated);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-full);
+  box-shadow: var(--shadow-md);
 }
 
-.legend-dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
+.tech-radar-nav button {
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast);
 }
 
-.legend-label {
-  color: #666;
+.tech-radar-nav button:hover:not(:disabled) {
+  background: var(--color-primary-hover);
 }
 
-.legend-new {
-  color: #FFD700;
-  font-size: 10px;
+.tech-radar-nav button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
-.legend-moved-up {
-  color: #4CAF50;
-  font-size: 10px;
-}
-
-.legend-moved-down {
-  color: #F44336;
-  font-size: 10px;
-}
-
-/* ============================================
-   Axis Lines
-   ============================================ */
-.radar-axis {
-  stroke: #e0e0e0;
-  stroke-width: 1;
-  stroke-dasharray: 4 4;
-}
-
-/* ============================================
-   Dark Mode
-   ============================================ */
-[data-theme="dark"] .radar-legend {
-  background: #2d2d2d;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-}
-
-[data-theme="dark"] .legend-title {
-  color: #e0e0e0;
-}
-
-[data-theme="dark"] .legend-label {
-  color: #aaa;
-}
-
-[data-theme="dark"] .blip-label {
-  fill: #e0e0e0;
-  text-shadow: 
-    -1px -1px 0 #1e1e1e,
-    1px -1px 0 #1e1e1e,
-    -1px 1px 0 #1e1e1e,
-    1px 1px 0 #1e1e1e;
-}
-
-[data-theme="dark"] .ring-label {
-  fill-opacity: 0.9;
-}
-
-[data-theme="dark"] .quadrant-label rect {
-  fill-opacity: 0.2;
-}
-
-[data-theme="dark"] .radar-axis {
-  stroke: #444;
-}
-
-/* ============================================
-   Animations
-   ============================================ */
-@keyframes blip-pulse {
-  0%, 100% {
-    transform: scale(1);
-  }
-  50% {
-    transform: scale(1.1);
-  }
-}
-
-.blip-active .blip-circle {
-  animation: blip-pulse 1.5s ease-in-out infinite;
-}
-
-@keyframes ring-sweep {
-  0% {
-    stroke-dashoffset: 1000;
-  }
-  100% {
-    stroke-dashoffset: 0;
-  }
-}
-
-.ring-active .ring-border {
-  animation: ring-sweep 2s ease-out;
+.tech-radar-nav span {
+  font-size: var(--fs-sm);
+  color: var(--color-text-secondary);
+  min-width: 50px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }

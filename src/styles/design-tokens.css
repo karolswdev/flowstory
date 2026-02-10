@@ -1,0 +1,131 @@
+/* ============================================
+   FlowStory Design Tokens
+   Clean, modern, professional design system
+   ============================================ */
+
+:root {
+  /* ========== Typography ========== */
+  --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  
+  /* Font sizes - modular scale */
+  --font-size-xs: 10px;
+  --font-size-sm: 12px;
+  --font-size-md: 14px;
+  --font-size-lg: 16px;
+  --font-size-xl: 18px;
+  
+  /* Line heights */
+  --line-height-tight: 1.2;
+  --line-height-normal: 1.4;
+  --line-height-relaxed: 1.6;
+
+  /* ========== Spacing ========== */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* ========== Border Radius ========== */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-full: 9999px;
+
+  /* ========== Shadows - subtle, modern ========== */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 2px 4px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-lg: 0 4px 8px rgba(0, 0, 0, 0.06), 0 2px 4px rgba(0, 0, 0, 0.04);
+  --shadow-focus: 0 0 0 3px rgba(59, 130, 246, 0.3);
+
+  /* ========== Node Colors - clean, flat ========== */
+  
+  /* System nodes - blue */
+  --node-system-bg: #EFF6FF;
+  --node-system-border: #3B82F6;
+  --node-system-text: #1E40AF;
+  --node-system-icon: #3B82F6;
+  
+  /* Action nodes - green */
+  --node-action-bg: #F0FDF4;
+  --node-action-border: #22C55E;
+  --node-action-text: #166534;
+  --node-action-icon: #22C55E;
+  
+  /* Event nodes - amber */
+  --node-event-bg: #FFFBEB;
+  --node-event-border: #F59E0B;
+  --node-event-text: #92400E;
+  --node-event-icon: #F59E0B;
+  
+  /* Decision nodes - orange */
+  --node-decision-bg: #FFF7ED;
+  --node-decision-border: #F97316;
+  --node-decision-text: #9A3412;
+  --node-decision-icon: #F97316;
+  
+  /* State nodes - variants (more visible backgrounds) */
+  --node-state-success-bg: #DCFCE7;
+  --node-state-success-border: #22C55E;
+  --node-state-success-text: #166534;
+  
+  --node-state-error-bg: #FEE2E2;
+  --node-state-error-border: #EF4444;
+  --node-state-error-text: #991B1B;
+  
+  --node-state-warning-bg: #FEF3C7;
+  --node-state-warning-border: #F59E0B;
+  --node-state-warning-text: #92400E;
+  
+  --node-state-info-bg: #DBEAFE;
+  --node-state-info-border: #3B82F6;
+  --node-state-info-text: #1E40AF;
+  
+  --node-state-danger-bg: #FEE2E2;
+  --node-state-danger-border: #EF4444;
+  --node-state-danger-text: #991B1B;
+  
+  /* Actor nodes - purple */
+  --node-actor-bg: #FAF5FF;
+  --node-actor-border: #A855F7;
+  --node-actor-text: #6B21A8;
+  --node-actor-icon: #A855F7;
+
+  /* ========== Edge Colors ========== */
+  --edge-default: #94A3B8;
+  --edge-flow: #3B82F6;
+  --edge-error: #EF4444;
+  --edge-success: #22C55E;
+  --edge-async: #8B5CF6;
+
+  /* ========== Misc ========== */
+  --node-border-width: 1.5px;
+  --transition-fast: 150ms ease;
+  --transition-normal: 200ms ease;
+}
+
+/* Dark mode overrides */
+[data-theme="dark"] {
+  --node-system-bg: #1E3A5F;
+  --node-system-border: #60A5FA;
+  --node-system-text: #BFDBFE;
+  
+  --node-action-bg: #14532D;
+  --node-action-border: #4ADE80;
+  --node-action-text: #BBF7D0;
+  
+  --node-event-bg: #451A03;
+  --node-event-border: #FBBF24;
+  --node-event-text: #FEF3C7;
+  
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 2px 4px rgba(0, 0, 0, 0.25);
+  --shadow-lg: 0 4px 8px rgba(0, 0, 0, 0.3);
+}

@@ -1,5 +1,6 @@
 /* ============================================
    Migration Roadmap Styles
+   FlowStory Design System
    ============================================ */
 
 /* ============================================
@@ -8,17 +9,18 @@
 .mr-phase {
   min-width: 200px;
   background: white;
-  border: 2px solid #e0e0e0;
-  border-radius: 12px;
-  padding: 16px;
-  font-family: 'Inter', system-ui, sans-serif;
+  border: var(--node-border-width) solid var(--edge-default);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  font-family: var(--font-family);
   position: relative;
   overflow: hidden;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .mr-phase:hover {
-  border-color: var(--status-color, #2196F3);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  border-color: var(--status-color, var(--node-system-border));
+  box-shadow: var(--shadow-md);
 }
 
 /* Status bar */
@@ -27,59 +29,59 @@
   top: 0;
   left: 0;
   right: 0;
-  height: 4px;
+  height: var(--space-1);
 }
 
 /* Timeline badge */
 .mr-timeline {
   position: absolute;
-  top: 8px;
-  right: 8px;
-  background: #f0f0f0;
-  padding: 4px 10px;
-  border-radius: 12px;
-  font-size: 11px;
-  font-weight: 600;
-  color: #666;
+  top: var(--space-2);
+  right: var(--space-2);
+  background: var(--node-system-bg);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-lg);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--edge-default);
 }
 
 /* Phase header */
 .mr-phase-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-top: 8px;
-  margin-bottom: 8px;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  margin-bottom: var(--space-2);
 }
 
 .mr-status-icon {
-  font-size: 16px;
+  font-size: var(--font-size-lg);
 }
 
 .mr-phase-name {
-  font-size: 16px;
-  font-weight: 700;
-  color: #333;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  color: var(--node-system-text);
 }
 
 .mr-phase-desc {
-  font-size: 12px;
-  color: #666;
-  margin-bottom: 12px;
-  line-height: 1.4;
+  font-size: var(--font-size-sm);
+  color: var(--edge-default);
+  margin-bottom: var(--space-3);
+  line-height: var(--line-height-normal);
 }
 
 /* Progress bar */
 .mr-progress-container {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .mr-progress-bar {
   flex: 1;
   height: 6px;
-  background: #e0e0e0;
+  background: var(--node-system-bg);
   border-radius: 3px;
   overflow: hidden;
 }
@@ -90,27 +92,27 @@
 }
 
 .mr-progress-text {
-  font-size: 12px;
-  font-weight: 600;
-  color: #666;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--edge-default);
   min-width: 36px;
 }
 
 /* Milestones */
 .mr-milestones {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid #eee;
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: var(--node-border-width) solid var(--node-system-bg);
 }
 
 .mr-milestone {
-  font-size: 11px;
-  color: #888;
+  font-size: var(--font-size-xs);
+  color: var(--edge-default);
   padding: 2px 0;
 }
 
 .mr-milestone.mr-done {
-  color: #4CAF50;
+  color: var(--edge-success);
 }
 
 /* ============================================
@@ -119,57 +121,58 @@
 .mr-task {
   min-width: 160px;
   background: white;
-  border: 2px solid #e0e0e0;
-  border-radius: 8px;
+  border: var(--node-border-width) solid var(--edge-default);
+  border-radius: var(--radius-md);
   display: flex;
   overflow: hidden;
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--font-family);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .mr-task:hover {
-  border-color: var(--status-color, #2196F3);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border-color: var(--status-color, var(--node-system-border));
+  box-shadow: var(--shadow-sm);
 }
 
 /* Status indicator (left strip) */
 .mr-task-status {
-  width: 32px;
+  width: var(--space-8);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
+  font-size: var(--font-size-md);
 }
 
 /* Task content */
 .mr-task-content {
   flex: 1;
-  padding: 10px 12px;
+  padding: var(--space-3);
 }
 
 .mr-task-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: #333;
-  margin-bottom: 4px;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--node-system-text);
+  margin-bottom: var(--space-1);
 }
 
 .mr-task-desc {
-  font-size: 11px;
-  color: #666;
-  margin-bottom: 6px;
+  font-size: var(--font-size-xs);
+  color: var(--edge-default);
+  margin-bottom: var(--space-2);
 }
 
 .mr-task-progress {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 6px;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
 }
 
 .mr-task-progress-bar {
   flex: 1;
-  height: 4px;
-  background: #e0e0e0;
+  height: var(--space-1);
+  background: var(--node-system-bg);
   border-radius: 2px;
   overflow: hidden;
 }
@@ -179,29 +182,29 @@
 }
 
 .mr-task-progress span {
-  font-size: 10px;
-  color: #666;
+  font-size: var(--font-size-xs);
+  color: var(--edge-default);
 }
 
 .mr-task-owner {
-  font-size: 10px;
-  color: #999;
+  font-size: var(--font-size-xs);
+  color: var(--edge-default);
 }
 
 .mr-task-risk {
   display: inline-block;
   font-size: 9px;
   color: white;
-  padding: 2px 6px;
-  border-radius: 4px;
-  margin-top: 4px;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  margin-top: var(--space-1);
   text-transform: capitalize;
 }
 
 .mr-task-notes {
-  font-size: 10px;
-  color: #F44336;
-  margin-top: 6px;
+  font-size: var(--font-size-xs);
+  color: var(--edge-error);
+  margin-top: var(--space-2);
   font-style: italic;
 }
 
@@ -213,19 +216,19 @@
 }
 
 .mr-highlighted {
-  border-color: var(--status-color, #2196F3);
-  box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.2), 0 4px 16px rgba(0, 0, 0, 0.15);
+  border-color: var(--status-color, var(--node-system-border));
+  box-shadow: var(--shadow-focus), var(--shadow-md);
   z-index: 100;
 }
 
 .mr-active {
-  border-color: var(--status-color, #2196F3);
-  box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.3), 0 8px 24px rgba(0, 0, 0, 0.2);
+  border-color: var(--status-color, var(--node-system-border));
+  box-shadow: var(--shadow-focus), var(--shadow-lg);
   z-index: 100;
 }
 
 .node-selected {
-  outline: 3px solid #FFD700;
+  outline: 3px solid var(--node-event-border);
   outline-offset: 2px;
 }
 
@@ -233,15 +236,15 @@
    Handles
    ============================================ */
 .mr-handle {
-  width: 8px;
-  height: 8px;
-  background: #B0BEC5;
+  width: var(--space-2);
+  height: var(--space-2);
+  background: var(--edge-default);
   border: 2px solid white;
 }
 
 .mr-phase:hover .mr-handle,
 .mr-task:hover .mr-handle {
-  background: var(--status-color, #2196F3);
+  background: var(--status-color, var(--node-system-border));
 }
 
 /* ============================================
@@ -280,3 +283,24 @@
 [data-theme="dark"] .mr-milestone {
   color: #888;
 }
+
+.migration-canvas { position: relative; padding: 24px; height: 100%; background: var(--color-bg); overflow: auto; }
+.migration-canvas h2 { margin: 0 0 24px; }
+.phases-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+.phase-card { padding: 16px; background: var(--color-bg-elevated); border: 1px solid var(--color-border); border-left-width: 4px; border-radius: 8px; }
+.phase-card.highlighted { box-shadow: var(--shadow-lg); }
+.phase-header { display: flex; justify-content: space-between; margin-bottom: 8px; }
+.phase-name { font-weight: 600; }
+.phase-dates { font-size: 12px; color: var(--color-text-secondary); margin-bottom: 12px; }
+.phase-progress { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.progress-bar { flex: 1; height: 6px; background: var(--color-bg); border-radius: 3px; }
+.progress-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+.task-item { font-size: 12px; padding: 4px 0; }
+.task-item.status-done { color: #4CAF50; }
+.task-item.status-blocked { color: #F44336; }
+.migration-info { position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%); background: var(--color-bg-elevated); border: 1px solid var(--color-border); border-radius: 8px; padding: 16px 24px; max-width: 500px; }
+.migration-info h3 { margin: 0 0 8px; }
+.migration-info p { margin: 0; color: var(--color-text-secondary); }
+.migration-nav { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 16px; padding: 8px 16px; background: var(--color-bg-elevated); border: 1px solid var(--color-border); border-radius: 24px; }
+.migration-nav button { padding: 6px 12px; border: none; background: var(--color-primary); color: white; border-radius: 4px; cursor: pointer; }
+.migration-nav button:disabled { opacity: 0.5; cursor: not-allowed; }

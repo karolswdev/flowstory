@@ -114,27 +114,47 @@ steps:
     nodeIds: [start]
     edgeIds: []
     narrative: "A user enters the flow."
+    camera:
+      center: [-300, 0]
+      zoom: 1.2
+      transition: 400
 
   - id: step-2
     title: "Initiates Action"
     nodeIds: [start, action-1]
     edgeIds: [e1]
     narrative: "User initiates the form submission process."
+    camera:
+      center: [-200, 0]
+      zoom: 1
+      transition: 400
 
   - id: step-3
     title: "Form Submission"
     nodeIds: [start, action-1, process]
     edgeIds: [e1, e2]
     narrative: "The form is submitted for processing."
+    camera:
+      center: [-100, 0]
+      zoom: 0.85
+      transition: 400
 
   - id: step-4
     title: "Validation Error Path"
     nodeIds: [start, action-1, process, error]
     edgeIds: [e1, e2, e3]
     narrative: "When validation fails, the error state appears with shake effect."
+    camera:
+      center: [0, 40]
+      zoom: 0.8
+      transition: 400
 
   - id: step-5
     title: "Success Path"
     nodeIds: [start, action-1, process, success]
     edgeIds: [e1, e2, e4]
     narrative: "When everything validates - celebration with emoji explosion!"
+    camera:
+      center: [0, 0]
+      zoom: 0.7
+      transition: 500

@@ -1,5 +1,6 @@
 import { NodeHandles } from './NodeHandles';
 import { getNodeSize, getSizeStyles } from './sizes';
+import { PlayIcon } from './icons';
 import { motion, AnimatePresence } from 'motion/react';
 import type { ActionNodeProps } from './types';
 import { nodeVariants, pulseVariants, getNodeAnimationState } from '../../animations/nodeVariants';
@@ -45,7 +46,9 @@ export function ActionNode({ data, selected }: ActionNodeProps) {
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.1, duration: 0.3 }}
       >
-        <span className="action-icon">👆</span>
+        <div className="action-icon">
+          <PlayIcon size={14} />
+        </div>
         <div className="action-label">{label}</div>
       </motion.div>
 

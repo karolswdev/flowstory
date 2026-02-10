@@ -1,4 +1,9 @@
 /* ============================================
+   FlowStory Edge Styles
+   Uses design tokens from design-tokens.css
+   ============================================ */
+
+/* ============================================
    Edge Particles
    ============================================ */
 .edge-particle {
@@ -9,7 +14,6 @@
   pointer-events: none;
 }
 
-/* Particle trail effect */
 @keyframes particle-pulse {
   0%, 100% {
     transform: scale(1);
@@ -28,40 +32,35 @@
 /* ============================================
    Base Edge Styles
    ============================================ */
-
-/* React Flow edge path styling via CSS classes */
 .react-flow__edge-path {
-  stroke-width: 2.5;
+  stroke-width: 2px;
   fill: none;
+  transition: stroke var(--transition-fast);
 }
 
-/* Architectural canvas gets thicker edges for visibility */
 .architectural-canvas .react-flow__edge-path {
-  stroke-width: 3;
+  stroke-width: 2.5px;
 }
 
-/* Selection state */
 .edge-selected .react-flow__edge-path {
-  stroke-width: 3;
+  stroke-width: 2.5px;
 }
 
-/* Active state - highlighted during current step */
 .edge-active .react-flow__edge-path {
-  stroke-width: 3;
-  filter: drop-shadow(0 0 4px rgba(33, 150, 243, 0.6));
+  stroke-width: 2.5px;
+  filter: drop-shadow(0 0 4px var(--edge-flow));
   animation: edge-pulse 1.5s ease-in-out infinite;
 }
 
 @keyframes edge-pulse {
   0%, 100% {
-    filter: drop-shadow(0 0 4px rgba(33, 150, 243, 0.6));
+    filter: drop-shadow(0 0 4px var(--edge-flow));
   }
   50% {
-    filter: drop-shadow(0 0 8px rgba(33, 150, 243, 0.9));
+    filter: drop-shadow(0 0 8px var(--edge-flow));
   }
 }
 
-/* Path tracing animation for new edges */
 .edge-trace .react-flow__edge-path {
   stroke-dasharray: 1000;
   stroke-dashoffset: 1000;
@@ -75,142 +74,152 @@
 }
 
 /* ============================================
-   Flow Edge - Solid arrow
+   Flow Edge - Solid arrow (success/happy path)
    ============================================ */
 .flow-edge .react-flow__edge-path {
-  stroke: #4CAF50;
+  stroke: var(--edge-success);
   stroke-dasharray: none;
 }
 
 .flow-edge.edge-active .react-flow__edge-path {
-  stroke: #2E7D32;
+  stroke: var(--node-action-text);
 }
 
 .flow-edge-label {
+  font-family: var(--font-family);
   background: white;
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: 500;
-  color: #4CAF50;
-  border: 1px solid #4CAF50;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--node-action-text);
+  border: var(--node-border-width) solid var(--edge-success);
+  box-shadow: var(--shadow-sm);
 }
 
 /* ============================================
    Event Edge - Dashed with lightning
    ============================================ */
 .event-edge .react-flow__edge-path {
-  stroke: #FFC107;
+  stroke: var(--node-event-border);
   stroke-dasharray: 8 4;
 }
 
 .event-edge.edge-active .react-flow__edge-path {
-  stroke: #FF8F00;
+  stroke: var(--node-event-text);
 }
 
 .event-edge-icon {
   background: white;
-  border-radius: 50%;
+  border-radius: var(--radius-full);
   width: 24px;
   height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
-  border: 2px solid #FFC107;
+  font-size: var(--font-size-md);
+  border: var(--node-border-width) solid var(--node-event-border);
+  box-shadow: var(--shadow-sm);
 }
 
 .event-edge-icon.icon-active {
-  border-color: #FF8F00;
-  background: #FFF8E1;
+  border-color: var(--node-event-text);
+  background: var(--node-event-bg);
 }
 
 .event-edge-label {
+  font-family: var(--font-family);
   background: white;
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: 500;
-  color: #F57F17;
-  border: 1px solid #FFC107;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--node-event-text);
+  border: var(--node-border-width) solid var(--node-event-border);
+  box-shadow: var(--shadow-sm);
 }
 
 /* ============================================
    Error Edge - Red dashed
    ============================================ */
 .error-edge .react-flow__edge-path {
-  stroke: #F44336;
+  stroke: var(--edge-error);
   stroke-dasharray: 6 3;
 }
 
 .error-edge.edge-active .react-flow__edge-path {
-  stroke: #C62828;
+  stroke: var(--node-state-error-text);
 }
 
 .error-edge-label {
+  font-family: var(--font-family);
   background: white;
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: 500;
-  color: #C62828;
-  border: 1px solid #F44336;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--node-state-error-text);
+  border: var(--node-border-width) solid var(--edge-error);
+  box-shadow: var(--shadow-sm);
 }
 
 /* ============================================
    Async Edge - Dotted with clock
    ============================================ */
 .async-edge .react-flow__edge-path {
-  stroke: #9C27B0;
+  stroke: var(--edge-async);
   stroke-dasharray: 3 3;
 }
 
 .async-edge.edge-active .react-flow__edge-path {
-  stroke: #6A1B9A;
+  stroke: var(--node-actor-text);
 }
 
 .async-edge-icon {
   background: white;
-  border-radius: 50%;
+  border-radius: var(--radius-full);
   width: 24px;
   height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
-  border: 2px solid #9C27B0;
+  font-size: var(--font-size-md);
+  border: var(--node-border-width) solid var(--edge-async);
+  box-shadow: var(--shadow-sm);
 }
 
 .async-edge-icon.icon-active {
-  border-color: #6A1B9A;
-  background: #F3E5F5;
+  border-color: var(--node-actor-text);
+  background: var(--node-actor-bg);
 }
 
 .async-edge-label {
+  font-family: var(--font-family);
   background: white;
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: 500;
-  color: #6A1B9A;
-  border: 1px solid #9C27B0;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--node-actor-text);
+  border: var(--node-border-width) solid var(--edge-async);
+  box-shadow: var(--shadow-sm);
 }
 
 /* ============================================
-   Common Label Styles
+   Common Label & Icon Styles
    ============================================ */
 .edge-label {
-  font-family: 'Inter', system-ui, sans-serif;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  font-family: var(--font-family);
+  box-shadow: var(--shadow-sm);
   z-index: 10;
 }
 
 .edge-label.label-active {
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 
 .edge-icon {
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow-sm);
   z-index: 10;
 }
 
@@ -219,135 +228,136 @@
    ============================================ */
 
 /* Command Edge - Blue (synchronous command) */
-.command-edge {
-  stroke: #2196F3;
+.command-edge .react-flow__edge-path {
+  stroke: var(--edge-flow);
   stroke-dasharray: none;
 }
-.command-edge.edge-active {
-  stroke: #1565C0;
+
+.command-edge.edge-active .react-flow__edge-path {
+  stroke: var(--node-system-text);
 }
 
 /* Query Edge - Cyan (request/response) */
-.query-edge {
-  stroke: #00BCD4;
+.query-edge .react-flow__edge-path {
+  stroke: var(--node-state-info-border);
   stroke-dasharray: 4 4;
 }
-.query-edge.edge-active {
-  stroke: #00838F;
+
+.query-edge.edge-active .react-flow__edge-path {
+  stroke: var(--node-state-info-text);
 }
 
 /* Action Edge - Teal (user action) */
-.action-edge {
-  stroke: #009688;
+.action-edge .react-flow__edge-path {
+  stroke: var(--node-action-border);
   stroke-dasharray: none;
 }
-.action-edge.edge-active {
-  stroke: #00695C;
+
+.action-edge.edge-active .react-flow__edge-path {
+  stroke: var(--node-action-text);
 }
 
 /* Integration Edge - Indigo (external integration) */
-.integration-edge {
-  stroke: #3F51B5;
+.integration-edge .react-flow__edge-path {
+  stroke: var(--edge-async);
   stroke-dasharray: 6 3;
 }
-.integration-edge.edge-active {
-  stroke: #283593;
+
+.integration-edge.edge-active .react-flow__edge-path {
+  stroke: var(--node-actor-text);
 }
 
-/* Compensation Edge - Deep Orange (rollback) */
-.compensation-edge {
-  stroke: #FF5722;
+/* Compensation Edge - Orange (rollback) */
+.compensation-edge .react-flow__edge-path {
+  stroke: var(--node-decision-border);
   stroke-dasharray: 8 4;
 }
-.compensation-edge.edge-active {
-  stroke: #D84315;
+
+.compensation-edge.edge-active .react-flow__edge-path {
+  stroke: var(--node-decision-text);
 }
 
 /* ============================================
    Dark Mode Edge Styles
    ============================================ */
 [data-theme="dark"] .react-flow__edge-path {
-  filter: brightness(1.2);
+  filter: brightness(1.1);
 }
 
 [data-theme="dark"] .flow-edge .react-flow__edge-path {
-  stroke: #81C784;
-}
-[data-theme="dark"] .flow-edge.edge-active .react-flow__edge-path {
-  stroke: #A5D6A7;
+  stroke: var(--node-action-border);
 }
 
 [data-theme="dark"] .event-edge .react-flow__edge-path {
-  stroke: #FFD54F;
-}
-[data-theme="dark"] .event-edge.edge-active .react-flow__edge-path {
-  stroke: #FFEE58;
+  stroke: var(--node-event-border);
 }
 
 [data-theme="dark"] .error-edge .react-flow__edge-path {
-  stroke: #EF5350;
-}
-[data-theme="dark"] .error-edge.edge-active .react-flow__edge-path {
-  stroke: #E57373;
+  stroke: var(--edge-error);
 }
 
 [data-theme="dark"] .async-edge .react-flow__edge-path {
-  stroke: #BA68C8;
-}
-[data-theme="dark"] .async-edge.edge-active .react-flow__edge-path {
-  stroke: #CE93D8;
+  stroke: var(--edge-async);
 }
 
 [data-theme="dark"] .command-edge .react-flow__edge-path {
-  stroke: #64B5F6;
-}
-[data-theme="dark"] .query-edge .react-flow__edge-path {
-  stroke: #4DD0E1;
-}
-[data-theme="dark"] .action-edge .react-flow__edge-path {
-  stroke: #4DB6AC;
-}
-[data-theme="dark"] .integration-edge .react-flow__edge-path {
-  stroke: #7986CB;
-}
-[data-theme="dark"] .compensation-edge .react-flow__edge-path {
-  stroke: #FF8A65;
+  stroke: var(--edge-flow);
 }
 
-/* Dark mode edge labels */
+[data-theme="dark"] .query-edge .react-flow__edge-path {
+  stroke: var(--node-state-info-border);
+}
+
+[data-theme="dark"] .action-edge .react-flow__edge-path {
+  stroke: var(--node-action-border);
+}
+
+[data-theme="dark"] .integration-edge .react-flow__edge-path {
+  stroke: var(--edge-async);
+}
+
+[data-theme="dark"] .compensation-edge .react-flow__edge-path {
+  stroke: var(--node-decision-border);
+}
+
+/* Dark mode labels */
 [data-theme="dark"] .flow-edge-label,
 [data-theme="dark"] .event-edge-label,
 [data-theme="dark"] .error-edge-label,
 [data-theme="dark"] .async-edge-label,
 [data-theme="dark"] .edge-label {
-  background: #2d2d2d;
-  border-color: rgba(255, 255, 255, 0.2);
+  background: #1e1e2e;
+  border-color: rgba(255, 255, 255, 0.15);
 }
 
 [data-theme="dark"] .flow-edge-label {
-  color: #81C784;
-}
-[data-theme="dark"] .event-edge-label {
-  color: #FFD54F;
-}
-[data-theme="dark"] .error-edge-label {
-  color: #EF5350;
-}
-[data-theme="dark"] .async-edge-label {
-  color: #BA68C8;
+  color: var(--node-action-border);
 }
 
-/* Dark mode edge icons */
+[data-theme="dark"] .event-edge-label {
+  color: var(--node-event-border);
+}
+
+[data-theme="dark"] .error-edge-label {
+  color: var(--edge-error);
+}
+
+[data-theme="dark"] .async-edge-label {
+  color: var(--edge-async);
+}
+
+/* Dark mode icons */
 [data-theme="dark"] .event-edge-icon,
 [data-theme="dark"] .async-edge-icon,
 [data-theme="dark"] .edge-icon {
-  background: #2d2d2d;
-  border-color: rgba(255, 255, 255, 0.3);
+  background: #1e1e2e;
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 [data-theme="dark"] .event-edge-icon.icon-active {
-  background: #3d3d3d;
+  background: #2a2a3e;
 }
+
 [data-theme="dark"] .async-edge-icon.icon-active {
-  background: #3d3d3d;
+  background: #2a2a3e;
 }

@@ -155,78 +155,94 @@ steps:
     nodeIds: [trigger]
     edgeIds: []
     narrative: A developer pushes code to the main branch.
+    camera: { center: [0, -504], zoom: 1.2, transition: 400 }
 
   - id: step-2
     nodeIds: [trigger, build-stage]
     edgeIds: [e1]
     narrative: This triggers the CI/CD pipeline's Build Stage.
+    camera: { center: [0, -454], zoom: 1, transition: 400 }
 
   - id: step-3
     nodeIds: [trigger, build-stage, compile]
     edgeIds: [e1, e2]
     narrative: First, the code is compiled.
+    camera: { center: [-100, -354], zoom: 0.9, transition: 400 }
 
   - id: step-4
     nodeIds: [trigger, build-stage, compile, lint]
     edgeIds: [e1, e2, e3]
     narrative: In parallel, linting checks code quality.
+    camera: { center: [0, -354], zoom: 0.85, transition: 400 }
 
   - id: step-5
     nodeIds: [trigger, build-stage, compile, lint, build-image]
     edgeIds: [e1, e2, e3, e4]
     narrative: And the Docker image is built.
+    camera: { center: [0, -340], zoom: 0.75, transition: 400 }
 
   - id: step-6
     nodeIds: [trigger, build-stage, compile, lint, build-image, test-stage]
     edgeIds: [e1, e2, e3, e4, e5, e6, e7]
     narrative: Once all build jobs complete, the Test Stage begins.
+    camera: { center: [0, -240], zoom: 0.7, transition: 500 }
 
   - id: step-7
     nodeIds: [trigger, build-stage, compile, lint, build-image, test-stage, unit-tests]
     edgeIds: [e1, e2, e3, e4, e5, e6, e7, e8]
     narrative: Unit tests verify individual components.
+    camera: { center: [-100, -124], zoom: 0.75, transition: 400 }
 
   - id: step-8
     nodeIds: [trigger, build-stage, compile, lint, build-image, test-stage, unit-tests, integration-tests]
     edgeIds: [e1, e2, e3, e4, e5, e6, e7, e8, e9]
     narrative: Integration tests verify system interactions.
+    camera: { center: [0, -124], zoom: 0.7, transition: 400 }
 
   - id: step-9
     nodeIds: [trigger, build-stage, compile, lint, build-image, test-stage, unit-tests, integration-tests, security-scan]
     edgeIds: [e1, e2, e3, e4, e5, e6, e7, e8, e9, e10]
     narrative: Security scan checks for vulnerabilities.
+    camera: { center: [0, -100], zoom: 0.65, transition: 400 }
 
   - id: step-10
     nodeIds: [trigger, build-stage, compile, lint, build-image, test-stage, unit-tests, integration-tests, security-scan, approval-gate]
     edgeIds: [e1, e2, e3, e4, e5, e6, e7, e8, e9, e10, e11, e12, e13]
     narrative: All tests pass. Now waiting for approval.
+    camera: { center: [0, 0], zoom: 0.6, transition: 500 }
 
   - id: step-11
     nodeIds: [trigger, build-stage, compile, lint, build-image, test-stage, unit-tests, integration-tests, security-scan, approval-gate, deploy-staging]
     edgeIds: [e1, e2, e3, e4, e5, e6, e7, e8, e9, e10, e11, e12, e13, e14]
     narrative: Approved! Deploying to staging environment.
+    camera: { center: [0, 106], zoom: 0.65, transition: 400 }
 
   - id: step-12
     nodeIds: [trigger, build-stage, compile, lint, build-image, test-stage, unit-tests, integration-tests, security-scan, approval-gate, deploy-staging, deploy-prod-stage]
     edgeIds: [e1, e2, e3, e4, e5, e6, e7, e8, e9, e10, e11, e12, e13, e14, e15]
     narrative: Staging validated. Production deployment begins.
+    camera: { center: [0, 230], zoom: 0.65, transition: 400 }
 
   - id: step-13
     nodeIds: [trigger, build-stage, compile, lint, build-image, test-stage, unit-tests, integration-tests, security-scan, approval-gate, deploy-staging, deploy-prod-stage, deploy-us-east]
     edgeIds: [e1, e2, e3, e4, e5, e6, e7, e8, e9, e10, e11, e12, e13, e14, e15, e16]
     narrative: Deploying to US-East region.
+    camera: { center: [-75, 346], zoom: 0.7, transition: 400 }
 
   - id: step-14
     nodeIds: [trigger, build-stage, compile, lint, build-image, test-stage, unit-tests, integration-tests, security-scan, approval-gate, deploy-staging, deploy-prod-stage, deploy-us-east, deploy-us-west]
     edgeIds: [e1, e2, e3, e4, e5, e6, e7, e8, e9, e10, e11, e12, e13, e14, e15, e16, e17]
     narrative: Deploying to US-West region.
+    camera: { center: [0, 346], zoom: 0.65, transition: 400 }
 
   - id: step-15
     nodeIds: [trigger, build-stage, compile, lint, build-image, test-stage, unit-tests, integration-tests, security-scan, approval-gate, deploy-staging, deploy-prod-stage, deploy-us-east, deploy-us-west, deploy-eu]
     edgeIds: [e1, e2, e3, e4, e5, e6, e7, e8, e9, e10, e11, e12, e13, e14, e15, e16, e17, e18]
     narrative: Deploying to EU-West region.
+    camera: { center: [0, 396], zoom: 0.6, transition: 400 }
 
   - id: step-16
     nodeIds: [trigger, build-stage, compile, lint, build-image, test-stage, unit-tests, integration-tests, security-scan, approval-gate, deploy-staging, deploy-prod-stage, deploy-us-east, deploy-us-west, deploy-eu, complete]
     edgeIds: [e1, e2, e3, e4, e5, e6, e7, e8, e9, e10, e11, e12, e13, e14, e15, e16, e17, e18, e19, e20, e21]
     narrative: All regions deployed. Pipeline complete!
+    camera: { center: [0, 100], zoom: 0.45, transition: 600 }

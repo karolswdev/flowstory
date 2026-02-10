@@ -1,6 +1,7 @@
 export { C4PersonNode } from './C4PersonNode';
 export { C4SystemNode } from './C4SystemNode';
 export { C4ExternalNode } from './C4ExternalNode';
+export { C4ContextCanvas } from './C4ContextCanvas';
 
 import type { NodeTypes } from '@xyflow/react';
 import { C4PersonNode } from './C4PersonNode';

@@ -1,5 +1,6 @@
 /* ============================================
    Cloud Cost Map Styles
+   FlowStory Design System
    ============================================ */
 
 /* ============================================
@@ -7,18 +8,19 @@
    ============================================ */
 .cc-block {
   background: white;
-  border: 2px solid #e0e0e0;
-  border-radius: 8px;
-  padding: 12px;
-  font-family: 'Inter', system-ui, sans-serif;
+  border: var(--node-border-width) solid var(--edge-default);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  font-family: var(--font-family);
   position: relative;
   overflow: hidden;
   min-width: 120px;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .cc-block:hover {
-  border-color: var(--block-color, #2196F3);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  border-color: var(--block-color, var(--node-system-border));
+  box-shadow: var(--shadow-md);
 }
 
 /* Color bar at top */
@@ -27,23 +29,23 @@
   top: 0;
   left: 0;
   right: 0;
-  height: 4px;
+  height: var(--space-1);
 }
 
 /* Category block (larger) */
 .cc-category {
   min-width: 160px;
   min-height: 100px;
-  background: var(--block-color-light, #f5f5f5);
+  background: var(--block-color-light, var(--node-system-bg));
 }
 
 .cc-category .cc-name {
-  font-size: 14px;
-  font-weight: 700;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
 }
 
 .cc-category .cc-spend {
-  font-size: 24px;
+  font-size: var(--font-size-xl);
 }
 
 /* Resource block */
@@ -53,11 +55,11 @@
 
 /* Name */
 .cc-name {
-  font-size: 12px;
-  font-weight: 600;
-  color: #333;
-  margin-top: 4px;
-  margin-bottom: 6px;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--node-system-text);
+  margin-top: var(--space-1);
+  margin-bottom: var(--space-2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -65,51 +67,51 @@
 
 /* Spend amount */
 .cc-spend {
-  font-size: 18px;
-  font-weight: 700;
-  color: #333;
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--node-system-text);
 }
 
 .cc-over-budget {
-  color: #F44336;
+  color: var(--edge-error);
 }
 
 /* Budget */
 .cc-budget {
-  font-size: 11px;
-  color: #666;
+  font-size: var(--font-size-xs);
+  color: var(--edge-default);
   margin-top: 2px;
 }
 
 .cc-over {
-  margin-left: 4px;
+  margin-left: var(--space-1);
 }
 
 /* Trend indicator */
 .cc-trend {
-  font-size: 12px;
-  font-weight: 600;
-  margin-top: 6px;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  margin-top: var(--space-2);
 }
 
 /* Team */
 .cc-team {
-  font-size: 10px;
-  color: #999;
-  margin-top: 6px;
+  font-size: var(--font-size-xs);
+  color: var(--edge-default);
+  margin-top: var(--space-2);
 }
 
 /* Optimization opportunity */
 .cc-optimize {
   position: absolute;
-  top: 8px;
-  right: 8px;
-  font-size: 10px;
-  background: #FFF3E0;
-  color: #E65100;
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-weight: 600;
+  top: var(--space-2);
+  right: var(--space-2);
+  font-size: var(--font-size-xs);
+  background: var(--node-event-bg);
+  color: var(--node-decision-text);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  font-weight: var(--font-weight-semibold);
 }
 
 /* ============================================
@@ -120,19 +122,19 @@
 }
 
 .cc-highlighted {
-  border-color: var(--block-color, #2196F3);
-  box-shadow: 0 0 0 3px var(--block-color-light, rgba(33, 150, 243, 0.2)), 0 4px 12px rgba(0, 0, 0, 0.15);
+  border-color: var(--block-color, var(--node-system-border));
+  box-shadow: var(--shadow-focus), var(--shadow-md);
   z-index: 100;
 }
 
 .cc-active {
-  border-color: var(--block-color, #2196F3);
-  box-shadow: 0 0 0 3px var(--block-color-light, rgba(33, 150, 243, 0.3)), 0 8px 24px rgba(0, 0, 0, 0.2);
+  border-color: var(--block-color, var(--node-system-border));
+  box-shadow: var(--shadow-focus), var(--shadow-lg);
   z-index: 100;
 }
 
 .node-selected {
-  outline: 3px solid #FFD700;
+  outline: 3px solid var(--node-event-border);
   outline-offset: 2px;
 }
 
@@ -140,31 +142,33 @@
    Handles
    ============================================ */
 .cc-handle {
-  width: 8px;
-  height: 8px;
-  background: #B0BEC5;
+  width: var(--space-2);
+  height: var(--space-2);
+  background: var(--edge-default);
   border: 2px solid white;
   opacity: 0;
+  transition: opacity var(--transition-fast);
 }
 
 .cc-block:hover .cc-handle {
   opacity: 1;
-  background: var(--block-color, #2196F3);
+  background: var(--block-color, var(--node-system-border));
 }
 
 /* ============================================
    Summary Card
    ============================================ */
 .cc-summary {
-  background: linear-gradient(135deg, #1976D2 0%, #1565C0 100%);
+  background: var(--node-system-border);
   color: white;
-  padding: 16px 20px;
-  border-radius: 12px;
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-lg);
   min-width: 200px;
+  box-shadow: var(--shadow-md);
 }
 
 .cc-summary-label {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   opacity: 0.8;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -172,19 +176,19 @@
 
 .cc-summary-value {
   font-size: 32px;
-  font-weight: 700;
-  margin: 4px 0;
+  font-weight: var(--font-weight-bold);
+  margin: var(--space-1) 0;
 }
 
 .cc-summary-budget {
-  font-size: 14px;
+  font-size: var(--font-size-md);
   opacity: 0.9;
 }
 
 .cc-summary-period {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   opacity: 0.7;
-  margin-top: 8px;
+  margin-top: var(--space-2);
 }
 
 /* ============================================
@@ -218,3 +222,141 @@
 [data-theme="dark"] .cc-optimize {
   background: #3d2a1a;
 }
+
+/* ============================================
+   Cloud Cost Canvas
+   ============================================ */
+.cloud-cost-canvas {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  background: var(--color-bg);
+  overflow: auto;
+}
+
+.cost-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.cost-header h2 { margin: 0; font-size: 24px; }
+
+.cost-totals { font-size: 20px; }
+.total-spend { font-weight: 700; color: var(--color-primary); }
+.total-budget { color: var(--color-text-secondary); }
+
+.cost-bars { display: flex; flex-direction: column; gap: 12px; }
+
+.cost-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.cost-bar-label {
+  width: 120px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.cost-bar-container {
+  flex: 1;
+  max-width: 300px;
+  height: 24px;
+  background: var(--color-bg-elevated);
+  border-radius: 4px;
+  position: relative;
+  overflow: hidden;
+}
+
+.cost-bar-budget {
+  position: absolute;
+  height: 100%;
+  border-right: 2px dashed var(--color-text-secondary);
+  opacity: 0.3;
+}
+
+.cost-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+}
+
+.cost-bar-fill.over-budget { box-shadow: 0 0 8px rgba(244,67,54,0.5); }
+
+.cost-bar-value {
+  width: 60px;
+  text-align: right;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.resources-grid h3 { margin: 0 0 12px; font-size: 16px; }
+
+.resources-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.resource-card {
+  padding: 12px;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.resource-card.highlighted { border-color: var(--color-primary); box-shadow: var(--shadow-md); }
+
+.resource-name { font-size: 13px; font-weight: 500; margin-bottom: 4px; }
+.resource-spend { font-size: 18px; font-weight: 700; }
+.resource-trend { font-size: 12px; margin-top: 4px; }
+.trend-up { color: #F44336; }
+.trend-down { color: #4CAF50; }
+.trend-stable { color: var(--color-text-secondary); }
+
+.cost-info {
+  position: absolute;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 16px 24px;
+  max-width: 500px;
+  box-shadow: var(--shadow-lg);
+}
+
+.cost-info h3 { margin: 0 0 8px; font-size: 16px; }
+.cost-info p { margin: 0; font-size: 14px; color: var(--color-text-secondary); }
+
+.cost-nav {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 16px;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 24px;
+}
+
+.cost-nav button {
+  padding: 6px 12px;
+  border: none;
+  background: var(--color-primary);
+  color: white;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.cost-nav button:disabled { opacity: 0.5; cursor: not-allowed; }
+.cost-nav span { font-size: 13px; color: var(--color-text-secondary); }
