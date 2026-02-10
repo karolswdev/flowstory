@@ -178,3 +178,72 @@
   background: var(--color-bg-secondary);
   color: var(--color-text);
 }
+
+/* ============================================
+   Step Progress Dots Component
+   ============================================ */
+
+.step-progress-dots {
+  position: fixed;
+  bottom: var(--space-4);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-elevated);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-full);
+  box-shadow: var(--shadow-md);
+  z-index: var(--z-overlay);
+}
+
+.step-progress-dot {
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-full);
+  background: var(--color-text-muted);
+  cursor: pointer;
+  transition: transform var(--transition-fast);
+}
+
+.step-progress-dot:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.step-progress-dot.active {
+  background: var(--color-primary);
+}
+
+.step-progress-dot.visited {
+  background: var(--color-text-secondary);
+}
+
+.step-progress-ellipsis {
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  letter-spacing: 2px;
+}
+
+.step-progress-counter {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  color: var(--color-text);
+  padding: 0 var(--space-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Presentation mode: larger dots */
+.presentation-mode .step-progress-dots {
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+}
+
+.presentation-mode .step-progress-dot {
+  width: 10px;
+  height: 10px;
+}

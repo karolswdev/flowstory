@@ -32,6 +32,7 @@ import { TeamOwnershipCanvas } from './components/team-ownership';
 import { TeamOwnershipStorySchema, type TeamOwnershipStory } from './schemas/team-ownership';
 import { EffectsProvider } from './effects';
 import { usePresentationMode, useStepNavigation } from './hooks';
+import { StepProgressDots } from './components/StepProgressDots';
 import './styles/global.css';
 
 /** Detect story type from YAML content */
@@ -1223,6 +1224,15 @@ function App() {
             <StoryPanel showHeader showNextPreview showStepBadge />
             <PlaybackControls showHints />
           </>
+        )}
+        
+        {/* Step progress dots for specialized canvases in presentation mode */}
+        {isPresenting && stepInfo && (
+          <StepProgressDots
+            currentStep={stepInfo.step}
+            totalSteps={stepInfo.total}
+            onStepClick={stepInfo.setter}
+          />
         )}
       </main>
     </div>
