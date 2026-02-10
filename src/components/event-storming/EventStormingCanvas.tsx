@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { fadeUp, TRANSITION } from '../../animation';
 import type { 
   EventStormingStory, 
   EventStormingStep, 
@@ -301,8 +302,11 @@ export function EventStormingCanvas({
       {currentStep && (
         <motion.div 
           className="es-info"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
+          variants={fadeUp}
+          initial="initial"
+          animate="animate"
+          exit="exit"
+          transition={TRANSITION.default}
           key={currentStepIndex}
         >
           <h3>{currentStep.title}</h3>

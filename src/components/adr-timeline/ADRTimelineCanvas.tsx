@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { fadeUp, TRANSITION } from '../../animation';
 import type { ADRTimelineStory, ADRTimelineStep, ADR, Category } from '../../schemas/adr-timeline';
 import { STATUS_STYLES, DEFAULT_CATEGORIES, ADR_TIMELINE_LAYOUT } from '../../schemas/adr-timeline';
 import './adr-timeline.css';
@@ -258,8 +259,11 @@ export function ADRTimelineCanvas({
       {currentStep && (
         <motion.div 
           className="adr-info"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
+          variants={fadeUp}
+          initial="initial"
+          animate="animate"
+          exit="exit"
+          transition={TRANSITION.default}
           key={currentStepIndex}
         >
           <h3>{currentStep.title}</h3>

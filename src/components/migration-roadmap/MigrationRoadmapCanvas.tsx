@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { fadeUp, TRANSITION } from '../../animation';
 import type { MigrationRoadmapStory, MigrationRoadmapStep, Phase, Task } from '../../schemas/migration-roadmap';
 import { STATUS_COLORS, STATUS_ICONS } from '../../schemas/migration-roadmap';
 import './migration-roadmap.css';
@@ -23,8 +24,11 @@ function PhaseCard({ phase, tasks, isHighlighted, delay = 0 }: {
   return (
     <motion.div
       className={`phase-card ${isHighlighted ? 'highlighted' : ''}`}
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
+      variants={fadeUp}
+          initial="initial"
+          animate="animate"
+          exit="exit"
+          transition={TRANSITION.default}
       transition={{ delay: delay / 1000 }}
       style={{ borderLeftColor: color }}
     >

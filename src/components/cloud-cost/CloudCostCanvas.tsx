@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { motion } from 'motion/react';
+import { fadeUp, TRANSITION } from '../../animation';
 import type { CloudCostStory, CloudCostStep, Category as CostCategory, Resource } from '../../schemas/cloud-cost';
 import { CATEGORY_COLORS, TREND_ICONS } from '../../schemas/cloud-cost';
 import './cloud-cost.css';
@@ -140,8 +141,11 @@ export function CloudCostCanvas({
       {currentStep && (
         <motion.div 
           className="cost-info"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
+          variants={fadeUp}
+          initial="initial"
+          animate="animate"
+          exit="exit"
+          transition={TRANSITION.default}
           key={currentStepIndex}
         >
           <h3>{currentStep.title}</h3>

@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { fadeUp, TRANSITION } from '../../animation';
 import type { DependencyGraphStory, DependencyGraphStep, ServiceNode } from '../../schemas/dependency-graph';
 import { HEALTH_COLORS, ServiceType } from '../../schemas/dependency-graph';
 

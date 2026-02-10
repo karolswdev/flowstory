@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { fadeUp, TRANSITION } from '../../animation';
 import type { TeamOwnershipStory, TeamOwnershipStep, Team, Service } from '../../schemas/team-ownership';
 import { SERVICE_TYPE_ICONS, SERVICE_TYPE_COLORS } from '../../schemas/team-ownership';
 

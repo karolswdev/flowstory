@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { fadeUp, scaleIn, TRANSITION, STAGGER } from '../../animation';
 import type { C4ContextStory, C4ContextStep, C4Person, C4ExternalSystem, C4Relationship } from '../../schemas/c4-context';
 import { C4_COLORS } from '../../schemas/c4-context';
 import './c4-context.css';
@@ -328,8 +329,11 @@ export function C4ContextCanvas({
       {currentStep && (
         <motion.div 
           className="c4-context-info"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
+          variants={fadeUp}
+          initial="initial"
+          animate="animate"
+          exit="exit"
+          transition={TRANSITION.default}
           key={currentStepIndex}
         >
           <h3>{currentStep.title}</h3>
