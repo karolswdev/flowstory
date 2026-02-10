@@ -5,3 +5,4 @@
  */
 
 export * from './presets';
+export { useReducedMotion } from './useReducedMotion';

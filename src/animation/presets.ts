@@ -180,3 +180,29 @@ export function prefersReducedMotion(): boolean {
 export function getAnimationDuration(duration: number): number {
   return prefersReducedMotion() ? 0 : duration;
 }
+
+/**
+ * Get transition config respecting reduced motion
+ */
+export function getTransition(config: typeof TRANSITION.default = TRANSITION.default) {
+  if (prefersReducedMotion()) {
+    return { duration: 0 };
+  }
+  return config;
+}
+
+/**
+ * Motion variants that respect reduced motion
+ * Returns static state when reduced motion is preferred
+ */
+export const accessibleVariants = {
+  fadeUp: prefersReducedMotion() 
+    ? { initial: fadeUp.animate, animate: fadeUp.animate, exit: fadeUp.animate }
+    : fadeUp,
+  fadeIn: prefersReducedMotion()
+    ? { initial: fadeIn.animate, animate: fadeIn.animate, exit: fadeIn.animate }
+    : fadeIn,
+  scaleIn: prefersReducedMotion()
+    ? { initial: scaleIn.animate, animate: scaleIn.animate, exit: scaleIn.animate }
+    : scaleIn,
+};
