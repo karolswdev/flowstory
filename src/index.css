@@ -1,6 +1,7 @@
 /* Design System Imports */
 @import './styles/tokens.css';
 @import './styles/canvas-common.css';
+@import './styles/presentation.css';
 
 :root {
   font-family: 'Inter', system-ui, Avenir, Helvetica, Arial, sans-serif;

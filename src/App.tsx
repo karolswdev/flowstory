@@ -31,6 +31,7 @@ import { MigrationRoadmapStorySchema, type MigrationRoadmapStory } from './schem
 import { TeamOwnershipCanvas } from './components/team-ownership';
 import { TeamOwnershipStorySchema, type TeamOwnershipStory } from './schemas/team-ownership';
 import { EffectsProvider } from './effects';
+import { usePresentationMode, useStepNavigation } from './hooks';
 import './styles/global.css';
 
 /** Detect story type from YAML content */
@@ -783,6 +784,40 @@ function App() {
   const [teamOwnershipStory, setTeamOwnershipStory] = useState<TeamOwnershipStory | null>(null);
   const [teamOwnershipStep, setTeamOwnershipStep] = useState(0);
 
+  // Presentation mode
+  const { isPresenting, togglePresentation } = usePresentationMode();
+
+  // Determine current step info for keyboard navigation
+  const getCurrentStepInfo = useCallback(() => {
+    if (techRadarStory) return { step: techRadarStep, total: techRadarStory.steps.length, setter: setTechRadarStep };
+    if (c4ContextStory) return { step: c4ContextStep, total: c4ContextStory.steps.length, setter: setC4ContextStep };
+    if (eventStormingStory) return { step: eventStormingStep, total: eventStormingStory.steps.length, setter: setEventStormingStep };
+    if (adrTimelineStory) return { step: adrTimelineStep, total: adrTimelineStory.steps.length, setter: setADRTimelineStep };
+    if (cloudCostStory) return { step: cloudCostStep, total: cloudCostStory.steps.length, setter: setCloudCostStep };
+    if (depGraphStory) return { step: depGraphStep, total: depGraphStory.steps.length, setter: setDepGraphStep };
+    if (migrationStory) return { step: migrationStep, total: migrationStory.steps.length, setter: setMigrationStep };
+    if (teamOwnershipStory) return { step: teamOwnershipStep, total: teamOwnershipStory.steps.length, setter: setTeamOwnershipStep };
+    if (bcDeploymentStory) return { step: bcDeploymentStep, total: bcDeploymentStory.steps.length, setter: setBCDeploymentStep };
+    if (bcCompositionStory) return { step: bcCompositionStep, total: bcCompositionStory.steps.length, setter: setBCCompositionStep };
+    return null;
+  }, [
+    techRadarStory, techRadarStep, c4ContextStory, c4ContextStep,
+    eventStormingStory, eventStormingStep, adrTimelineStory, adrTimelineStep,
+    cloudCostStory, cloudCostStep, depGraphStory, depGraphStep,
+    migrationStory, migrationStep, teamOwnershipStory, teamOwnershipStep,
+    bcDeploymentStory, bcDeploymentStep, bcCompositionStory, bcCompositionStep,
+  ]);
+
+  const stepInfo = getCurrentStepInfo();
+
+  // Keyboard navigation for specialized canvases
+  useStepNavigation({
+    currentStep: stepInfo?.step ?? 0,
+    totalSteps: stepInfo?.total ?? 1,
+    onStepChange: stepInfo?.setter ?? (() => {}),
+    enabled: stepInfo !== null,
+  });
+
   // Reset special story states when story changes
   const handleStoryChange = useCallback((storyId: string) => {
     setCurrentStory(storyId);
@@ -956,8 +991,8 @@ function App() {
       flexDirection: 'column',
       background: 'var(--color-bg-primary)',
     }}>
-      {/* Toolbar */}
-      <header className="app-toolbar" data-testid="app-toolbar" style={{
+      {/* Toolbar - hidden in presentation mode */}
+      <header className="app-toolbar" data-testid="app-toolbar" data-hide-in-presentation style={{
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
@@ -976,8 +1011,24 @@ function App() {
           </h1>
           <StorySelector currentStory={currentStory} onStoryChange={handleStoryChange} />
         </div>
-        <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }} data-hide-in-presentation>
           {!isBCDeployment && !isBCComposition && !isTechRadar && !isC4Context && !isEventStorming && !isADRTimeline && !isCloudCost && !isDepGraph && !isMigration && !isTeamOwnership && <ExportButton showLabels />}
+          <button 
+            onClick={togglePresentation}
+            style={{
+              padding: '8px 16px',
+              background: 'var(--color-primary)',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '14px',
+              fontWeight: 500,
+            }}
+            title="Press P to present, ESC to exit"
+          >
+            {isPresenting ? 'Exit (ESC)' : 'Present (P)'}
+          </button>
           <ThemeToggle showLabel />
         </div>
       </header>
