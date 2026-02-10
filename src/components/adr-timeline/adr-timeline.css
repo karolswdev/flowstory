@@ -58,7 +58,7 @@
 .adr-status {
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
-  color: white;
+  color: var(--color-text-inverse);
   padding: 3px var(--space-2);
   border-radius: var(--radius-full);
   display: flex;
@@ -378,13 +378,13 @@
 
 .adr-number {
   font-size: 10px;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   fill: var(--color-text-secondary);
 }
 
 .adr-title {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
   fill: var(--color-text);
 }
 
@@ -395,7 +395,7 @@
 
 .adr-status {
   font-size: 11px;
-  font-weight: 500;
+  font-weight: var(--fw-medium);
 }
 
 .adr-timeline-date {
@@ -405,12 +405,12 @@
 
 .adr-legend {
   display: flex;
-  gap: 16px;
-  padding: 8px 16px;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-4);
   margin-top: 8px;
   background: var(--color-bg-elevated);
-  border-radius: 8px;
-  font-size: 12px;
+  border-radius: var(--radius-md);
+  font-size: var(--fs-sm);
 }
 
 .adr-legend-item {
@@ -422,52 +422,52 @@
 
 .adr-info {
   position: absolute;
-  bottom: 80px;
+  bottom: calc(var(--space-16) + var(--space-6));
   left: 50%;
   transform: translateX(-50%);
   background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  padding: 16px 24px;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4) var(--space-6);
   max-width: 500px;
   box-shadow: var(--shadow-lg);
 }
 
 .adr-info h3 {
-  margin: 0 0 8px;
-  font-size: 16px;
-  font-weight: 600;
+  margin: 0 0 var(--space-2);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
   color: var(--color-text);
 }
 
 .adr-info p {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--fs-md);
   color: var(--color-text-secondary);
 }
 
 .adr-nav {
   position: absolute;
-  bottom: 20px;
+  bottom: var(--space-5);
   left: 50%;
   transform: translateX(-50%);
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 8px 16px;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-4);
   background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border);
-  border-radius: 24px;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-full);
   box-shadow: var(--shadow-md);
 }
 
 .adr-nav button {
-  padding: 6px 12px;
+  padding: var(--space-2) var(--space-3);
   border: none;
   background: var(--color-primary);
-  color: white;
-  border-radius: 4px;
-  font-size: 13px;
+  color: var(--color-text-inverse);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
   cursor: pointer;
 }
 
@@ -477,6 +477,6 @@
 }
 
 .adr-nav span {
-  font-size: 13px;
+  font-size: var(--fs-sm);
   color: var(--color-text-secondary);
 }

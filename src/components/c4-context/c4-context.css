@@ -362,6 +362,7 @@
 
 /* ============================================
    C4 Context Canvas (SVG-based)
+   Uses design tokens from styles/tokens.css
    ============================================ */
 .c4-context-canvas {
   position: relative;
@@ -380,93 +381,98 @@
 }
 
 .c4-node-name {
-  font-size: 14px;
-  font-weight: 600;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
   fill: white;
 }
 
 .c4-node-desc {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   fill: rgba(255, 255, 255, 0.8);
 }
 
 .c4-system-name {
-  font-size: 16px;
-  font-weight: 700;
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-bold);
   fill: white;
 }
 
 .c4-system-desc {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   fill: rgba(255, 255, 255, 0.9);
 }
 
 .c4-external-name {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
   fill: white;
 }
 
 .c4-external-desc {
-  font-size: 10px;
+  font-size: var(--fs-xs);
   fill: rgba(255, 255, 255, 0.8);
 }
 
 .c4-rel-label {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   fill: var(--color-text-secondary);
   background: var(--color-bg);
 }
 
 .c4-context-info {
   position: absolute;
-  bottom: 80px;
+  bottom: calc(var(--space-16) + var(--space-6));
   left: 50%;
   transform: translateX(-50%);
   background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  padding: 16px 24px;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4) var(--space-6);
   max-width: 500px;
   box-shadow: var(--shadow-lg);
 }
 
 .c4-context-info h3 {
-  margin: 0 0 8px;
-  font-size: 16px;
-  font-weight: 600;
+  margin: 0 0 var(--space-2);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
   color: var(--color-text);
 }
 
 .c4-context-info p {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--fs-md);
   color: var(--color-text-secondary);
 }
 
 .c4-context-nav {
   position: absolute;
-  bottom: 20px;
+  bottom: var(--space-5);
   left: 50%;
   transform: translateX(-50%);
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 8px 16px;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-4);
   background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border);
-  border-radius: 24px;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-full);
   box-shadow: var(--shadow-md);
 }
 
 .c4-context-nav button {
-  padding: 6px 12px;
+  padding: var(--space-2) var(--space-3);
   border: none;
   background: var(--color-primary);
-  color: white;
-  border-radius: 4px;
-  font-size: 13px;
+  color: var(--color-text-inverse);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
   cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.c4-context-nav button:hover:not(:disabled) {
+  background: var(--color-primary-hover);
 }
 
 .c4-context-nav button:disabled {
@@ -475,6 +481,7 @@
 }
 
 .c4-context-nav span {
-  font-size: 13px;
+  font-size: var(--fs-sm);
   color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
 }
