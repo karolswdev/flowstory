@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { motion } from 'motion/react';
-import { fadeUp, TRANSITION } from '../../animation';
+import { fadeUp, TRANSITION, useStaggeredChildren, STAGGER_PRESETS, slideInLeft } from '../../animation';
 import type { CloudCostStory, CloudCostStep, Category as CostCategory, Resource } from '../../schemas/cloud-cost';
 import { CATEGORY_COLORS, TREND_ICONS } from '../../schemas/cloud-cost';
 import './cloud-cost.css';
@@ -14,10 +14,10 @@ interface CloudCostCanvasProps {
 const formatCurrency = (n: number) => 
   n >= 1000 ? `$${(n/1000).toFixed(1)}k` : `$${n.toFixed(0)}`;
 
-function CostBar({ category, maxSpend, delay = 0 }: {
+function CostBar({ category, maxSpend, transition }: {
   category: CostCategory;
   maxSpend: number;
-  delay?: number;
+  transition?: { duration: number; delay: number; ease: number[] };
 }) {
   const width = (category.spend / maxSpend) * 300;
   const budgetWidth = category.budget ? (category.budget / maxSpend) * 300 : 0;
@@ -27,9 +27,10 @@ function CostBar({ category, maxSpend, delay = 0 }: {
   return (
     <motion.div 
       className="cost-bar-row"
-      initial={{ opacity: 0, x: -20 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ delay: delay / 1000 }}
+      variants={slideInLeft}
+      initial="initial"
+      animate="animate"
+      transition={transition}
     >
       <div className="cost-bar-label">{category.name}</div>
       <div className="cost-bar-container">
@@ -41,7 +42,7 @@ function CostBar({ category, maxSpend, delay = 0 }: {
           style={{ backgroundColor: color }}
           initial={{ width: 0 }}
           animate={{ width }}
-          transition={{ duration: 0.5, delay: delay / 1000 }}
+          transition={{ duration: 0.5, delay: transition?.delay || 0 }}
         />
       </div>
       <div className="cost-bar-value">{formatCurrency(category.spend)}</div>
@@ -100,6 +101,9 @@ export function CloudCostCanvas({
   const totalSpend = story.categories.reduce((sum, c) => sum + c.spend, 0);
   const totalBudget = story.categories.reduce((sum, c) => sum + (c.budget || 0), 0);
   
+  // Staggered animations for category bars
+  const { getTransition } = useStaggeredChildren(visibleCategories.length, STAGGER_PRESETS.list);
+  
   return (
     <div className="cloud-cost-canvas">
       {/* Header */}
@@ -116,7 +120,7 @@ export function CloudCostCanvas({
       {/* Category bars */}
       <div className="cost-bars">
         {visibleCategories.map((cat, i) => (
-          <CostBar key={cat.id} category={cat} maxSpend={maxSpend} delay={i * 100} />
+          <CostBar key={cat.id} category={cat} maxSpend={maxSpend} transition={getTransition(i)} />
         ))}
       </div>
       
