@@ -247,3 +247,86 @@
   width: 10px;
   height: 10px;
 }
+
+/* ============================================
+   Keyboard Help Overlay
+   ============================================ */
+
+.keyboard-help-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--color-bg-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: var(--z-modal);
+}
+
+.keyboard-help-modal {
+  background: var(--color-bg-elevated);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6);
+  min-width: 320px;
+  max-width: 90vw;
+  box-shadow: var(--shadow-xl);
+}
+
+.keyboard-help-modal h2 {
+  margin: 0 0 var(--space-4);
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text);
+  text-align: center;
+}
+
+.keyboard-help-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.keyboard-help-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-2) 0;
+  border-bottom: var(--border-width) solid var(--color-border);
+}
+
+.keyboard-help-item:last-child {
+  border-bottom: none;
+}
+
+.keyboard-help-item kbd {
+  display: inline-block;
+  padding: var(--space-1) var(--space-2);
+  background: var(--color-bg-secondary);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  color: var(--color-text);
+  min-width: 80px;
+  text-align: center;
+}
+
+.keyboard-help-item span {
+  color: var(--color-text-secondary);
+  font-size: var(--fs-md);
+}
+
+.keyboard-help-dismiss {
+  margin: var(--space-4) 0 0;
+  text-align: center;
+  font-size: var(--fs-sm);
+  color: var(--color-text-muted);
+}
+
+.keyboard-help-dismiss kbd {
+  padding: 2px var(--space-1);
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-xs);
+}

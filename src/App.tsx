@@ -33,6 +33,7 @@ import { TeamOwnershipStorySchema, type TeamOwnershipStory } from './schemas/tea
 import { EffectsProvider } from './effects';
 import { usePresentationMode, useStepNavigation } from './hooks';
 import { StepProgressDots } from './components/StepProgressDots';
+import { KeyboardHelp } from './components/KeyboardHelp';
 import './styles/global.css';
 
 /** Detect story type from YAML content */
@@ -1234,6 +1235,9 @@ function App() {
             onStepClick={stepInfo.setter}
           />
         )}
+        
+        {/* Keyboard help overlay (press ? to toggle) */}
+        <KeyboardHelp enabled={true} />
       </main>
     </div>
   );
