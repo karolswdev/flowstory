@@ -11,7 +11,7 @@ src/
 │   ├── shared/       # Shared UI: StepOverlay (unified step info card)
 │   ├── nodes/        # Shared node components (StateNode, NodeHandles, sizes, etc.)
 │   ├── edges/        # Shared edge components (FlowEdge, etc.)
-│   ├── service/      # ServiceFlowCanvas + ServiceNode + QueueNode
+│   ├── service/      # ServiceFlowCanvas + 9 node types + ServiceCallEdge + ZoneNode
 │   ├── http/         # HttpFlowCanvas + participants
 │   ├── pipeline/     # PipelineCanvas + StageNode + JobNode + GateNode
 │   ├── bc-deployment/  # BCDeploymentCanvas + BCCoreNode + ArtifactNode
@@ -124,6 +124,7 @@ Every story has ordered **steps** — the heart of FlowStory. Each step:
 
 ### Step State Pattern (all ReactFlow renderers)
 
+**3-set pattern** (most renderers):
 ```tsx
 const { active, completed, revealed } = useMemo(() => {
   const active = new Set<string>();
@@ -137,6 +138,8 @@ const { active, completed, revealed } = useMemo(() => {
   return { active, completed, revealed };
 }, [story.steps, currentStepIndex]);
 ```
+
+**6-set pattern** (service-flow): Separate sets for calls AND nodes, plus `newCallIds`/`newNodeIds` for entry effects. Camera uses explicit `focusNodes[]` when present, falls back to active call participants.
 
 ## Node System
 
@@ -250,7 +253,7 @@ description: "Optional description"
 
 ### Key Renderer Schemas
 
-**service-flow:** `services[] + queues[] + calls[] + steps[{activeCalls}]`
+**service-flow:** `services[] + queues[] + calls[] + zones[] + steps[{activeCalls, focusNodes, revealNodes, revealCalls}]`
 **http-flow:** `participants[] + exchanges[] + steps[{activeExchanges}]`
 **pipeline:** `pipeline{} + stages[] + jobs[] + steps[{activeStages, activeJobs, activeGates}]`
 **bc-deployment:** `bc{} + artifacts[] + edges[] + steps[{focusNodes, activeEdges, expandNodes}]`
@@ -261,7 +264,7 @@ description: "Optional description"
 ### Narration Patterns
 ```yaml
 narrative: "Inline text"           # Most renderers
-narration:                          # bc-deployment, bc-composition, state-diagram
+narration:                          # bc-deployment, bc-composition, state-diagram, service-flow
   speaker: Architect
   message: "Detailed explanation"
 ```

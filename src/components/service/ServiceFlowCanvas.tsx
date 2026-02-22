@@ -8,24 +8,32 @@ import {
   Node,
   Edge,
   ConnectionMode,
-  MarkerType,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
+import Dagre from '@dagrejs/dagre';
+
 import { ServiceNode, type ServiceNodeData } from './ServiceNode';
 import { QueueNode, type QueueNodeData } from './QueueNode';
+import { DatabaseNode } from './DatabaseNode';
+import { EventBusNode } from './EventBusNode';
+import { GatewayNode } from './GatewayNode';
+import { ExternalNode } from './ExternalNode';
+import { WorkerNode } from './WorkerNode';
+import { WorkflowNode } from './WorkflowNode';
+import { CacheNode } from './CacheNode';
+import { ServiceCallEdge, type ServiceCallEdgeData } from './ServiceCallEdge';
+import { ZoneNode, type ZoneNodeData } from './ZoneNode';
 import type {
   ServiceFlowStory,
-  ServiceDef,
-  QueueDef,
   CallDef,
-  ServiceFlowStep,
   CallType,
 } from '../../schemas/service-flow';
 import {
-  SERVICE_FLOW_LAYOUT,
   CALL_TYPE_COLORS,
   SERVICE_TYPE_COLORS,
+  ZONE_COLORS,
+  ZONE_PADDING,
 } from '../../schemas/service-flow';
 import { getSmartHandles, type NodeRect } from '../nodes/NodeHandles';
 import { NODE_DIMENSIONS } from '../nodes/dimensions';
@@ -37,9 +45,22 @@ import './service-nodes.css';
 // Node Types Registry
 // ============================================================================
 
+const edgeTypes = {
+  'service-call': ServiceCallEdge,
+};
+
 const nodeTypes = {
   service: ServiceNode,
   queue: QueueNode,
+  database: DatabaseNode,
+  'event-bus': EventBusNode,
+  gateway: GatewayNode,
+  external: ExternalNode,
+  worker: WorkerNode,
+  'event-processor': WorkerNode,
+  workflow: WorkflowNode,
+  cache: CacheNode,
+  zone: ZoneNode,
 };
 
 // ============================================================================
@@ -64,73 +85,56 @@ interface LayoutResult {
 }
 
 /**
- * Compute topological depth for each node based on call graph.
- * Sources (no incoming calls) get depth 0. Each hop adds 1.
- * This creates a left-to-right layout following data flow.
+ * Map service type to ReactFlow node type for distinct shapes.
+ * Types with dedicated shape components get their own key;
+ * 'api' (and any unknown) falls back to the generic 'service' rectangle.
  */
-function computeNodeDepths(
-  participantIds: string[],
-  calls: CallDef[]
-): Map<string, number> {
-  const depths = new Map<string, number>();
-  const incoming = new Map<string, Set<string>>();
+const SHAPE_NODE_TYPES = new Set(['database', 'event-bus', 'gateway', 'external', 'worker', 'event-processor', 'workflow', 'cache']);
 
-  // Initialize
-  for (const id of participantIds) {
-    depths.set(id, 0);
-    incoming.set(id, new Set());
-  }
-
-  // Build incoming edges
-  for (const call of calls) {
-    incoming.get(call.to)?.add(call.from);
-  }
-
-  // BFS from sources
-  const queue: string[] = [];
-  for (const id of participantIds) {
-    if (incoming.get(id)!.size === 0) {
-      queue.push(id);
-    }
-  }
-
-  const visited = new Set<string>();
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-    if (visited.has(current)) continue;
-    visited.add(current);
-
-    const currentDepth = depths.get(current) || 0;
-    for (const call of calls) {
-      if (call.from === current) {
-        const targetDepth = depths.get(call.to) || 0;
-        depths.set(call.to, Math.max(targetDepth, currentDepth + 1));
-        if (!visited.has(call.to)) {
-          queue.push(call.to);
-        }
-      }
-    }
-  }
-
-  // Assign unvisited nodes (disconnected) to depth 0
-  for (const id of participantIds) {
-    if (!visited.has(id)) depths.set(id, 0);
-  }
-
-  return depths;
+function getServiceNodeType(serviceType: string): string {
+  return SHAPE_NODE_TYPES.has(serviceType) ? serviceType : 'service';
 }
 
-function buildSequenceLayout(
+function getParticipantDimensions(p: { kind: string; type: string }): { width: number; height: number } {
+  if (p.kind === 'queue') return NODE_DIMENSIONS.queue;
+  const key = getServiceNodeType(p.type);
+  return NODE_DIMENSIONS[key as keyof typeof NODE_DIMENSIONS] || NODE_DIMENSIONS.service;
+}
+
+/**
+ * Detect bidirectional edges (A->B + B->A) for curvature offset.
+ */
+function detectBidirectional(calls: CallDef[]): Set<string> {
+  const pairs = new Set<string>();
+  const edgeSet = new Set<string>();
+
+  for (const c of calls) {
+    const key = `${c.from}->${c.to}`;
+    const reverse = `${c.to}->${c.from}`;
+    edgeSet.add(key);
+    if (edgeSet.has(reverse)) {
+      pairs.add(key);
+      pairs.add(reverse);
+    }
+  }
+  return pairs;
+}
+
+function buildDagreLayout(
   story: ServiceFlowStory,
   activeCallIds: Set<string>,
   completedCallIds: Set<string>,
-  revealedCallIds: Set<string>
+  revealedCallIds: Set<string>,
+  activeNodeIds: Set<string>,
+  completedNodeIds: Set<string>,
+  revealedNodeIds: Set<string>,
+  newCallIds: Set<string>,
+  newNodeIds: Set<string>,
 ): LayoutResult {
-  const { services, queues = [], calls, steps } = story;
-  const { LANE_WIDTH, LANE_SPACING, NODE_HEIGHT, QUEUE_HEIGHT, PADDING } = SERVICE_FLOW_LAYOUT;
+  const { services, queues = [], calls } = story;
 
-  // Progressive reveal: determine which participants are involved in revealed calls
-  const revealedParticipantIds = new Set<string>();
+  // Progressive reveal: determine which participants are visible
+  const revealedParticipantIds = new Set<string>(revealedNodeIds);
   for (const call of calls) {
     if (revealedCallIds.has(call.id)) {
       revealedParticipantIds.add(call.from);
@@ -144,78 +148,127 @@ function buildSequenceLayout(
     ...queues.map(q => ({ ...q, kind: 'queue' as const })),
   ];
 
-  const allIds = participants.map(p => p.id);
+  // Filter to revealed participants
+  const visibleParticipants = participants.filter(
+    p => revealedParticipantIds.size === 0 || revealedParticipantIds.has(p.id)
+  );
 
-  // Compute graph-based depths for left-to-right positioning
-  const depths = computeNodeDepths(allIds, calls);
+  // ── Dagre layout ──
+  const g = new Dagre.graphlib.Graph();
+  g.setDefaultEdgeLabel(() => ({}));
+  g.setGraph({
+    rankdir: 'LR',
+    nodesep: 80,
+    ranksep: 140,
+    marginx: 60,
+    marginy: 60,
+  });
 
-  // Group participants by depth column
-  const columns = new Map<number, typeof participants>();
-  for (const p of participants) {
-    const d = depths.get(p.id) || 0;
-    if (!columns.has(d)) columns.set(d, []);
-    columns.get(d)!.push(p);
+  // Add nodes with type-aware dimensions
+  for (const p of visibleParticipants) {
+    const dim = getParticipantDimensions(p);
+    g.setNode(p.id, { width: dim.width, height: dim.height });
   }
 
-  // Position: each depth column gets an X, items within column spread vertically
-  const COL_WIDTH = LANE_WIDTH + LANE_SPACING;
-  const ROW_HEIGHT = NODE_HEIGHT + 80;
-
-  const positions = new Map<string, { x: number; y: number }>();
-  const sortedDepths = [...columns.keys()].sort((a, b) => a - b);
-
-  for (const depth of sortedDepths) {
-    const col = columns.get(depth)!;
-    const x = PADDING + depth * COL_WIDTH;
-    const colHeight = col.length * ROW_HEIGHT;
-    const startY = PADDING + Math.max(0, (4 * ROW_HEIGHT - colHeight) / 2); // Center vertically
-
-    col.forEach((p, i) => {
-      positions.set(p.id, { x, y: startY + i * ROW_HEIGHT });
-    });
+  // Add edges — skip self-loops (dagre doesn't handle them)
+  const visibleIds = new Set(visibleParticipants.map(p => p.id));
+  for (const call of calls) {
+    if (call.from !== call.to && visibleIds.has(call.from) && visibleIds.has(call.to)) {
+      g.setEdge(call.from, call.to);
+    }
   }
 
-  // Create nodes — only show revealed participants
-  const nodes: Node[] = participants
-    .filter(p => revealedCallIds.size === 0 || revealedParticipantIds.has(p.id))
-    .map((p) => {
-    const pos = positions.get(p.id) || { x: 0, y: 0 };
-    const isActive = calls.some(
+  Dagre.layout(g);
+
+  // Detect bidirectional edges for curvature offset
+  const biPairs = detectBidirectional(calls);
+
+  // Compute which participants are newly revealed this step
+  const newParticipantIds = new Set<string>(newNodeIds);
+  for (const call of calls) {
+    if (newCallIds.has(call.id)) {
+      newParticipantIds.add(call.from);
+      newParticipantIds.add(call.to);
+    }
+  }
+  // Exclude participants that were already visible from prior steps
+  const previousParticipantIds = new Set<string>();
+  for (const call of calls) {
+    if (completedCallIds.has(call.id)) {
+      previousParticipantIds.add(call.from);
+      previousParticipantIds.add(call.to);
+    }
+  }
+  for (const id of completedNodeIds) previousParticipantIds.add(id);
+
+  // ── Build positioned nodes ──
+  const nodes: Node[] = visibleParticipants.map((p) => {
+    const dagreNode = g.node(p.id);
+    const dim = getParticipantDimensions(p);
+    const x = (dagreNode?.x ?? 0) - dim.width / 2;
+    const y = (dagreNode?.y ?? 0) - dim.height / 2;
+
+    const isActive = activeNodeIds.has(p.id) || calls.some(
       c => activeCallIds.has(c.id) && (c.from === p.id || c.to === p.id)
     );
-    const isComplete = calls.some(
+    const isComplete = completedNodeIds.has(p.id) || calls.some(
       c => completedCallIds.has(c.id) && (c.from === p.id || c.to === p.id)
     );
+    const isNew = newParticipantIds.has(p.id) && !previousParticipantIds.has(p.id);
 
-    if (p.kind === 'service') {
-      return {
-        id: p.id,
-        type: 'service',
-        position: pos,
-        data: {
-          ...p,
-          isActive,
-          isComplete,
-        } as ServiceNodeData,
-      };
-    } else {
-      return {
-        id: p.id,
-        type: 'queue',
-        position: pos,
-        data: {
-          ...p,
-          isActive,
-          isComplete,
-        } as QueueNodeData,
-      };
-    }
+    const nodeType = p.kind === 'queue' ? 'queue' : getServiceNodeType(p.type);
+    return {
+      id: p.id,
+      type: nodeType,
+      position: { x, y },
+      data: { ...p, isActive, isComplete, isNew } as ServiceNodeData & QueueNodeData,
+    };
   });
+
+  // ── Zone bounding boxes ──
+  const { zones = [] } = story;
+  if (zones.length > 0) {
+    // Build position+dimension map for zone bbox computation
+    const memberRects = new Map<string, { x: number; y: number; w: number; h: number }>();
+    for (const node of nodes) {
+      const dim = NODE_DIMENSIONS[node.type as keyof typeof NODE_DIMENSIONS] || NODE_DIMENSIONS.service;
+      memberRects.set(node.id, { x: node.position.x, y: node.position.y, w: dim.width, h: dim.height });
+    }
+
+    zones.forEach((zone, idx) => {
+      const rects = zone.members
+        .map(id => memberRects.get(id))
+        .filter((r): r is { x: number; y: number; w: number; h: number } => !!r);
+      if (rects.length === 0) return;
+
+      const minX = Math.min(...rects.map(r => r.x)) - ZONE_PADDING;
+      const minY = Math.min(...rects.map(r => r.y)) - ZONE_PADDING - 20;
+      const maxX = Math.max(...rects.map(r => r.x + r.w)) + ZONE_PADDING;
+      const maxY = Math.max(...rects.map(r => r.y + r.h)) + ZONE_PADDING;
+
+      const color = zone.color || ZONE_COLORS[idx % ZONE_COLORS.length];
+
+      nodes.push({
+        id: `zone-${zone.id}`,
+        type: 'zone',
+        position: { x: minX, y: minY },
+        data: {
+          label: zone.label,
+          color,
+          width: maxX - minX,
+          height: maxY - minY,
+        } as ZoneNodeData,
+        style: { zIndex: -1 },
+        selectable: false,
+        draggable: false,
+      });
+    });
+  }
 
   // Build node rect lookup for smart handle selection
   const nodeRects = new Map<string, NodeRect>();
   for (const node of nodes) {
-    const dim = node.type === 'queue' ? NODE_DIMENSIONS.queue : NODE_DIMENSIONS.service;
+    const dim = NODE_DIMENSIONS[node.type as keyof typeof NODE_DIMENSIONS] || NODE_DIMENSIONS.service;
     nodeRects.set(node.id, {
       x: node.position.x,
       y: node.position.y,
@@ -224,74 +277,105 @@ function buildSequenceLayout(
     });
   }
 
-  // Create edges from calls — only revealed calls
-  const edges: Edge[] = calls.filter(c => revealedCallIds.has(c.id)).map((call, i) => {
+  // ── Build edges via custom edge component ──
+  // Track bidirectional index per pair
+  const biIndexTracker = new Map<string, number>();
+
+  const edges: Edge[] = calls.filter(c => revealedCallIds.has(c.id)).map((call) => {
     const isActive = activeCallIds.has(call.id);
     const isComplete = completedCallIds.has(call.id);
     const color = CALL_TYPE_COLORS[call.type as CallType] || '#666';
+    const isBidirectional = biPairs.has(`${call.from}->${call.to}`);
+    const isSelfLoop = call.from === call.to;
 
-    const label = buildEdgeLabel(call);
-    const animated = isActive;
-    const strokeWidth = isActive ? 3 : isComplete ? 2 : 1;
+    // Assign bidirectional index (0 or 1) for curvature offset
+    let bidirectionalIndex = 0;
+    if (isBidirectional) {
+      const pairKey = [call.from, call.to].sort().join('--');
+      bidirectionalIndex = biIndexTracker.get(pairKey) ?? 0;
+      biIndexTracker.set(pairKey, bidirectionalIndex + 1);
+    }
 
     // Smart handle selection
     const sourceRect = nodeRects.get(call.from);
     const targetRect = nodeRects.get(call.to);
     const [sourceHandle, targetHandle] = sourceRect && targetRect
       ? getSmartHandles(sourceRect, targetRect)
-      : ['source-bottom', 'target-top'];
+      : ['source-right', 'target-left'];
+
+    // Extract semantic data for label rendering
+    const isNewEdge = newCallIds.has(call.id);
+    const edgeData: ServiceCallEdgeData = {
+      callType: call.type,
+      method: call.type === 'sync' ? (call as any).method : undefined,
+      path: call.type === 'sync' ? (call as any).path : undefined,
+      duration: call.type === 'sync' ? (call as any).duration : undefined,
+      messageType: call.type !== 'sync' ? (call as any).messageType : undefined,
+      action: call.type === 'subscribe' ? (call as any).action : undefined,
+      isActive,
+      isComplete,
+      isNew: isNewEdge,
+      isBidirectional,
+      bidirectionalIndex,
+      isSelfLoop,
+      color,
+    };
 
     return {
       id: call.id,
       source: call.from,
       target: call.to,
+      type: 'service-call',
       sourceHandle,
       targetHandle,
-      label,
-      labelStyle: { fill: 'var(--color-text, #333)', fontSize: 11, fontWeight: 500 },
-      labelBgStyle: { fill: 'var(--color-bg-elevated, #fff)', fillOpacity: 1, rx: 4, ry: 4, filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.15))' },
-      labelBgPadding: [6, 4] as [number, number],
       zIndex: 1000,
-      animated,
-      style: {
-        stroke: color,
-        strokeWidth,
-        strokeDasharray: call.type === 'async' || call.type === 'publish' || call.type === 'subscribe'
-          ? '5,5'
-          : undefined,
-        opacity: isActive ? 1 : isComplete ? 0.8 : 0.4,
-      },
-      markerEnd: {
-        type: MarkerType.ArrowClosed,
-        color,
-      },
-      data: {
-        callType: call.type,
-        isActive,
-        isComplete,
-      },
+      data: edgeData,
     };
   });
 
-  return { nodes, edges };
-}
+  // ── Generate reverse response edges for sync calls with `response` ──
+  for (const call of calls) {
+    if (call.type !== 'sync' || !revealedCallIds.has(call.id)) continue;
+    const syncCall = call as any;
+    if (!syncCall.response) continue;
 
-function buildEdgeLabel(call: CallDef): string {
-  switch (call.type) {
-    case 'sync':
-      const method = call.method || '';
-      const path = call.path || '';
-      const duration = call.duration ? ` (${call.duration}ms)` : '';
-      return `${method} ${path}${duration}`.trim();
-    case 'async':
-      return call.messageType;
-    case 'publish':
-      return `pub: ${call.messageType}`;
-    case 'subscribe':
-      return `sub: ${call.action || call.messageType}`;
-    default:
-      return '';
+    const isActive = activeCallIds.has(call.id);
+    const isComplete = completedCallIds.has(call.id);
+    const color = CALL_TYPE_COLORS[call.type as CallType] || '#666';
+
+    // Reverse direction for response
+    const sourceRect = nodeRects.get(call.to);
+    const targetRect = nodeRects.get(call.from);
+    const [sourceHandle, targetHandle] = sourceRect && targetRect
+      ? getSmartHandles(sourceRect, targetRect)
+      : ['source-left', 'target-right'];
+
+    const responseLabel = syncCall.response.label || `${syncCall.response.status}`;
+
+    edges.push({
+      id: `${call.id}-response`,
+      source: call.to,
+      target: call.from,
+      type: 'service-call',
+      sourceHandle,
+      targetHandle,
+      zIndex: 999,
+      data: {
+        callType: 'sync',
+        isActive,
+        isComplete,
+        isNew: newCallIds.has(call.id),
+        isBidirectional: true,
+        bidirectionalIndex: 1,
+        isSelfLoop: false,
+        isResponse: true,
+        responseLabel,
+        color,
+      } as ServiceCallEdgeData,
+    });
   }
+
+  return { nodes, edges };
 }
 
 // ============================================================================
@@ -305,33 +389,80 @@ export function ServiceFlowCanvas({
   showPayloads = false,
   showDurations = true,
 }: ServiceFlowCanvasProps) {
-  // Compute active/completed/revealed calls based on current step
-  const { activeCallIds, completedCallIds, revealedCallIds } = useMemo(() => {
-    const active = new Set<string>();
-    const completed = new Set<string>();
-    const revealed = new Set<string>();
+  // Compute 6-set step state + newCallIds for entry effects
+  const {
+    activeCallIds,
+    completedCallIds,
+    revealedCallIds,
+    activeNodeIds: activeNodeSet,
+    completedNodeIds,
+    revealedNodeIds,
+    newCallIds,
+    newNodeIds,
+  } = useMemo(() => {
+    const activeC = new Set<string>();
+    const completedC = new Set<string>();
+    const revealedC = new Set<string>();
+    const activeN = new Set<string>();
+    const completedN = new Set<string>();
+    const revealedN = new Set<string>();
+    const previouslyRevealedC = new Set<string>();
+    const previouslyRevealedN = new Set<string>();
 
     story.steps.forEach((step, i) => {
       if (i <= currentStepIndex) {
-        step.activeCalls.forEach(id => revealed.add(id));
+        step.activeCalls.forEach(id => revealedC.add(id));
+        step.revealCalls.forEach(id => revealedC.add(id));
+        step.revealNodes.forEach(id => revealedN.add(id));
       }
       if (i < currentStepIndex) {
-        step.activeCalls.forEach(id => completed.add(id));
+        step.activeCalls.forEach(id => { completedC.add(id); previouslyRevealedC.add(id); });
+        step.revealCalls.forEach(id => { completedC.add(id); previouslyRevealedC.add(id); });
+        step.revealNodes.forEach(id => { completedN.add(id); previouslyRevealedN.add(id); });
       } else if (i === currentStepIndex) {
-        step.activeCalls.forEach(id => active.add(id));
+        step.activeCalls.forEach(id => activeC.add(id));
+        step.revealNodes.forEach(id => activeN.add(id));
       }
     });
 
-    return { activeCallIds: active, completedCallIds: completed, revealedCallIds: revealed };
+    // New = revealed in current step but not in any previous step
+    const newC = new Set<string>();
+    for (const id of revealedC) {
+      if (!previouslyRevealedC.has(id)) newC.add(id);
+    }
+    const newN = new Set<string>();
+    for (const id of revealedN) {
+      if (!previouslyRevealedN.has(id)) newN.add(id);
+    }
+
+    return {
+      activeCallIds: activeC,
+      completedCallIds: completedC,
+      revealedCallIds: revealedC,
+      activeNodeIds: activeN,
+      completedNodeIds: completedN,
+      revealedNodeIds: revealedN,
+      newCallIds: newC,
+      newNodeIds: newN,
+    };
   }, [story.steps, currentStepIndex]);
 
   // Build layout with progressive reveal
   const { nodes, edges } = useMemo(() => {
-    return buildSequenceLayout(story, activeCallIds, completedCallIds, revealedCallIds);
-  }, [story, activeCallIds, completedCallIds, revealedCallIds]);
+    return buildDagreLayout(
+      story, activeCallIds, completedCallIds, revealedCallIds,
+      activeNodeSet, completedNodeIds, revealedNodeIds,
+      newCallIds, newNodeIds,
+    );
+  }, [story, activeCallIds, completedCallIds, revealedCallIds, activeNodeSet, completedNodeIds, revealedNodeIds, newCallIds, newNodeIds]);
 
-  // Compute active node IDs for camera focus
-  const activeNodeIds = useMemo(() => {
+  // Camera focus: prefer explicit focusNodes, fall back to call participants
+  const currentStep = story.steps[currentStepIndex];
+  const focusNodeIds = useMemo(() => {
+    if (currentStep?.focusNodes?.length) {
+      return currentStep.focusNodes;
+    }
+    // Fall back to deriving from active calls
     const ids: string[] = [];
     for (const call of story.calls) {
       if (activeCallIds.has(call.id)) {
@@ -340,7 +471,7 @@ export function ServiceFlowCanvas({
       }
     }
     return [...new Set(ids)];
-  }, [story.calls, activeCallIds]);
+  }, [currentStep, story.calls, activeCallIds]);
 
   const onNodeClick = useCallback((_event: React.MouseEvent, _node: Node) => {}, []);
 
@@ -350,6 +481,7 @@ export function ServiceFlowCanvas({
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         onNodeClick={onNodeClick}
         connectionMode={ConnectionMode.Loose}
         fitView
@@ -362,7 +494,7 @@ export function ServiceFlowCanvas({
       >
         <Background color="var(--edge-default, #e0e0e0)" gap={20} />
         <Controls showInteractive={false} />
-        <ServiceFlowCameraController activeNodeIds={activeNodeIds} />
+        <ServiceFlowCameraController activeNodeIds={focusNodeIds} />
         <MiniMap 
           nodeColor={(node) => {
             if (node.type === 'queue') return '#A855F7';

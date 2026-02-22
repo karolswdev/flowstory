@@ -1,3 +1,12 @@
 export { ServiceNode, type ServiceNodeData } from './ServiceNode';
 export { QueueNode, type QueueNodeData } from './QueueNode';
+export { DatabaseNode } from './DatabaseNode';
+export { EventBusNode } from './EventBusNode';
+export { GatewayNode } from './GatewayNode';
+export { ExternalNode } from './ExternalNode';
+export { WorkerNode } from './WorkerNode';
+export { WorkflowNode } from './WorkflowNode';
+export { CacheNode } from './CacheNode';
+export { ServiceCallEdge, type ServiceCallEdgeData } from './ServiceCallEdge';
+export { ZoneNode, type ZoneNodeData } from './ZoneNode';
 export { ServiceFlowCanvas } from './ServiceFlowCanvas';

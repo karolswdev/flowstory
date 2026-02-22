@@ -10,7 +10,7 @@ Visual story-driven flow diagrams for user journeys, system architecture, and pr
 ## See It In Action
 
 ### Service Flow
-Map microservice communication patterns with sync/async calls and message queues.
+Map microservice choreography with **9 distinct node shapes** (cylinders, hexagons, diamonds, clouds, pills), dagre auto-layout, zone grouping, response arrows, and cinematic entry animations.
 
 ![Service Flow Demo](docs/demos/demo-service-flow.gif)
 
@@ -43,7 +43,7 @@ Visualize REST API sequences with request/response details, status codes, and he
 - **Export options** — PNG, SVG, PDF, animated GIF (in-browser + CLI recorder)
 - **Auto-focus camera** — Smooth pan/zoom to active elements each step
 - **Dark/light themes** — Full token-based theming with `data-theme` switching
-- **Embed mode** — `?embed=true` for clean iframe embedding
+- **Embed mode** — `?embed=true` for clean iframe embedding with subtle attribution
 - **Shareable URLs** — `?story=id&step=N` for direct linking
 
 ## Quick Start
@@ -282,7 +282,7 @@ flowstory/
 │   │   ├── shared/       # StepOverlay (unified step info card)
 │   │   ├── nodes/        # Shared node components + sizes
 │   │   ├── edges/        # FlowEdge, AnimatedEventEdge, EdgeParticle
-│   │   ├── service/      # ServiceFlowCanvas
+│   │   ├── service/      # ServiceFlowCanvas + 9 node shapes + edge + zones
 │   │   ├── http/         # HttpFlowCanvas
 │   │   ├── pipeline/     # PipelineCanvas
 │   │   ├── bc-deployment/  # BCDeploymentCanvas

@@ -4,7 +4,7 @@ import { z } from 'zod';
 // Type Definitions
 // ============================================================================
 
-export const SERVICE_TYPES = ['api', 'worker', 'gateway', 'database', 'cache', 'external'] as const;
+export const SERVICE_TYPES = ['api', 'worker', 'gateway', 'database', 'cache', 'external', 'event-bus', 'workflow', 'event-processor'] as const;
 export type ServiceType = typeof SERVICE_TYPES[number];
 
 export const HEALTH_STATUSES = ['healthy', 'degraded', 'down'] as const;
@@ -22,7 +22,7 @@ export type CallType = typeof CALL_TYPES[number];
 export const PROTOCOLS = ['http', 'grpc', 'graphql'] as const;
 export type Protocol = typeof PROTOCOLS[number];
 
-export const LAYOUTS = ['sequence', 'topology', 'trace'] as const;
+export const LAYOUTS = ['sequence'] as const;
 export type ServiceFlowLayout = typeof LAYOUTS[number];
 
 // ============================================================================
@@ -36,6 +36,9 @@ export const SERVICE_TYPE_ICONS: Record<ServiceType, string> = {
   database: '🗄️',
   cache: '⚡',
   external: '🌐',
+  'event-bus': '📬',
+  workflow: '🔄',
+  'event-processor': '⚡',
 };
 
 export const SERVICE_TYPE_COLORS: Record<ServiceType, string> = {
@@ -45,6 +48,9 @@ export const SERVICE_TYPE_COLORS: Record<ServiceType, string> = {
   database: '#78716C',
   cache: '#06B6D4',
   external: '#64748B',
+  'event-bus': '#F97316',
+  workflow: '#EC4899',
+  'event-processor': '#8B5CF6',
 };
 
 export const STATUS_COLORS: Record<HealthStatus, string> = {
@@ -65,6 +71,17 @@ export const CALL_TYPE_COLORS: Record<CallType, string> = {
   publish: '#F59E0B',
   subscribe: '#14B8A6',
 };
+
+export const ZONE_COLORS = [
+  'rgba(59, 130, 246, 0.06)',   // Blue
+  'rgba(168, 85, 247, 0.06)',   // Purple
+  'rgba(34, 197, 94, 0.06)',    // Green
+  'rgba(249, 115, 22, 0.06)',   // Orange
+  'rgba(236, 72, 153, 0.06)',   // Pink
+  'rgba(6, 182, 212, 0.06)',    // Cyan
+] as const;
+
+export const ZONE_PADDING = 40;
 
 // ============================================================================
 // Zod Schemas
@@ -96,6 +113,11 @@ export const QueueDefSchema = z.object({
   consumers: z.number().int().optional(),
 });
 
+export const ResponseSchema = z.object({
+  status: z.union([z.number(), z.string()]),
+  label: z.string().optional(),
+});
+
 export const SyncCallSchema = z.object({
   id: z.string(),
   type: z.literal('sync'),
@@ -107,7 +129,7 @@ export const SyncCallSchema = z.object({
   duration: z.number().optional(),
   status: z.union([z.number(), z.enum(['ok', 'error'])]).optional(),
   payload: z.unknown().optional(),
-  response: z.unknown().optional(),
+  response: ResponseSchema.optional(),
 });
 
 export const AsyncCallSchema = z.object({
@@ -145,11 +167,21 @@ export const CallDefSchema = z.discriminatedUnion('type', [
   SubscribeCallSchema,
 ]);
 
+export const ZoneDefSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  members: z.array(z.string()),
+  color: z.string().optional(),
+});
+
 export const ServiceFlowStepSchema = z.object({
   id: z.string(),
   title: z.string(),
   narrative: z.string(),
   activeCalls: z.array(z.string()),
+  focusNodes: z.array(z.string()).optional().default([]),
+  revealNodes: z.array(z.string()).optional().default([]),
+  revealCalls: z.array(z.string()).optional().default([]),
   duration: z.number().optional(),
   narration: z.object({
     speaker: z.string(),
@@ -167,6 +199,7 @@ export const ServiceFlowStorySchema = z.object({
   services: z.array(ServiceDefSchema),
   queues: z.array(QueueDefSchema).optional().default([]),
   calls: z.array(CallDefSchema),
+  zones: z.array(ZoneDefSchema).optional().default([]),
   steps: z.array(ServiceFlowStepSchema),
 });
 
@@ -174,6 +207,7 @@ export const ServiceFlowStorySchema = z.object({
 // TypeScript Types (inferred from Zod)
 // ============================================================================
 
+export type ZoneDef = z.infer<typeof ZoneDefSchema>;
 export type ServiceDef = z.infer<typeof ServiceDefSchema>;
 export type QueueDef = z.infer<typeof QueueDefSchema>;
 export type SyncCall = z.infer<typeof SyncCallSchema>;
@@ -196,16 +230,3 @@ export function isValidServiceFlowStory(data: unknown): data is ServiceFlowStory
   return ServiceFlowStorySchema.safeParse(data).success;
 }
 
-// ============================================================================
-// Layout Constants
-// ============================================================================
-
-export const SERVICE_FLOW_LAYOUT = {
-  LANE_WIDTH: 220,
-  LANE_SPACING: 120,
-  CALL_SPACING: 80,
-  NODE_HEIGHT: 80,
-  QUEUE_HEIGHT: 60,
-  HEADER_HEIGHT: 50,
-  PADDING: 80,
-} as const;

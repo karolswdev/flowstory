@@ -1,6 +1,6 @@
 # FlowStory — Service-Flow Renderer Upgrade Roadmap
 
-> **Status:** Phase 1 — Not Started
+> **Status:** Complete — All 8 Phases Delivered 🎉
 > **Created:** 2026-02-21
 > **Goal:** Transform the service-flow renderer from 4.5/10 to 9.5/10 — distinct visual shapes per actor type, dagre layout, multi-axis step control, zone grouping, and cinematic animation
 
@@ -23,32 +23,32 @@ The state-diagram renderer (dagre, phases, dual-axis, custom edges) is the gold 
 
 ---
 
-## Phase 1 — CSS Cleanup + Narration Wiring
-**Size: S | Rating after: 5.5/10**
+## Phase 1 — CSS Cleanup + Narration Wiring ✅
+**Size: S | Rating after: 5.5/10 | Completed: 2026-02-21**
 
 Immediate quality lift. Fix design system violations, wire narration already in YAML.
 
-- [ ] Delete dead CSS (`.service-flow-step-info`, `.database-node` — 70+ lines)
-- [ ] Fix `background: white` → `var(--color-bg-elevated)`
-- [ ] Fix Material Design purple in queue glow → Tailwind `#A855F7`
-- [ ] Add `narration` to step schema (one-line `.optional()` addition)
-- [ ] Replace Material Design → Tailwind colors in `SERVICE_TYPE_COLORS` and `CALL_TYPE_COLORS`
-- [ ] Pass `narration`, `onStepChange`, `showDots` to `<StepOverlay>`
+- [x] Delete dead CSS (`.service-flow-step-info`, `.database-node` — 70+ lines)
+- [x] Fix `background: white` → `var(--color-bg-elevated)`
+- [x] Fix Material Design purple in queue glow → Tailwind `#A855F7`
+- [x] Add `narration` to step schema (one-line `.optional()` addition)
+- [x] Replace Material Design → Tailwind colors in `SERVICE_TYPE_COLORS` and `CALL_TYPE_COLORS`
+- [x] Pass `narration`, `onStepChange`, `showDots` to `<StepOverlay>`
 
 **Files:** `service-nodes.css`, `service-flow.ts` (schema), `ServiceFlowCanvas.tsx`
 
 ---
 
-## Phase 2 — Multi-Axis Step Control
-**Size: M | Depends on: Phase 1 | Rating after: 6.5/10**
+## Phase 2 — Multi-Axis Step Control ✅
+**Size: M | Depends on: Phase 1 | Rating after: 6.5/10 | Completed: 2026-02-21**
 
 The architectural fix that unblocks the most painful authoring problems.
 
-- [ ] Add `focusNodes[]` to step schema — camera targets independent of calls
-- [ ] Add `revealNodes[]` to step schema — explicitly reveal nodes without a call
-- [ ] Add `revealCalls[]` to step schema — reveal edges in completed state
-- [ ] Replace 3-set step computation with 6-set (modeled on state-diagram)
-- [ ] Camera uses `focusNodeIds` when non-empty, falls back to call participants
+- [x] Add `focusNodes[]` to step schema — camera targets independent of calls
+- [x] Add `revealNodes[]` to step schema — explicitly reveal nodes without a call
+- [x] Add `revealCalls[]` to step schema — reveal edges in completed state
+- [x] Replace 3-set step computation with 6-set (modeled on state-diagram)
+- [x] Camera uses `focusNodeIds` when non-empty, falls back to call participants
 
 **Files:** `service-flow.ts` (schema), `ServiceFlowCanvas.tsx`
 
@@ -65,17 +65,18 @@ The architectural fix that unblocks the most painful authoring problems.
 
 ---
 
-## Phase 3 — Dagre Layout
-**Size: M | Depends on: Phase 2 | Rating after: 7.0/10**
+## Phase 3 — Dagre Layout ✅
+**Size: M | Depends on: Phase 2 | Rating after: 7.0/10 | Completed: 2026-02-21**
 
 Replace hand-rolled BFS with dagre for proper graph layout.
 
-- [ ] Import `@dagrejs/dagre` (already a project dependency)
-- [ ] Replace `computeNodeDepths` + `buildSequenceLayout` with `buildDagreLayout`
-- [ ] `rankdir: 'LR'`, `nodesep: 80`, `ranksep: 140`, type-aware node dimensions
-- [ ] Port `detectBidirectional()` from state-diagram
-- [ ] Exclude self-loops from dagre graph
-- [ ] Remove dead `LAYOUTS` constants (`topology`/`trace` never implemented)
+- [x] Import `@dagrejs/dagre` (already a project dependency)
+- [x] Replace `computeNodeDepths` + `buildSequenceLayout` with `buildDagreLayout`
+- [x] `rankdir: 'LR'`, `nodesep: 80`, `ranksep: 140`, type-aware node dimensions
+- [x] Port `detectBidirectional()` from state-diagram
+- [x] Exclude self-loops from dagre graph
+- [x] Remove dead `LAYOUTS` constants (`topology`/`trace` never implemented)
+- [x] Remove dead `SERVICE_FLOW_LAYOUT` constants (replaced by dagre config)
 
 **Files:** `ServiceFlowCanvas.tsx`, `service-flow.ts` (layout constants)
 
@@ -83,8 +84,8 @@ Replace hand-rolled BFS with dagre for proper graph layout.
 
 ---
 
-## Phase 4 — Distinct Visual Node Types
-**Size: L | Depends on: Phase 3 | Rating after: 8.0/10**
+## Phase 4 — Distinct Visual Node Types ✅
+**Size: L | Depends on: Phase 3 | Rating after: 8.0/10 | Completed: 2026-02-21**
 
 Each actor type gets a distinct visual shape. The #1 user request.
 
@@ -99,44 +100,44 @@ Each actor type gets a distinct visual shape. The #1 user request.
 | `workflow` | Pill/stadium | `WorkflowNode.tsx` |
 | `cache` | Rounded square + bolt | `CacheNode.tsx` |
 
-- [ ] Create 7 new node components in `src/components/service/`
-- [ ] Expand `SERVICE_TYPES` with `'event-bus'`, `'workflow'`, `'event-processor'`
-- [ ] Expand `nodeTypes` registry in canvas, map service type → component
-- [ ] Add per-type dimensions in `dimensions.ts` for smart edge routing
-- [ ] CSS for each shape with three-tier states (active/complete/dimmed)
-- [ ] Update barrel exports
+- [x] Create 7 new node components in `src/components/service/`
+- [x] Expand `SERVICE_TYPES` with `'event-bus'`, `'workflow'`, `'event-processor'`
+- [x] Expand `nodeTypes` registry in canvas, map service type → component
+- [x] Add per-type dimensions in `dimensions.ts` for smart edge routing
+- [x] CSS for each shape with three-tier states (active/complete/dimmed)
+- [x] Update barrel exports
 
 **Files:** 7 new `*.tsx`, `service-flow.ts`, `ServiceFlowCanvas.tsx`, `dimensions.ts`, `service-nodes.css`, `index.ts`
 
 ---
 
-## Phase 5 — Custom Edge Component
-**Size: M | Depends on: Phase 3 | Rating after: 8.5/10**
+## Phase 5 — Custom Edge Component ✅
+**Size: M | Depends on: Phase 3 | Rating after: 8.5/10 | Completed: 2026-02-21**
 
 Fix dark mode, semantic labels, bidirectional handling, self-loops.
 
-- [ ] Create `ServiceCallEdge.tsx` (modeled on `TransitionEdge.tsx`)
-- [ ] Semantic label parts: method (bold) + path (secondary) + duration (tertiary)
-- [ ] Three-tier CSS: `.call-edge-active` / `.call-edge-complete` / `.call-edge-dimmed`
-- [ ] Bidirectional curvature offset (+0.35 / -0.35)
-- [ ] Self-loop bezier arc
-- [ ] All colors via design tokens — eliminate hardcoded `#333` and `#fff`
-- [ ] Register `edgeTypes` in canvas, pass data instead of inline styles
+- [x] Create `ServiceCallEdge.tsx` (modeled on `TransitionEdge.tsx`)
+- [x] Semantic label parts: method (bold) + path (secondary) + duration (tertiary)
+- [x] Three-tier CSS: `.call-edge-active` / `.call-edge-complete` / `.call-edge-dimmed`
+- [x] Bidirectional curvature offset (+0.35 / -0.35)
+- [x] Self-loop bezier arc
+- [x] All colors via design tokens — eliminate hardcoded `#333` and `#fff`
+- [x] Register `edgeTypes` in canvas, pass data instead of inline styles
 
 **Files:** New `ServiceCallEdge.tsx`, `ServiceFlowCanvas.tsx`, `service-nodes.css`
 
 ---
 
-## Phase 6 — Zone/Group Support
-**Size: M | Depends on: Phase 3 | Rating after: 9.0/10**
+## Phase 6 — Zone/Group Support ✅
+**Size: M | Depends on: Phase 3 | Rating after: 9.0/10 | Completed: 2026-02-21**
 
 Visual grouping for bounded contexts, sync/async paths, teams.
 
-- [ ] Create `ZoneNode.tsx` (modeled on `StatePhaseNode`)
-- [ ] Add `ZoneDefSchema` (id, label, members[], color?) to schema
-- [ ] Add `zones[]` to story schema
-- [ ] Compute zone bounding boxes post-dagre from member positions
-- [ ] Zone color palette (6 semi-transparent Tailwind colors)
+- [x] Create `ZoneNode.tsx` (modeled on `StatePhaseNode`)
+- [x] Add `ZoneDefSchema` (id, label, members[], color?) to schema
+- [x] Add `zones[]` to story schema
+- [x] Compute zone bounding boxes post-dagre from member positions
+- [x] Zone color palette (6 semi-transparent Tailwind colors)
 
 **Files:** New `ZoneNode.tsx`, `service-flow.ts`, `ServiceFlowCanvas.tsx`
 
@@ -153,28 +154,28 @@ zones:
 
 ---
 
-## Phase 7 — Entry Effects
-**Size: S | Depends on: Phase 2 | Rating after: 9.2/10**
+## Phase 7 — Entry Effects ✅
+**Size: S | Depends on: Phase 2 | Rating after: 9.2/10 | Completed: 2026-02-21**
 
 Newly-revealed nodes spring in with a bounce; previously-revealed nodes stay still.
 
-- [ ] Track `isNew` per node (revealed this step vs previously)
-- [ ] `isNew` nodes: dramatic entry (scale 0.6→1, spring overshoot)
-- [ ] Existing nodes: no re-animation
-- [ ] `isNew` edges: stroke draw-in animation (dashoffset)
+- [x] Track `isNew` per node (revealed this step vs previously)
+- [x] `isNew` nodes: dramatic entry (scale 0.6→1, spring overshoot)
+- [x] Existing nodes: no re-animation
+- [x] `isNew` edges: stroke draw-in animation (dashoffset)
 
 **Files:** `ServiceFlowCanvas.tsx`, all node components, `ServiceCallEdge.tsx`
 
 ---
 
-## Phase 8 — Response Edges + Payload Display
-**Size: S | Depends on: Phase 5 | Rating after: 9.5/10**
+## Phase 8 — Response Edges + Payload Display ✅
+**Size: S | Depends on: Phase 5 | Rating after: 9.5/10 | Completed: 2026-02-21**
 
 Show HTTP responses flowing back. Eliminate the "re-activate forward call" hack.
 
-- [ ] Add `response: { status, label? }` to `SyncCallSchema`
-- [ ] Generate reverse edge with `isResponse: true` for calls with `response`
-- [ ] Response edges: dotted stroke, lighter color, reversed arrowhead
+- [x] Add `response: { status, label? }` to `SyncCallSchema`
+- [x] Generate reverse edge with `isResponse: true` for calls with `response`
+- [x] Response edges: dotted stroke, lighter color, reversed arrowhead
 
 **Files:** `service-flow.ts`, `ServiceFlowCanvas.tsx`, `ServiceCallEdge.tsx`
 

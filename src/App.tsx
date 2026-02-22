@@ -484,6 +484,18 @@ function App() {
 
         {/* Keyboard help overlay (press ? to toggle) */}
         <KeyboardHelp enabled={true} />
+
+        {/* Subtle GitHub link in embed mode */}
+        {isEmbed && (
+          <a
+            href="https://github.com/karolswdev/flowstory"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="embed-watermark"
+          >
+            Powered by FlowStory
+          </a>
+        )}
       </main>
     </div>
   );

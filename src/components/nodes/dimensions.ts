@@ -4,9 +4,18 @@
  */
 
 export const NODE_DIMENSIONS = {
-  // service-flow (CSS: min-width 200px, schema NODE_HEIGHT 80; queue min-width 160px, QUEUE_HEIGHT 60)
+  // service-flow — generic service (rectangle) and queue
   service:   { width: 200, height: 80 },
   queue:     { width: 160, height: 60 },
+  // service-flow — distinct visual shapes
+  database:        { width: 160, height: 100 },
+  'event-bus':     { width: 180, height: 90 },
+  gateway:         { width: 120, height: 120 },
+  external:        { width: 180, height: 90 },
+  worker:          { width: 180, height: 80 },
+  'event-processor': { width: 180, height: 80 },
+  workflow:        { width: 180, height: 70 },
+  cache:           { width: 120, height: 120 },
 
   // http-flow (CSS: participant min-width 120px ~80h; request/response min-width 280px ~90h)
   participant: { width: 120, height: 80 },

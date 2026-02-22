@@ -7,6 +7,7 @@ import { QUEUE_TYPE_ICONS } from '../../schemas/service-flow';
 export interface QueueNodeData extends QueueDef {
   isActive?: boolean;
   isComplete?: boolean;
+  isNew?: boolean;
 }
 
 interface QueueNodeProps {
@@ -23,6 +24,7 @@ export const QueueNode = memo(function QueueNode({ data, selected }: QueueNodePr
     consumers,
     isActive = false,
     isComplete = false,
+    isNew = false,
   } = data;
 
   const icon = QUEUE_TYPE_ICONS[type as QueueType] || '📥';
@@ -32,13 +34,16 @@ export const QueueNode = memo(function QueueNode({ data, selected }: QueueNodePr
     <motion.div
       className={`queue-node queue-node--${type} queue-node--${stateClass}`}
       data-state={stateClass}
-      initial={{ opacity: 0, scale: 0.9 }}
-      animate={{ 
-        opacity: 1, 
+      initial={isNew ? { opacity: 0, scale: 0.6 } : { opacity: 0, scale: 0.9 }}
+      animate={{
+        opacity: 1,
         scale: 1,
-        boxShadow: isActive ? '0 0 12px rgba(156, 39, 176, 0.4)' : 'none',
+        boxShadow: isActive ? '0 0 12px rgba(168, 85, 247, 0.4)' : 'none',
       }}
-      transition={{ duration: 0.2 }}
+      transition={isNew
+        ? { type: 'spring', stiffness: 400, damping: 25, mass: 0.8 }
+        : { duration: 0.2 }
+      }
     >
       <NodeHandles />
 

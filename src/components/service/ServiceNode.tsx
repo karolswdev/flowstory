@@ -11,6 +11,7 @@ import {
 export interface ServiceNodeData extends ServiceDef {
   isActive?: boolean;
   isComplete?: boolean;
+  isNew?: boolean;
 }
 
 interface ServiceNodeProps {
@@ -38,6 +39,7 @@ export const ServiceNode = memo(function ServiceNode({ data, selected }: Service
     instances,
     isActive = false,
     isComplete = false,
+    isNew = false,
   } = data;
 
   const icon = SERVICE_TYPE_ICONS[type as ServiceType] || '⚙️';
@@ -53,13 +55,16 @@ export const ServiceNode = memo(function ServiceNode({ data, selected }: Service
         borderColor: isActive ? borderColor : undefined,
         boxShadow: isActive ? `0 0 12px ${borderColor}40` : undefined,
       }}
-      initial={{ opacity: 0, scale: 0.9 }}
-      animate={{ 
-        opacity: 1, 
+      initial={isNew ? { opacity: 0, scale: 0.6 } : { opacity: 0, scale: 0.9 }}
+      animate={{
+        opacity: 1,
         scale: 1,
         filter: isActive ? 'brightness(1.1)' : 'brightness(1)',
       }}
-      transition={{ duration: 0.2 }}
+      transition={isNew
+        ? { type: 'spring', stiffness: 400, damping: 25, mass: 0.8 }
+        : { duration: 0.2 }
+      }
     >
       <NodeHandles />
 
