@@ -39,18 +39,18 @@ export const SERVICE_TYPE_ICONS: Record<ServiceType, string> = {
 };
 
 export const SERVICE_TYPE_COLORS: Record<ServiceType, string> = {
-  api: '#2196F3',
-  worker: '#9C27B0',
-  gateway: '#FF9800',
-  database: '#795548',
-  cache: '#00BCD4',
-  external: '#607D8B',
+  api: '#3B82F6',
+  worker: '#A855F7',
+  gateway: '#F59E0B',
+  database: '#78716C',
+  cache: '#06B6D4',
+  external: '#64748B',
 };
 
 export const STATUS_COLORS: Record<HealthStatus, string> = {
-  healthy: '#4CAF50',
-  degraded: '#FFC107',
-  down: '#F44336',
+  healthy: '#22C55E',
+  degraded: '#F59E0B',
+  down: '#EF4444',
 };
 
 export const QUEUE_TYPE_ICONS: Record<QueueType, string> = {
@@ -60,10 +60,10 @@ export const QUEUE_TYPE_ICONS: Record<QueueType, string> = {
 };
 
 export const CALL_TYPE_COLORS: Record<CallType, string> = {
-  sync: '#2196F3',
-  async: '#9C27B0',
-  publish: '#FF9800',
-  subscribe: '#009688',
+  sync: '#3B82F6',
+  async: '#A855F7',
+  publish: '#F59E0B',
+  subscribe: '#14B8A6',
 };
 
 // ============================================================================
@@ -151,6 +151,10 @@ export const ServiceFlowStepSchema = z.object({
   narrative: z.string(),
   activeCalls: z.array(z.string()),
   duration: z.number().optional(),
+  narration: z.object({
+    speaker: z.string(),
+    message: z.string(),
+  }).optional(),
 });
 
 export const ServiceFlowStorySchema = z.object({

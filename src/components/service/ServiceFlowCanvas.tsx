@@ -248,8 +248,8 @@ function buildSequenceLayout(
       sourceHandle,
       targetHandle,
       label,
-      labelStyle: { fill: '#333', fontSize: 11, fontWeight: 500 },
-      labelBgStyle: { fill: '#fff', fillOpacity: 1, rx: 4, ry: 4, filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.15))' },
+      labelStyle: { fill: 'var(--color-text, #333)', fontSize: 11, fontWeight: 500 },
+      labelBgStyle: { fill: 'var(--color-bg-elevated, #fff)', fillOpacity: 1, rx: 4, ry: 4, filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.15))' },
       labelBgPadding: [6, 4] as [number, number],
       zIndex: 1000,
       animated,
@@ -360,14 +360,14 @@ export function ServiceFlowCanvas({
         nodesConnectable={false}
         elementsSelectable={true}
       >
-        <Background color="#e0e0e0" gap={20} />
+        <Background color="var(--edge-default, #e0e0e0)" gap={20} />
         <Controls showInteractive={false} />
         <ServiceFlowCameraController activeNodeIds={activeNodeIds} />
         <MiniMap 
           nodeColor={(node) => {
-            if (node.type === 'queue') return '#9C27B0';
+            if (node.type === 'queue') return '#A855F7';
             const data = node.data as ServiceNodeData;
-            return SERVICE_TYPE_COLORS[data.type] || '#2196F3';
+            return SERVICE_TYPE_COLORS[data.type] || '#3B82F6';
           }}
           maskColor="rgba(0, 0, 0, 0.1)"
         />
@@ -378,6 +378,9 @@ export function ServiceFlowCanvas({
         totalSteps={story.steps.length}
         title={story.steps[currentStepIndex]?.title}
         narrative={story.steps[currentStepIndex]?.narrative}
+        narration={story.steps[currentStepIndex]?.narration}
+        onStepChange={onStepChange}
+        showDots
       />
     </div>
   );
