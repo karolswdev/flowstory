@@ -6,11 +6,10 @@ import {
   MiniMap,
   useNodesState,
   useEdgesState,
-  useReactFlow,
   type Node,
   type Edge,
 } from '@xyflow/react';
-import { motion, AnimatePresence } from 'motion/react';
+import { StepOverlay } from '../shared';
 import { BCCoreNode } from './BCCoreNode';
 import { ArtifactNode } from './ArtifactNode';
 import { ChildArtifactNode } from './ChildArtifactNode';
@@ -23,6 +22,7 @@ import {
 } from '../../utils/layout/bcDeploymentLayout';
 import { getSmartHandles, type NodeRect } from '../nodes/NodeHandles';
 import { NODE_DIMENSIONS } from '../nodes/dimensions';
+import { useAutoFocus } from '../../hooks/useCameraController';
 import './bc-deployment.css';
 
 interface BCDeploymentCanvasProps {
@@ -51,14 +51,9 @@ export function BCDeploymentCanvas({
   currentStepIndex,
   onStepChange 
 }: BCDeploymentCanvasProps) {
-  console.log('[BCDeploymentCanvas] Rendering, story:', story?.title);
-  
-  const { fitBounds, getNodes } = useReactFlow();
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
-  
-  console.log('[BCDeploymentCanvas] Hooks initialized, nodes count:', nodes.length);
 
   const currentStep = story.steps[currentStepIndex] as BCDeploymentStep | undefined;
   
@@ -269,52 +264,11 @@ export function BCDeploymentCanvas({
     setEdges(storyEdges);
   }, [story.edges, story.artifacts, activeEdgeIds, expandedNodes, nodeRects, setEdges]);
 
-  // Focus camera on active nodes
-  useEffect(() => {
-    if (!currentStep?.focusNodes?.length) return;
-
-    // Small delay to let nodes render
-    const timer = setTimeout(() => {
-      const allNodes = getNodes();
-      const focusNodes = allNodes.filter(n => focusNodeIds.has(n.id));
-      
-      if (focusNodes.length === 0) {
-        // If no focus nodes, fit all
-        fitBounds(
-          { x: -300, y: -300, width: 600, height: 600 },
-          { padding: 0.2, duration: 600 }
-        );
-        return;
-      }
-
-      // Calculate bounds of focus nodes
-      const bounds = focusNodes.reduce(
-        (acc, node) => ({
-          minX: Math.min(acc.minX, node.position.x),
-          minY: Math.min(acc.minY, node.position.y),
-          maxX: Math.max(acc.maxX, node.position.x + 150),
-          maxY: Math.max(acc.maxY, node.position.y + 100),
-        }),
-        { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }
-      );
-
-      // Adjust padding based on zoom level
-      const zoomLevel = currentStep.zoomLevel || 1;
-      const padding = zoomLevel > 1 ? 80 : 120;
-      
-      fitBounds(
-        {
-          x: bounds.minX - padding,
-          y: bounds.minY - padding,
-          width: bounds.maxX - bounds.minX + padding * 2,
-          height: bounds.maxY - bounds.minY + padding * 2,
-        },
-        { padding: 0.1, duration: 600 }
-      );
-    }, 100);
-
-    return () => clearTimeout(timer);
-  }, [currentStep, focusNodeIds, fitBounds, getNodes]);
+  // Active node IDs for camera auto-focus
+  const activeNodeIds = useMemo(
+    () => [...focusNodeIds],
+    [focusNodeIds],
+  );
 
   // Layout mode indicator
   const layoutMode = story.layout?.mode || 'radial';
@@ -335,6 +289,7 @@ export function BCDeploymentCanvas({
       >
         <Background color="#ccc" gap={20} />
         <Controls position="bottom-left" />
+        <BCDeploymentCameraController activeNodeIds={activeNodeIds} />
         <MiniMap 
           nodeColor={(node) => {
             if (node.type === 'bc-core') return story.bc.color || '#4CAF50';
@@ -355,46 +310,34 @@ export function BCDeploymentCanvas({
         <span>{layoutMode}</span>
       </div>
 
-      {/* Step Description Overlay */}
-      <AnimatePresence mode="wait">
-        {currentStep && (
-          <motion.div
-            key={currentStepIndex}
-            className="bc-step-overlay"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            transition={{ duration: 0.3 }}
-            style={{ '--bc-color': story.bc.color || '#4CAF50' } as React.CSSProperties}
-          >
-            <h3 className="bc-step-title">{currentStep.title}</h3>
-            <p className="bc-step-description">{currentStep.description}</p>
-            
-            {/* Narration bubble (if present) */}
-            {currentStep.narration && (
-              <div className={`bc-narration ${currentStep.narration.position || 'right'}`}>
-                {currentStep.narration.speaker && (
-                  <span className="narration-speaker">{currentStep.narration.speaker}:</span>
-                )}
-                <span className="narration-message">{currentStep.narration.message}</span>
-              </div>
-            )}
-            
-            <div className="bc-step-progress">
-              {story.steps.map((_, i) => (
-                <button
-                  key={i}
-                  className={`bc-step-dot ${i === currentStepIndex ? 'active' : i < currentStepIndex ? 'complete' : ''}`}
-                  onClick={() => onStepChange?.(i)}
-                  aria-label={`Go to step ${i + 1}`}
-                />
-              ))}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {currentStep && (
+        <StepOverlay
+          stepIndex={currentStepIndex}
+          totalSteps={story.steps.length}
+          title={currentStep.title}
+          description={currentStep.description}
+          narration={currentStep.narration}
+          accentColor={story.bc.color || '#22c55e'}
+          onStepChange={onStepChange}
+          showDots
+        />
+      )}
     </div>
   );
+}
+
+/**
+ * Inner component for camera auto-focus.
+ * Must be a child of <ReactFlow> to access useReactFlow().
+ */
+function BCDeploymentCameraController({ activeNodeIds }: { activeNodeIds: string[] }) {
+  useAutoFocus(activeNodeIds, {
+    padding: 120,
+    duration: 600,
+    maxZoom: 1.3,
+    minZoom: 0.3,
+  });
+  return null;
 }
 
 export default BCDeploymentCanvas;

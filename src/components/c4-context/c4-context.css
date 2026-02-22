@@ -282,7 +282,7 @@
 }
 
 .c4-edge-label {
-  background: white;
+  background: var(--color-bg-elevated);
   padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-sm);
   font-size: var(--font-size-sm);
@@ -305,7 +305,7 @@
   display: flex;
   gap: var(--space-5);
   padding: var(--space-3) var(--space-4);
-  background: white;
+  background: var(--color-bg-elevated);
   border: var(--node-border-width) solid var(--edge-default);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-sm);

@@ -122,7 +122,7 @@
 .architectural-canvas.transitioning .bc-region,
 .architectural-canvas.transitioning .orchestration-layer,
 .architectural-canvas.transitioning .infrastructure-layer {
-  transition: all 0.5s ease-out;
+  transition: opacity 0.5s ease-out, transform 0.5s ease-out;
 }
 
 /* Executive view - simplified */

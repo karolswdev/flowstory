@@ -2,6 +2,8 @@
  * FlowStory Hooks
  */
 
+export { useCameraController, useAutoFocus } from './useCameraController';
+
 export { usePresentationMode } from './usePresentationMode';
 export type { PresentationModeState } from './usePresentationMode';
 

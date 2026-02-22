@@ -1,14 +1,17 @@
 /**
- * FlowStory Design Tokens
- * 
- * Single source of truth for visual consistency across all renderers.
- * Import this in main.css before component styles.
+ * FlowStory Design Tokens — Single Source of Truth
+ *
+ * All visual tokens for the entire app live here.
+ * Import via index.css. Never define tokens elsewhere.
  */
 
 :root {
   /* ============================================
-     Typography Scale (1.25 ratio)
+     Typography
      ============================================ */
+  --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+  /* Scale (1.25 ratio) */
   --fs-xs: 10px;
   --fs-sm: 12px;
   --fs-md: 14px;
@@ -17,16 +20,39 @@
   --fs-2xl: 28px;
   --fs-3xl: 36px;
 
-  /* Font Weights */
+  /* Aliases for --font-size-* consumers */
+  --font-size-xs: var(--fs-xs);
+  --font-size-sm: var(--fs-sm);
+  --font-size-md: var(--fs-md);
+  --font-size-lg: var(--fs-lg);
+  --font-size-xl: var(--fs-xl);
+
+  /* Weights */
   --fw-normal: 400;
   --fw-medium: 500;
   --fw-semibold: 600;
   --fw-bold: 700;
 
+  /* Aliases for --font-weight-* consumers */
+  --font-weight-normal: var(--fw-normal);
+  --font-weight-medium: var(--fw-medium);
+  --font-weight-semibold: var(--fw-semibold);
+  --font-weight-bold: var(--fw-bold);
+
   /* Line Heights */
   --lh-tight: 1.2;
   --lh-normal: 1.5;
   --lh-relaxed: 1.75;
+
+  /* Aliases for --line-height-* consumers */
+  --line-height-tight: var(--lh-tight);
+  --line-height-normal: 1.4;
+  --line-height-relaxed: 1.6;
+
+  /* Letter Spacing */
+  --tracking-tight: -0.01em;
+  --tracking-normal: 0;
+  --tracking-wide: 0.05em;
 
   /* ============================================
      Spacing Scale (4px base)
@@ -44,29 +70,42 @@
   --space-16: 64px;
 
   /* ============================================
-     Colors - Light Theme
+     Colors — Light Theme
      ============================================ */
-  
+
   /* Backgrounds */
   --color-bg: #ffffff;
-  --color-bg-secondary: #f8f9fa;
+  --color-bg-secondary: #f8fafc;
+  --color-bg-tertiary: #f1f5f9;
   --color-bg-elevated: #ffffff;
   --color-bg-overlay: rgba(0, 0, 0, 0.5);
 
+  /* Aliases for global.css consumers */
+  --color-bg-primary: var(--color-bg);
+
+  /* Surfaces */
+  --color-surface-primary: var(--color-bg);
+  --color-surface-secondary: var(--color-bg-secondary);
+  --color-surface-border: var(--color-border);
+
   /* Text */
-  --color-text: #1a1a2e;
-  --color-text-secondary: #6b7280;
-  --color-text-muted: #9ca3af;
+  --color-text: #0f172a;
+  --color-text-secondary: #64748b;
+  --color-text-muted: #94a3b8;
   --color-text-inverse: #ffffff;
 
-  /* Borders */
-  --color-border: #e5e7eb;
-  --color-border-strong: #d1d5db;
+  /* Aliases for global.css consumers */
+  --color-text-primary: var(--color-text);
 
-  /* Primary */
-  --color-primary: #2563eb;
-  --color-primary-hover: #1d4ed8;
+  /* Borders */
+  --color-border: #e2e8f0;
+  --color-border-strong: #cbd5e1;
+
+  /* Brand */
+  --color-primary: #3b82f6;
+  --color-primary-hover: #2563eb;
   --color-primary-light: #dbeafe;
+  --color-secondary: #22c55e;
 
   /* Semantic */
   --color-success: #10b981;
@@ -78,17 +117,81 @@
   --color-info: #3b82f6;
   --color-info-light: #dbeafe;
 
-  /* Status Colors (for diagrams) */
+  /* Status Colors */
   --status-healthy: #10b981;
   --status-degraded: #f59e0b;
   --status-critical: #ef4444;
-  --status-unknown: #9ca3af;
+  --status-unknown: #94a3b8;
   --status-pending: #8b5cf6;
+
+  /* ============================================
+     Node Colors (Tailwind palette)
+     ============================================ */
+
+  /* System — blue */
+  --node-system-bg: #eff6ff;
+  --node-system-border: #3b82f6;
+  --node-system-text: #1e40af;
+  --node-system-icon: #3b82f6;
+
+  /* Action — green */
+  --node-action-bg: #f0fdf4;
+  --node-action-border: #22c55e;
+  --node-action-text: #166534;
+  --node-action-icon: #22c55e;
+
+  /* Event — amber */
+  --node-event-bg: #fffbeb;
+  --node-event-border: #f59e0b;
+  --node-event-text: #92400e;
+  --node-event-icon: #f59e0b;
+
+  /* Decision — orange */
+  --node-decision-bg: #fff7ed;
+  --node-decision-border: #f97316;
+  --node-decision-text: #9a3412;
+  --node-decision-icon: #f97316;
+
+  /* Actor — purple */
+  --node-actor-bg: #faf5ff;
+  --node-actor-border: #a855f7;
+  --node-actor-text: #6b21a8;
+  --node-actor-icon: #a855f7;
+
+  /* State variants */
+  --node-state-success-bg: #dcfce7;
+  --node-state-success-border: #22c55e;
+  --node-state-success-text: #166534;
+
+  --node-state-error-bg: #fee2e2;
+  --node-state-error-border: #ef4444;
+  --node-state-error-text: #991b1b;
+
+  --node-state-warning-bg: #fef3c7;
+  --node-state-warning-border: #f59e0b;
+  --node-state-warning-text: #92400e;
+
+  --node-state-info-bg: #dbeafe;
+  --node-state-info-border: #3b82f6;
+  --node-state-info-text: #1e40af;
+
+  --node-state-danger-bg: #fee2e2;
+  --node-state-danger-border: #ef4444;
+  --node-state-danger-text: #991b1b;
+
+  /* ============================================
+     Edge Colors
+     ============================================ */
+  --edge-default: #94a3b8;
+  --edge-flow: #3b82f6;
+  --edge-error: #ef4444;
+  --edge-success: #22c55e;
+  --edge-async: #8b5cf6;
 
   /* ============================================
      Diagram-Specific Palettes
      ============================================ */
-  
+
   /* Service Types */
   --svc-service: #3b82f6;
   --svc-database: #10b981;
@@ -123,7 +226,7 @@
   --es-hotspot: #ef4444;
 
   /* ADR Status */
-  --adr-draft: #9ca3af;
+  --adr-draft: #94a3b8;
   --adr-proposed: #3b82f6;
   --adr-decided: #10b981;
   --adr-deprecated: #f59e0b;
@@ -131,14 +234,14 @@
   --adr-rejected: #ef4444;
 
   /* ============================================
-     Shadows
+     Shadows — Visible, with depth
      ============================================ */
-  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.06);
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.06);
-  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 0, 0, 0.06);
-  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1), 0 4px 6px rgba(0, 0, 0, 0.05);
-  --shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.1), 0 10px 10px rgba(0, 0, 0, 0.04);
-  --shadow-focus: 0 0 0 3px rgba(59, 130, 246, 0.3);
+  --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.12), 0 2px 4px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 10px 20px rgba(0, 0, 0, 0.12), 0 4px 8px rgba(0, 0, 0, 0.06);
+  --shadow-xl: 0 20px 30px rgba(0, 0, 0, 0.14), 0 10px 12px rgba(0, 0, 0, 0.06);
+  --shadow-focus: 0 0 0 3px rgba(59, 130, 246, 0.35);
 
   /* ============================================
      Border Radius
@@ -154,6 +257,7 @@
      ============================================ */
   --border-width: 1px;
   --border-width-thick: 2px;
+  --node-border-width: 1.5px;
 
   /* ============================================
      Transitions
@@ -179,30 +283,96 @@
    ============================================ */
 [data-theme="dark"],
 .dark {
+  /* Backgrounds */
   --color-bg: #0f172a;
   --color-bg-secondary: #1e293b;
+  --color-bg-tertiary: #334155;
   --color-bg-elevated: #1e293b;
   --color-bg-overlay: rgba(0, 0, 0, 0.7);
 
+  /* Text */
   --color-text: #f1f5f9;
   --color-text-secondary: #94a3b8;
   --color-text-muted: #64748b;
 
+  /* Borders */
   --color-border: #334155;
   --color-border-strong: #475569;
 
-  --color-primary: #3b82f6;
-  --color-primary-hover: #60a5fa;
+  /* Brand */
+  --color-primary: #60a5fa;
+  --color-primary-hover: #3b82f6;
   --color-primary-light: #1e3a5f;
 
+  /* Semantic */
+  --color-success: #34d399;
   --color-success-light: #064e3b;
+  --color-warning: #fbbf24;
   --color-warning-light: #78350f;
+  --color-error: #f87171;
   --color-error-light: #7f1d1d;
+  --color-info: #60a5fa;
   --color-info-light: #1e3a5f;
 
+  /* Node colors — dark */
+  --node-system-bg: #1e3a5f;
+  --node-system-border: #60a5fa;
+  --node-system-text: #bfdbfe;
+  --node-system-icon: #60a5fa;
+
+  --node-action-bg: #14532d;
+  --node-action-border: #4ade80;
+  --node-action-text: #bbf7d0;
+  --node-action-icon: #4ade80;
+
+  --node-event-bg: #451a03;
+  --node-event-border: #fbbf24;
+  --node-event-text: #fef3c7;
+  --node-event-icon: #fbbf24;
+
+  --node-decision-bg: #431407;
+  --node-decision-border: #fb923c;
+  --node-decision-text: #fed7aa;
+  --node-decision-icon: #fb923c;
+
+  --node-actor-bg: #3b0764;
+  --node-actor-border: #c084fc;
+  --node-actor-text: #e9d5ff;
+  --node-actor-icon: #c084fc;
+
+  --node-state-success-bg: #14532d;
+  --node-state-success-border: #4ade80;
+  --node-state-success-text: #bbf7d0;
+
+  --node-state-error-bg: #450a0a;
+  --node-state-error-border: #f87171;
+  --node-state-error-text: #fecaca;
+
+  --node-state-warning-bg: #451a03;
+  --node-state-warning-border: #fbbf24;
+  --node-state-warning-text: #fef3c7;
+
+  --node-state-info-bg: #1e3a5f;
+  --node-state-info-border: #60a5fa;
+  --node-state-info-text: #bfdbfe;
+
+  --node-state-danger-bg: #450a0a;
+  --node-state-danger-border: #f87171;
+  --node-state-danger-text: #fecaca;
+
+  /* Edge colors — dark */
+  --edge-default: #64748b;
+  --edge-flow: #60a5fa;
+  --edge-error: #f87171;
+  --edge-success: #4ade80;
+  --edge-async: #a78bfa;
+
+  /* Shadows — dark */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.2);
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 10px 20px rgba(0, 0, 0, 0.5);
+  --shadow-xl: 0 20px 30px rgba(0, 0, 0, 0.6);
 }
 
 /* ============================================

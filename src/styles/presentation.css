@@ -105,7 +105,7 @@
   height: 8px;
   border-radius: var(--radius-full);
   background: var(--color-text-muted);
-  transition: all var(--transition-fast);
+  transition: background-color var(--transition-fast), transform var(--transition-fast);
 }
 
 .presentation-progress__dot--active {

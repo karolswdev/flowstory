@@ -5,7 +5,7 @@
 .adr-node {
   min-width: 220px;
   max-width: 280px;
-  background: white;
+  background: var(--color-bg-elevated);
   border: var(--node-border-width) solid var(--edge-default);
   border-radius: var(--radius-lg);
   padding: var(--space-3) var(--space-4);

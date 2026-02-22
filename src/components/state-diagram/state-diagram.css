@@ -1,0 +1,398 @@
+/* ============================================================================
+   State Diagram Renderer — CSS
+   ============================================================================ */
+
+/* Canvas */
+.state-diagram-canvas {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  background: var(--color-bg-primary);
+}
+
+/* ── Step Info Overlay ── */
+.state-diagram-step-info {
+  position: absolute;
+  bottom: 20px;
+  left: 20px;
+  max-width: 420px;
+  background: var(--color-surface-primary);
+  border: 1px solid var(--color-surface-border);
+  border-radius: 12px;
+  padding: 16px 20px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
+  z-index: 10;
+}
+
+.state-diagram-step-info .step-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+  padding: 2px 8px;
+  border-radius: 10px;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.state-diagram-step-info .step-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-bottom: 6px;
+  line-height: 1.3;
+}
+
+.state-diagram-step-info .step-narrative {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+/* ── State Node: Normal (Pill) ── */
+.state-diagram-node {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 28px;
+  border: 2px solid var(--color-surface-border, #ddd);
+  background: var(--color-surface-primary, #fff);
+  cursor: default;
+  transition: border-color 0.3s, box-shadow 0.3s, opacity 0.3s;
+  min-width: 120px;
+  justify-content: center;
+  font-family: var(--font-family, system-ui, sans-serif);
+}
+
+.state-diagram-node .state-diagram-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary, #333);
+  white-space: nowrap;
+  letter-spacing: 0.3px;
+}
+
+.state-diagram-node .state-diagram-icon {
+  font-size: 14px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+/* Variant colors */
+.state-diagram-node.variant-success { border-color: var(--node-state-success-border); }
+.state-diagram-node.variant-error   { border-color: var(--node-state-error-border); }
+.state-diagram-node.variant-warning { border-color: var(--node-state-warning-border); }
+.state-diagram-node.variant-info    { border-color: var(--node-state-info-border); }
+.state-diagram-node.variant-danger  { border-color: var(--node-state-danger-border); }
+.state-diagram-node.variant-default { border-color: var(--edge-default); }
+
+/* Active state */
+.state-diagram-node.node-active {
+  border-width: 3px;
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.15), 0 4px 20px rgba(59, 130, 246, 0.2);
+  z-index: 10;
+}
+
+.state-diagram-node.node-active.variant-success {
+  box-shadow: 0 0 0 4px rgba(76, 175, 80, 0.15), 0 4px 20px rgba(76, 175, 80, 0.2);
+}
+.state-diagram-node.node-active.variant-error {
+  box-shadow: 0 0 0 4px rgba(244, 67, 54, 0.15), 0 4px 20px rgba(244, 67, 54, 0.2);
+}
+.state-diagram-node.node-active.variant-warning {
+  box-shadow: 0 0 0 4px rgba(255, 152, 0, 0.15), 0 4px 20px rgba(255, 152, 0, 0.2);
+}
+.state-diagram-node.node-active.variant-info {
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.15), 0 4px 20px rgba(59, 130, 246, 0.2);
+}
+.state-diagram-node.node-active.variant-danger {
+  box-shadow: 0 0 0 4px rgba(233, 30, 99, 0.15), 0 4px 20px rgba(233, 30, 99, 0.2);
+}
+
+/* Complete state */
+.state-diagram-node.node-complete {
+  opacity: 0.55;
+  filter: saturate(0.5);
+}
+
+/* Dimmed state (not yet revealed) */
+.state-diagram-node.node-dimmed {
+  opacity: 0.25;
+  filter: saturate(0.3);
+}
+
+/* ── Initial Node (UML filled circle) ── */
+.state-diagram-initial {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: default;
+}
+
+.state-diagram-initial .initial-marker {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--color-text);
+  flex-shrink: 0;
+}
+
+.state-diagram-initial .initial-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-primary, #333);
+  white-space: nowrap;
+}
+
+.state-diagram-initial.node-active .initial-marker {
+  box-shadow: 0 0 0 4px rgba(51, 51, 51, 0.2), 0 2px 12px rgba(0, 0, 0, 0.3);
+}
+
+.state-diagram-initial.node-complete {
+  opacity: 0.55;
+  filter: saturate(0.5);
+}
+
+.state-diagram-initial.node-dimmed {
+  opacity: 0.25;
+}
+
+/* ── Terminal Node (UML bull's-eye) ── */
+.state-diagram-terminal {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: default;
+}
+
+.state-diagram-terminal .terminal-marker {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 3px solid var(--color-text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.state-diagram-terminal .terminal-inner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-text);
+}
+
+.state-diagram-terminal .terminal-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-primary, #333);
+  white-space: nowrap;
+}
+
+.state-diagram-terminal.node-active .terminal-marker {
+  box-shadow: 0 0 0 4px rgba(51, 51, 51, 0.2), 0 2px 12px rgba(0, 0, 0, 0.3);
+}
+
+.state-diagram-terminal.node-complete {
+  opacity: 0.55;
+  filter: saturate(0.5);
+}
+
+.state-diagram-terminal.node-dimmed {
+  opacity: 0.25;
+}
+
+/* ── Choice Node (Diamond) ── */
+.state-diagram-choice {
+  cursor: default;
+  position: relative;
+}
+
+.state-diagram-choice .choice-diamond {
+  width: 48px;
+  height: 48px;
+  background: var(--node-decision-border);
+  transform: rotate(45deg);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--node-decision-text);
+}
+
+.state-diagram-choice .choice-icon {
+  transform: rotate(-45deg);
+  color: white;
+  font-size: 18px;
+  font-weight: bold;
+}
+
+.state-diagram-choice .choice-label {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-primary, #333);
+  white-space: nowrap;
+}
+
+.state-diagram-choice.node-active .choice-diamond {
+  box-shadow: 0 0 0 4px rgba(255, 152, 0, 0.2), 0 4px 16px rgba(255, 152, 0, 0.3);
+}
+
+.state-diagram-choice.node-complete {
+  opacity: 0.55;
+  filter: saturate(0.5);
+}
+
+.state-diagram-choice.node-dimmed {
+  opacity: 0.25;
+}
+
+/* ── Phase Background Node ── */
+.state-diagram-phase {
+  border-radius: 16px;
+  border: 1px dashed rgba(0, 0, 0, 0.12);
+  pointer-events: none;
+  position: relative;
+}
+
+.state-diagram-phase .phase-label {
+  position: absolute;
+  top: 8px;
+  left: 16px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: rgba(0, 0, 0, 0.35);
+}
+
+/* ── Transition Edge Labels ── */
+.transition-edge-label {
+  background: var(--color-surface-primary, #fff);
+  border: 1px solid var(--color-surface-border, #ddd);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  pointer-events: all;
+  max-width: 200px;
+}
+
+.transition-edge-label .trigger-text {
+  font-weight: 600;
+  color: var(--color-text-primary, #333);
+}
+
+.transition-edge-label .guard-text {
+  font-style: italic;
+  color: var(--color-warning);
+  font-size: 10px;
+}
+
+.transition-edge-label .action-text {
+  font-size: 10px;
+  color: var(--color-text-secondary, #666);
+}
+
+.transition-edge-label.label-active {
+  border-color: var(--color-primary);
+  box-shadow: 0 1px 8px rgba(59, 130, 246, 0.15);
+}
+
+/* ── Transition Edge Paths ── */
+.transition-edge-path {
+  stroke: var(--edge-default);
+  stroke-width: 1.5;
+  fill: none;
+  transition: stroke 0.3s, stroke-width 0.3s, opacity 0.3s;
+}
+
+.transition-edge-path.edge-active {
+  stroke: var(--node-state-info-border);
+  stroke-width: 2.5;
+  filter: drop-shadow(0 0 3px rgba(59, 130, 246, 0.3));
+}
+
+.transition-edge-path.edge-complete {
+  stroke: var(--edge-default);
+  stroke-width: 1.5;
+  opacity: 0.6;
+}
+
+.transition-edge-path.edge-dimmed {
+  stroke: var(--color-border);
+  stroke-width: 1;
+  opacity: 0.3;
+}
+
+.transition-edge-path.edge-error {
+  stroke: var(--edge-error);
+}
+
+.transition-edge-path.edge-error.edge-active {
+  stroke: var(--edge-error);
+  filter: drop-shadow(0 0 3px rgba(244, 67, 54, 0.3));
+}
+
+/* ── Glow Animation ── */
+@keyframes state-glow-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+  50%      { box-shadow: 0 0 0 6px rgba(59, 130, 246, 0.15); }
+}
+
+.state-diagram-node.node-active {
+  animation: state-glow-pulse 2s ease-in-out infinite;
+}
+
+/* ── Dark Mode ── */
+[data-theme="dark"] .state-diagram-node {
+  background: var(--color-surface-primary);
+  border-color: var(--color-surface-border);
+}
+
+[data-theme="dark"] .state-diagram-node .state-diagram-label {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .state-diagram-initial .initial-marker {
+  background: var(--color-text-muted);
+}
+
+[data-theme="dark"] .state-diagram-terminal .terminal-marker {
+  border-color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .state-diagram-terminal .terminal-inner {
+  background: var(--color-text-muted);
+}
+
+[data-theme="dark"] .state-diagram-phase {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme="dark"] .state-diagram-phase .phase-label {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+[data-theme="dark"] .transition-edge-label {
+  background: var(--color-surface-primary);
+  border-color: var(--color-surface-border);
+}
+
+[data-theme="dark"] .transition-edge-path {
+  stroke: #546E7A;
+}
+
+[data-theme="dark"] .transition-edge-path.edge-dimmed {
+  stroke: #37474F;
+}

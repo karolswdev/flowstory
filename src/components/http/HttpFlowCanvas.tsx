@@ -4,6 +4,7 @@
  */
 
 import { useMemo, useState } from 'react';
+import { StepOverlay } from '../shared';
 import {
   ReactFlow,
   Background,
@@ -13,7 +14,6 @@ import {
   type Node,
   type Edge,
 } from '@xyflow/react';
-import { motion } from 'motion/react';
 import type { HttpFlowStory, Exchange, Participant } from '../../schemas/http-flow';
 import { METHOD_COLORS, getStatusColor } from '../../schemas/http-flow';
 import { ParticipantNode } from './ParticipantNode';
@@ -323,24 +323,16 @@ export function HttpFlowCanvas({
           </div>
         </Panel>
 
-        {/* Step info panel */}
-        {currentStep && (
-          <Panel position="bottom-center">
-            <motion.div
-              className="step-panel"
-              key={currentStep.id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-            >
-              <div className="step-badge">
-                Step {currentStepIndex + 1} / {story.steps.length}
-              </div>
-              <h4>{currentStep.title}</h4>
-              <p>{currentStep.narrative}</p>
-            </motion.div>
-          </Panel>
-        )}
       </ReactFlow>
+
+      {currentStep && (
+        <StepOverlay
+          stepIndex={currentStepIndex}
+          totalSteps={story.steps.length}
+          title={currentStep.title}
+          narrative={currentStep.narrative}
+        />
+      )}
     </div>
   );
 }

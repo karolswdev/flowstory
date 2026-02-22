@@ -20,7 +20,7 @@ import {
   type Node,
   type Edge,
 } from '@xyflow/react';
-import { motion, AnimatePresence } from 'motion/react';
+import { StepOverlay } from '../shared';
 import type {
   BCCompositionStory,
   Step as CompositionStep,
@@ -501,40 +501,16 @@ export function BCCompositionCanvas({
         <BCCompositionCameraController activeNodeIds={focusNodeIdsArray} />
       </ReactFlow>
 
-      {/* Step Description Overlay */}
-      <AnimatePresence mode="wait">
-        {currentStep && (
-          <motion.div
-            key={currentStep.id}
-            className="bc-step-overlay"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            transition={{ duration: 0.3 }}
-          >
-            <h3 className="bc-step-title">{currentStep.title}</h3>
-            {currentStep.description && (
-              <p className="bc-step-description">{currentStep.description}</p>
-            )}
-            {currentStep.narration && (
-              <div className="bc-narration">
-                {currentStep.narration.speaker && (
-                  <span className="narration-speaker">{currentStep.narration.speaker}:</span>
-                )}
-                <span className="narration-message">{currentStep.narration.message}</span>
-              </div>
-            )}
-            <div className="bc-step-progress">
-              {story.steps.map((_, i) => (
-                <div
-                  key={i}
-                  className={`bc-step-dot ${i === currentStepIndex ? 'active' : i < currentStepIndex ? 'complete' : ''}`}
-                />
-              ))}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {currentStep && (
+        <StepOverlay
+          stepIndex={currentStepIndex}
+          totalSteps={story.steps.length}
+          title={currentStep.title}
+          description={currentStep.description}
+          narration={currentStep.narration}
+          showDots
+        />
+      )}
     </div>
   );
 }

@@ -31,6 +31,8 @@ import { MigrationRoadmapCanvas } from '../components/migration-roadmap';
 import { MigrationRoadmapStorySchema } from '../schemas/migration-roadmap';
 import { TeamOwnershipCanvas } from '../components/team-ownership';
 import { TeamOwnershipStorySchema } from '../schemas/team-ownership';
+import { StateDiagramCanvas } from '../components/state-diagram';
+import { StateDiagramStorySchema } from '../schemas/state-diagram';
 
 export type SpecializedStoryType =
   | 'service-flow'
@@ -45,7 +47,8 @@ export type SpecializedStoryType =
   | 'cloud-cost'
   | 'dependency-graph'
   | 'migration-roadmap'
-  | 'team-ownership';
+  | 'team-ownership'
+  | 'state-diagram';
 
 export type StoryType = 'story-flow' | SpecializedStoryType;
 
@@ -70,6 +73,7 @@ export const RENDERER_MAP: Record<SpecializedStoryType, SpecializedRendererConfi
   'dependency-graph': { type: 'dependency-graph', Canvas: DependencyGraphCanvas, schema: DependencyGraphStorySchema },
   'migration-roadmap': { type: 'migration-roadmap', Canvas: MigrationRoadmapCanvas, schema: MigrationRoadmapStorySchema },
   'team-ownership': { type: 'team-ownership', Canvas: TeamOwnershipCanvas, schema: TeamOwnershipStorySchema },
+  'state-diagram': { type: 'state-diagram', Canvas: StateDiagramCanvas, schema: StateDiagramStorySchema },
 };
 
 /** All specialized story type strings for type-guard checks */

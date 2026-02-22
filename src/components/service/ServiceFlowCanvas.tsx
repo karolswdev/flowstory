@@ -1,4 +1,5 @@
 import { useMemo, useCallback } from 'react';
+import { StepOverlay } from '../shared';
 import {
   ReactFlow,
   Background,
@@ -341,9 +342,7 @@ export function ServiceFlowCanvas({
     return [...new Set(ids)];
   }, [story.calls, activeCallIds]);
 
-  const onNodeClick = useCallback((event: React.MouseEvent, node: Node) => {
-    console.log('Service clicked:', node.id);
-  }, []);
+  const onNodeClick = useCallback((_event: React.MouseEvent, _node: Node) => {}, []);
 
   return (
     <div className="service-flow-canvas" data-testid="service-flow-canvas">
@@ -374,12 +373,12 @@ export function ServiceFlowCanvas({
         />
       </ReactFlow>
 
-      {/* Step info overlay */}
-      <div className="service-flow-step-info">
-        <div className="step-badge">Step {currentStepIndex + 1} / {story.steps.length}</div>
-        <div className="step-title">{story.steps[currentStepIndex]?.title}</div>
-        <div className="step-narrative">{story.steps[currentStepIndex]?.narrative}</div>
-      </div>
+      <StepOverlay
+        stepIndex={currentStepIndex}
+        totalSteps={story.steps.length}
+        title={story.steps[currentStepIndex]?.title}
+        narrative={story.steps[currentStepIndex]?.narrative}
+      />
     </div>
   );
 }

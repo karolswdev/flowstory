@@ -87,7 +87,7 @@
 
 .flow-edge-label {
   font-family: var(--font-family);
-  background: white;
+  background: var(--color-bg-elevated);
   padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-sm);
   font-size: var(--font-size-sm);
@@ -110,7 +110,7 @@
 }
 
 .event-edge-icon {
-  background: white;
+  background: var(--color-bg-elevated);
   border-radius: var(--radius-full);
   width: 24px;
   height: 24px;
@@ -129,7 +129,7 @@
 
 .event-edge-label {
   font-family: var(--font-family);
-  background: white;
+  background: var(--color-bg-elevated);
   padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-sm);
   font-size: var(--font-size-sm);
@@ -153,7 +153,7 @@
 
 .error-edge-label {
   font-family: var(--font-family);
-  background: white;
+  background: var(--color-bg-elevated);
   padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-sm);
   font-size: var(--font-size-sm);
@@ -176,7 +176,7 @@
 }
 
 .async-edge-icon {
-  background: white;
+  background: var(--color-bg-elevated);
   border-radius: var(--radius-full);
   width: 24px;
   height: 24px;
@@ -195,7 +195,7 @@
 
 .async-edge-label {
   font-family: var(--font-family);
-  background: white;
+  background: var(--color-bg-elevated);
   padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-sm);
   font-size: var(--font-size-sm);

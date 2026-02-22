@@ -108,7 +108,7 @@
 .stage-node {
   min-width: 260px;
   min-height: 120px;
-  background: white;
+  background: var(--color-bg-elevated);
   border: var(--node-border-width) solid var(--node-system-border);
   border-radius: var(--radius-lg);
   font-family: var(--font-family);
@@ -184,7 +184,7 @@
   width: 10px;
   height: 10px;
   background: var(--node-system-border);
-  border: 2px solid white;
+  border: 2px solid var(--color-bg-elevated);
   border-radius: var(--radius-full);
 }
 
@@ -194,7 +194,7 @@
 
 .job-node {
   min-width: 220px;
-  background: white;
+  background: var(--color-bg-elevated);
   border: var(--node-border-width) solid var(--edge-default);
   border-radius: var(--radius-md);
   font-family: var(--font-family);
@@ -265,7 +265,7 @@
   width: 8px;
   height: 8px;
   background: var(--edge-default);
-  border: 2px solid white;
+  border: 2px solid var(--color-bg-elevated);
   border-radius: var(--radius-full);
 }
 
@@ -415,6 +415,6 @@
   width: 8px;
   height: 8px;
   background: var(--node-decision-border);
-  border: 2px solid white;
+  border: 2px solid var(--color-bg-elevated);
   border-radius: var(--radius-full);
 }

@@ -27,6 +27,12 @@ export const NODE_DIMENSIONS = {
   compositionCore:    { width: 160, height: 160 },
   compositionElement: { width: 160, height: 90 },
   compositionChild:   { width: 100, height: 50 },
+
+  // state-diagram (schema: NODE_WIDTH 192, NODE_HEIGHT 56; initial/terminal 32+80 × 32; choice 56 × 76)
+  stateNormal:   { width: 192, height: 56 },
+  stateInitial:  { width: 112, height: 32 },
+  stateTerminal: { width: 112, height: 32 },
+  stateChoice:   { width: 56, height: 76 },
 } as const;
 
 export type NodeDimensionKey = keyof typeof NODE_DIMENSIONS;

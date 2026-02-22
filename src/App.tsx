@@ -13,10 +13,21 @@ import { parseStory } from './utils/parser';
 import { assignSimplePositions } from './utils/layout/simpleLayout';
 import { RENDERER_MAP, type StoryType, type SpecializedStoryType } from './renderers/specialized';
 import { EffectsProvider } from './effects';
-import { usePresentationMode, useStepNavigation } from './hooks';
+import { usePresentationMode, useStepNavigation, useShareableUrl } from './hooks';
 import { StepProgressDots } from './components/StepProgressDots';
 import { KeyboardHelp } from './components/KeyboardHelp';
 import './styles/global.css';
+
+// ── URL param helpers ──
+
+function getUrlParams() {
+  const params = new URLSearchParams(window.location.search);
+  return {
+    story: params.get('story'),
+    step: params.get('step') ? Number(params.get('step')) : null,
+    embed: params.get('embed') === 'true',
+  };
+}
 
 // ── Detect story type from YAML content ──
 
@@ -132,26 +143,14 @@ const STORIES: Record<string, { title: string; category: string; file?: string }
     category: 'FinOps',
     file: './stories/cloud-cost/monthly-review.yaml',
   },
-  'dependency-graph': {
-    title: 'Dependency Graph',
-    category: 'Architecture',
-    file: './stories/dependency-graph/microservices.yaml',
-  },
+  // dependency-graph: removed from MVP catalog (too thin — 136 lines)
   'event-storming': {
     title: 'Event Storming',
     category: 'DDD',
     file: './stories/event-storming/order-domain.yaml',
   },
-  'migration-roadmap': {
-    title: 'Migration Roadmap',
-    category: 'Strategy',
-    file: './stories/migration-roadmap/monolith-to-microservices.yaml',
-  },
-  'team-ownership': {
-    title: 'Team Ownership',
-    category: 'Organization',
-    file: './stories/team-ownership/platform-teams.yaml',
-  },
+  // migration-roadmap: removed from MVP catalog (too thin — 97 lines)
+  // team-ownership: removed from MVP catalog (too thin — 99 lines)
   'tech-radar': {
     title: 'Tech Radar',
     category: 'Strategy',
@@ -172,6 +171,11 @@ const STORIES: Record<string, { title: string; category: string; file?: string }
     title: 'Trip Ops — VR 16-State Machine',
     category: 'Catalyst',
     file: './stories/catalyst/trip-ops-vr-state-machine.yaml',
+  },
+  'state-diagram-vr-lifecycle': {
+    title: 'VR Lifecycle (State Diagram)',
+    category: 'State Diagrams',
+    file: './stories/state-diagram/vr-lifecycle.yaml',
   },
   'catalyst-trip-ops-pt-state-machine': {
     title: 'Trip Ops — PT 16-State Machine',
@@ -317,21 +321,29 @@ function StoryLoader({
 // ── Main App ──
 
 function App() {
+  const urlParams = getUrlParams();
+
   const getInitialStory = () => {
-    const params = new URLSearchParams(window.location.search);
-    const storyParam = params.get('story');
-    return storyParam && STORIES[storyParam] ? storyParam : 'user-registration';
+    return urlParams.story && STORIES[urlParams.story] ? urlParams.story : 'user-registration';
   };
 
   const [currentStory, setCurrentStory] = useState(getInitialStory);
   const [activeStory, setActiveStory] = useState<ActiveStory>({ type: 'story-flow' });
+  const [isEmbed] = useState(urlParams.embed);
+  const [initialStep] = useState(urlParams.step);
 
   // Presentation mode
   const { isPresenting, togglePresentation } = usePresentationMode();
 
-  // Unified step change
+  // Unified step change — also update URL param
   const handleStepChange = useCallback((step: number) => {
-    setActiveStory(prev => prev.type === 'story-flow' ? prev : { ...prev, step });
+    setActiveStory(prev => {
+      if (prev.type === 'story-flow') return prev;
+      const url = new URL(window.location.href);
+      url.searchParams.set('step', String(step));
+      window.history.replaceState({}, '', url.toString());
+      return { ...prev, step };
+    });
   }, []);
 
   // Step info for keyboard navigation + progress dots
@@ -347,6 +359,9 @@ function App() {
     enabled: stepInfo !== null,
   });
 
+  // Shareable URL
+  const { copyUrl, copied } = useShareableUrl(currentStory, stepInfo?.step ?? 0);
+
   // Reset state when switching stories
   const handleStoryChange = useCallback((storyId: string) => {
     setCurrentStory(storyId);
@@ -356,10 +371,15 @@ function App() {
     window.history.replaceState({}, '', url.toString());
   }, []);
 
-  // Stable callback for StoryLoader
+  // Stable callback for StoryLoader — apply initial step from URL if present
   const handleSpecializedLoad = useCallback((story: ActiveStory) => {
-    setActiveStory(story);
-  }, []);
+    if (initialStep !== null && story.type !== 'story-flow') {
+      const maxStep = story.story.steps.length - 1;
+      setActiveStory({ ...story, step: Math.min(initialStep, maxStep) });
+    } else {
+      setActiveStory(story);
+    }
+  }, [initialStep]);
 
   const isSpecialized = activeStory.type !== 'story-flow';
 
@@ -371,47 +391,66 @@ function App() {
       flexDirection: 'column',
       background: 'var(--color-bg-primary)',
     }}>
-      {/* Toolbar - hidden in presentation mode */}
-      <header className="app-toolbar" data-testid="app-toolbar" data-hide-in-presentation style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        padding: '8px 16px',
-        borderBottom: '1px solid var(--color-surface-border)',
-        background: 'var(--color-surface-primary)',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <h1 style={{
-            margin: 0,
-            fontSize: '18px',
-            fontWeight: 600,
-            color: 'var(--color-text-primary)'
-          }}>
-            FlowStory
-          </h1>
-          <StorySelector currentStory={currentStory} onStoryChange={handleStoryChange} />
-        </div>
-        <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }} data-hide-in-presentation>
-          <ExportButton showLabels />
-          <button
-            onClick={togglePresentation}
-            style={{
-              padding: '8px 16px',
-              background: 'var(--color-primary)',
-              color: 'white',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '14px',
-              fontWeight: 500,
-            }}
-            title="Press P to present, ESC to exit"
-          >
-            {isPresenting ? 'Exit (ESC)' : 'Present (P)'}
-          </button>
-          <ThemeToggle showLabel />
-        </div>
-      </header>
+      {/* Toolbar - hidden in presentation mode and embed mode */}
+      {!isEmbed && (
+        <header className="app-toolbar" data-testid="app-toolbar" data-hide-in-presentation style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '8px 16px',
+          borderBottom: '1px solid var(--color-surface-border)',
+          background: 'var(--color-surface-primary)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            <h1 style={{
+              margin: 0,
+              fontSize: '18px',
+              fontWeight: 600,
+              color: 'var(--color-text-primary)'
+            }}>
+              FlowStory
+            </h1>
+            <StorySelector currentStory={currentStory} onStoryChange={handleStoryChange} />
+          </div>
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }} data-hide-in-presentation>
+            <button
+              onClick={copyUrl}
+              style={{
+                padding: '8px 16px',
+                background: copied ? 'var(--color-success)' : 'var(--color-bg-secondary)',
+                color: copied ? 'var(--color-text-inverse)' : 'var(--color-text)',
+                border: '1px solid var(--color-border)',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '14px',
+                fontWeight: 500,
+                transition: 'background-color 200ms ease-out, color 200ms ease-out',
+              }}
+              title="Copy shareable link to clipboard"
+            >
+              {copied ? 'Copied!' : 'Share Link'}
+            </button>
+            <ExportButton showLabels />
+            <button
+              onClick={togglePresentation}
+              style={{
+                padding: '8px 16px',
+                background: 'var(--color-primary)',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '14px',
+                fontWeight: 500,
+              }}
+              title="Press P to present, ESC to exit"
+            >
+              {isPresenting ? 'Exit (ESC)' : 'Present (P)'}
+            </button>
+            <ThemeToggle showLabel />
+          </div>
+        </header>
+      )}
 
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <StoryLoader

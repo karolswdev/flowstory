@@ -75,7 +75,7 @@
 .tech-blip-circle {
   stroke: white;
   stroke-width: var(--border-width-thick);
-  transition: all var(--transition-fast);
+  transition: stroke-width var(--transition-fast), filter var(--transition-fast), transform var(--transition-fast);
 }
 
 .tech-blip.highlighted .tech-blip-circle {

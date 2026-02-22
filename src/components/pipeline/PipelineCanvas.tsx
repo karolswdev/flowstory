@@ -1,4 +1,5 @@
 import { useMemo, useCallback } from 'react';
+import { StepOverlay } from '../shared';
 import {
   ReactFlow,
   Background,
@@ -28,6 +29,7 @@ import {
 } from '../../schemas/pipeline';
 import { getSmartHandles, type NodeRect } from '../nodes/NodeHandles';
 import { NODE_DIMENSIONS } from '../nodes/dimensions';
+import { useAutoFocus } from '../../hooks/useCameraController';
 
 import './pipeline-nodes.css';
 
@@ -225,9 +227,15 @@ export function PipelineCanvas({
     return buildStagesLayout(story, activeStages, activeJobs, activeGates, completedStages, completedJobs);
   }, [story, activeStages, activeJobs, activeGates, completedStages, completedJobs]);
 
-  const onNodeClick = useCallback((event: React.MouseEvent, node: Node) => {
-    console.log('Pipeline element clicked:', node.id);
-  }, []);
+  // Compute active node IDs for camera focus
+  const activeNodeIds = useMemo(() => {
+    const ids: string[] = [];
+    activeStages.forEach(id => ids.push(id));
+    activeJobs.forEach(id => ids.push(id));
+    return ids;
+  }, [activeStages, activeJobs]);
+
+  const onNodeClick = useCallback((_event: React.MouseEvent, _node: Node) => {}, []);
 
   const triggerIcon = TRIGGER_TYPE_ICONS[story.pipeline.trigger.type] || '🔄';
 
@@ -261,7 +269,8 @@ export function PipelineCanvas({
       >
         <Background color="#e0e0e0" gap={20} />
         <Controls showInteractive={false} />
-        <MiniMap 
+        <PipelineCameraController activeNodeIds={activeNodeIds} />
+        <MiniMap
           nodeColor={(node) => {
             if (node.type === 'stage') return '#2196F3';
             if (node.type === 'gate') return '#FF9800';
@@ -272,14 +281,28 @@ export function PipelineCanvas({
         />
       </ReactFlow>
 
-      {/* Step info overlay */}
-      <div className="pipeline-step-info">
-        <div className="step-badge">Step {currentStepIndex + 1} / {story.steps.length}</div>
-        <div className="step-title">{story.steps[currentStepIndex]?.title}</div>
-        <div className="step-narrative">{story.steps[currentStepIndex]?.narrative}</div>
-      </div>
+      <StepOverlay
+        stepIndex={currentStepIndex}
+        totalSteps={story.steps.length}
+        title={story.steps[currentStepIndex]?.title}
+        narrative={story.steps[currentStepIndex]?.narrative}
+      />
     </div>
   );
+}
+
+/**
+ * Inner component for camera auto-focus.
+ * Must be a child of <ReactFlow> to access useReactFlow().
+ */
+function PipelineCameraController({ activeNodeIds }: { activeNodeIds: string[] }) {
+  useAutoFocus(activeNodeIds, {
+    padding: 100,
+    duration: 600,
+    maxZoom: 1.3,
+    minZoom: 0.4,
+  });
+  return null;
 }
 
 export default PipelineCanvas;

@@ -7,7 +7,7 @@
    Cost Block (Category & Resource)
    ============================================ */
 .cc-block {
-  background: white;
+  background: var(--color-bg-elevated);
   border: var(--node-border-width) solid var(--edge-default);
   border-radius: var(--radius-md);
   padding: var(--space-3);
