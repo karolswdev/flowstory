@@ -1,6 +1,6 @@
+import { motion } from 'motion/react';
 import { memo } from 'react';
 import { NodeHandles } from '../nodes/NodeHandles';
-import { motion } from 'framer-motion';
 import type { ServiceDef, HealthStatus, ServiceType } from '../../schemas/service-flow';
 import {
   SERVICE_TYPE_ICONS,

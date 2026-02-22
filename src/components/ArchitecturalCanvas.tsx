@@ -1,3 +1,4 @@
+import { motion, AnimatePresence } from 'motion/react';
 /**
  * Architectural Canvas - BC-aware visualization with swim lanes
  * 
@@ -19,7 +20,6 @@ import {
   type Edge,
   type ReactFlowInstance,
 } from '@xyflow/react';
-import { motion, AnimatePresence } from 'framer-motion';
 import { nodeTypes } from './nodes';
 import { edgeTypes, EdgeMarkers } from './edges';
 import { LegendPanel } from './legend';

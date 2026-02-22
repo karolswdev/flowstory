@@ -1,0 +1,336 @@
+id: trip-ops-inbound-events
+title: "Trip Operations — Inbound Cross-BC Event Consumption"
+description: >
+  Trip Operations consumes events from three upstream bounded contexts via its
+  EventProcessor pod. Assignment BC drives VR reservation and PT-VR linking.
+  Enrollment BC triggers student discharge cleanup. Routing BC reorders stops.
+  This is the inbound side of the event-driven architecture — reactive domain logic
+  in response to cross-context state changes.
+renderer: service-flow
+schemaVersion: "2.0"
+layout: sequence
+
+services:
+  - id: enrollment-bc
+    name: Enrollment & Demand BC
+    type: api
+    technology: ".NET 10"
+    status: healthy
+
+  - id: routing-bc
+    name: Routing & Pricing BC
+    type: api
+    technology: ".NET 10"
+    status: healthy
+
+  - id: assignment-bc
+    name: Assignment BC
+    type: api
+    technology: ".NET 10"
+    status: healthy
+
+  - id: trip-ops-ep
+    name: Trip Ops EventProcessor
+    type: worker
+    technology: ".NET 10 — 9 EP Handlers"
+    status: healthy
+    instances: 1
+
+  - id: redis
+    name: Redis (Idempotency)
+    type: database
+    technology: "Redis — 1-hour TTL keys"
+
+  - id: trip-ops-api
+    name: Trip Ops API
+    type: api
+    technology: ".NET 10 — MediatR"
+    status: healthy
+
+  - id: trip-ops-db
+    name: trip_operations DB
+    type: database
+    technology: "PostgreSQL 16"
+
+queues:
+  - id: enrollment-topic
+    name: enrollment-and-demand (ASB)
+    type: topic
+    broker: servicebus
+    consumers: 1
+
+  - id: routing-topic
+    name: routing-and-pricing (ASB)
+    type: topic
+    broker: servicebus
+    consumers: 1
+
+  - id: assignment-topic
+    name: provider-network-and-assignment (ASB)
+    type: topic
+    broker: servicebus
+    consumers: 1
+
+calls:
+  # ── Assignment: TripAssignedEvent → ReserveVr ──
+  - id: trip-assigned-event
+    type: subscribe
+    from: assignment-topic
+    to: trip-ops-ep
+    messageType: "TripAssignedEvent"
+    action: "TripAssignedEventHandler"
+
+  - id: idempotency-check-1
+    type: sync
+    from: trip-ops-ep
+    to: redis
+    method: GET
+    path: "trip-ops:ep:TripAssignedEventHandler:{eventId}:{tenantId}"
+    duration: 2
+    status: ok
+    note: "1-hour TTL. Skip if already processed."
+
+  - id: reserve-vr-command
+    type: sync
+    from: trip-ops-ep
+    to: trip-ops-api
+    method: SEND
+    path: "ReserveVrCommand(vrId, driverId, vehicleId, monitorId)"
+    duration: 45
+    status: ok
+    note: "VR transitions NEW → RESERVED. VrStateChangedEvent fires."
+
+  # ── Assignment: TripAssignedToRunEvent → Link PT to VR ──
+  - id: trip-assigned-to-run
+    type: subscribe
+    from: assignment-topic
+    to: trip-ops-ep
+    messageType: "TripAssignedToRunEvent"
+    action: "TripAssignedToRunEventHandler"
+
+  - id: link-pt-to-vr
+    type: sync
+    from: trip-ops-ep
+    to: trip-ops-db
+    method: UPDATE
+    path: "PT.ReassignToVehicleRun(newVrId) + PT.SyncStateFromVehicleRun(vrStatus)"
+    duration: 20
+    status: ok
+    note: "Syncs PT state from parent VR. Copies DriverId, ServiceProviderId, MonitorId for settlement."
+
+  # ── Assignment: TripUnassignedEvent → Cancel/Flag PT ──
+  - id: trip-unassigned
+    type: subscribe
+    from: assignment-topic
+    to: trip-ops-ep
+    messageType: "TripUnassignedEvent"
+    action: "TripUnassignedEventHandler"
+
+  - id: cancel-or-flag-pt
+    type: sync
+    from: trip-ops-ep
+    to: trip-ops-db
+    method: UPDATE
+    path: "PT.Cancel(reason) — if pre-boarding, else flag for rescue"
+    duration: 20
+    status: ok
+    note: "CanBeReassigned() = true for NEW→ATPU. Pre-boarding → Cancel. Post-boarding → flag for Rescue Orchestration."
+
+  # ── Enrollment: StudentDischargedEvent → Cancel ALL PTs ──
+  - id: student-discharged
+    type: subscribe
+    from: enrollment-topic
+    to: trip-ops-ep
+    messageType: "StudentDischargedEvent"
+    action: "StudentDischargedEventHandler"
+
+  - id: idempotency-check-2
+    type: sync
+    from: trip-ops-ep
+    to: redis
+    method: GET
+    path: "enroll:discharged:{studentId}:{tenantId}"
+    duration: 2
+    status: ok
+
+  - id: cancel-all-pts
+    type: sync
+    from: trip-ops-ep
+    to: trip-ops-db
+    method: UPDATE
+    path: "SELECT all non-terminal PTs for student → CancelTripCommand (batch)"
+    duration: 35
+    status: ok
+    note: "Cancels NEW/GROUPING/DISPATCHING/ACCEPTED PTs. TOPU+ are flagged for rescue (student is en route)."
+
+  # ── Routing: StopSequencedEvent → Reorder VR stops ──
+  - id: stop-sequenced
+    type: subscribe
+    from: routing-topic
+    to: trip-ops-ep
+    messageType: "StopSequencedEvent"
+    action: "StopSequencedEventHandler"
+
+  - id: reorder-stops
+    type: sync
+    from: trip-ops-ep
+    to: trip-ops-db
+    method: UPDATE
+    path: "VehicleRun.Stops — reorder by optimized SequenceNumber"
+    duration: 25
+    status: ok
+    note: "Updates Stop.SequenceNumber in VehicleRun.Stops JSONB. ETA recalculation triggered."
+
+  # Mark idempotency
+  - id: mark-processed
+    type: sync
+    from: trip-ops-ep
+    to: redis
+    method: SET
+    path: "SET key=true TTL=3600s"
+    duration: 1
+    status: ok
+    note: "Idempotency key set after successful processing."
+
+steps:
+  - id: step-1
+    title: "The Inbound Event Architecture"
+    narrative: >
+      Trip Operations has 9 EventProcessor handlers — 4 handle self-consumed events
+      (SignalR broadcast) and 5 handle cross-context events from 3 upstream BCs.
+      Every handler follows the same pattern: idempotency check (Redis, 1-hour TTL),
+      domain logic, persist, mark processed. At-least-once delivery is safe because
+      every handler is idempotent.
+    activeCalls: []
+    duration: 5500
+    narration:
+      speaker: Architect
+      message: "5 cross-context handlers. 3 upstream BCs. All idempotent. At-least-once delivery is safe by design."
+
+  - id: step-2
+    title: "Assignment → Reserve the VehicleRun"
+    narrative: >
+      TripAssignedEvent from the Assignment BC triggers TripAssignedEventHandler.
+      Redis idempotency check first. Then ReserveVrCommand: VR transitions
+      NEW → RESERVED with DriverId, VehicleId, and optional MonitorId.
+      VrStateChangedEvent fires — SignalR updates the dispatch board in real-time.
+    activeCalls:
+      - trip-assigned-event
+      - idempotency-check-1
+      - reserve-vr-command
+    duration: 5500
+    narration:
+      speaker: Domain Expert
+      message: "Assignment matches driver to VR. Trip Ops reacts by reserving it. The VR goes from NEW to RESERVED — the offer negotiation can begin."
+
+  - id: step-3
+    title: "Assignment → Link PassengerTrip to VehicleRun"
+    narrative: >
+      TripAssignedToRunEvent links a specific PassengerTrip to its assigned
+      VehicleRun. TripAssignedToRunEventHandler calls PT.ReassignToVehicleRun()
+      and PT.SyncStateFromVehicleRun() to align the PT's state with the VR.
+      Critically: UpdateSettlementData() copies DriverId + ServiceProviderId +
+      MonitorId to the PT — this denormalization is what allows PtDroppedOffEvent
+      to carry settlement data without cross-BC queries.
+    activeCalls:
+      - trip-assigned-to-run
+      - link-pt-to-vr
+    duration: 5500
+    narration:
+      speaker: Architecture Lead
+      message: "The settlement data denormalization happens here — DriverId, ServiceProviderId, MonitorId copied to PT. This is why PtDroppedOffEvent is self-contained."
+
+  - id: step-4
+    title: "Assignment → Unassign a Trip"
+    narrative: >
+      TripUnassignedEvent fires when a driver is removed from a VR (illness, cancellation).
+      TripUnassignedEventHandler checks CanBeReassigned() for each affected PT.
+      Pre-boarding PTs (NEW through ATPU) are cancelled with PtCancelledEvent.
+      Post-boarding PTs (ONBOARD+) cannot be cancelled — they're flagged for
+      Rescue Orchestration to handle instead.
+    activeCalls:
+      - trip-unassigned
+      - cancel-or-flag-pt
+    duration: 5500
+    narration:
+      speaker: Domain Expert
+      message: "CanBeReassigned() enforces the domain rule: you can't cancel a trip after the student is already on the bus."
+
+  - id: step-5
+    title: "Enrollment → Student Discharged — Cancel All PTs"
+    narrative: >
+      StudentDischargedEvent from Enrollment & Demand triggers StudentDischargedEventHandler.
+      Redis idempotency check prevents duplicate processing (idempotency key:
+      enroll:discharged:{studentId}:{tenantId}). The handler queries all non-terminal
+      PTs for the discharged student and cancels them via CancelTripCommand.
+      Student won't appear in tomorrow's SGR generation — the SubscriptionTrip is deactivated.
+    activeCalls:
+      - student-discharged
+      - idempotency-check-2
+      - cancel-all-pts
+    duration: 5500
+    narration:
+      speaker: Domain Expert
+      message: "Student leaves the district → all their pending trips cancelled in one sweep. The idempotency key prevents this from running twice if the event is redelivered."
+
+  - id: step-6
+    title: "Routing → Reorder Stops After Optimization"
+    narrative: >
+      StopSequencedEvent fires after the Routing & Pricing BC completes route
+      optimization for a VehicleRun. StopSequencedEventHandler reorders the
+      Stop VOs in VehicleRun.Stops JSONB by the new optimized SequenceNumbers.
+      ETA recalculation is triggered — the next GPS fix will produce updated
+      confidence interval estimates based on the new stop order.
+    activeCalls:
+      - stop-sequenced
+      - reorder-stops
+    duration: 5500
+    narration:
+      speaker: Architecture Lead
+      message: "Routing optimizes the route. Trip Ops reorders the stops. ETA recalculates. This is event-driven choreography — no direct coupling between Routing and Trip Ops."
+
+  - id: step-7
+    title: "Idempotency — The At-Least-Once Safety Net"
+    narrative: >
+      Every cross-context handler writes an idempotency key to Redis after successful
+      processing (TTL: 1 hour). Pattern: trip-ops:ep:{handlerName}:{eventId}:{tenantId}.
+      This means Azure Service Bus can redeliver an event (at-least-once guarantee)
+      and the handler will safely skip it. No duplicate VR reservations, no double
+      student cancellations, no race conditions.
+    activeCalls:
+      - mark-processed
+    duration: 5000
+    narration:
+      speaker: Architect
+      message: "Redis idempotency is the safety net for at-least-once delivery. 1-hour TTL matches the ASB lock duration. Zero duplicate processing."
+
+  - id: step-8
+    title: "The Full Inbound Event Map"
+    narrative: >
+      5 inbound event types from 3 upstream BCs. 5 handlers with Redis idempotency.
+      All are reactions to upstream state changes — Assignment drives VR reservation,
+      Enrollment drives student cleanup, Routing drives stop reordering.
+      This is the choreography complement to Trip Ops' outbound event fanout — both
+      sides of the event-driven boundary.
+    activeCalls:
+      - trip-assigned-event
+      - idempotency-check-1
+      - reserve-vr-command
+      - trip-assigned-to-run
+      - link-pt-to-vr
+      - trip-unassigned
+      - cancel-or-flag-pt
+      - student-discharged
+      - idempotency-check-2
+      - cancel-all-pts
+      - stop-sequenced
+      - reorder-stops
+      - mark-processed
+    duration: 7000
+    narration:
+      speaker: Architecture Lead
+      message: "5 handlers, 3 upstream BCs, full idempotency. The inbound side is as important as the outbound fanout."
+
+camera:
+  center: [0, 0]
+  zoom: 1

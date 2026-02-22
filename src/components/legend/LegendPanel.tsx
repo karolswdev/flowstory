@@ -1,5 +1,5 @@
+import { motion, AnimatePresence } from 'motion/react';
 import { useState, useCallback, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import './legend.css';
 
 /**

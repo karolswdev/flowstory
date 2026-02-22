@@ -1,6 +1,6 @@
+import { motion } from 'motion/react';
 import { memo } from 'react';
 import { NodeHandles } from '../nodes/NodeHandles';
-import { motion } from 'framer-motion';
 import type { StageDef, GateDef } from '../../schemas/pipeline';
 import { GATE_STATUS_COLORS } from '../../schemas/pipeline';
 

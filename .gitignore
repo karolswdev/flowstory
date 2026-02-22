@@ -38,3 +38,6 @@ npm-debug.log*
 *.gif
 *.bmp
 *.webp
+
+# But keep README demo GIFs
+!docs/demos/*.gif

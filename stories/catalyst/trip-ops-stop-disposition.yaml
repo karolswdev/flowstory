@@ -1,0 +1,202 @@
+id: trip-ops-stop-disposition
+title: "Stop VO — 8-State Disposition Micro-Machine"
+description: >
+  The Stop value object is stored as a JSONB collection on VehicleRun (VehicleRun.Stops).
+  Each Stop has a StopDisposition enum tracking its execution state through the route.
+  This is the nested micro-machine inside every VR — 8 states from SCHEDULED through
+  COMPLETED (or CANCELLED). Mutations use immutable copy-with-change: WithArrival(),
+  WithDeparture(), WithPassengerTripId() — each returns a new Stop instance.
+renderer: state-diagram
+direction: LR
+
+phases:
+  - id: pre-route
+    label: "Pre-Route"
+    color: "rgba(59, 130, 246, 0.07)"
+    order: 1
+  - id: pickup-sequence
+    label: "Pickup Sequence"
+    color: "rgba(5, 150, 105, 0.07)"
+    order: 2
+  - id: dropoff-sequence
+    label: "Dropoff Sequence"
+    color: "rgba(245, 158, 11, 0.07)"
+    order: 3
+  - id: terminal
+    label: "Terminal"
+    color: "rgba(139, 92, 246, 0.07)"
+    order: 4
+
+states:
+  - id: scheduled
+    label: SCHEDULED
+    type: initial
+    phase: pre-route
+    description: "Stop created by SGR from SubscriptionTrip template. SequenceNumber set. Immutable VO in VehicleRun.Stops JSONB."
+
+  - id: intransit
+    label: INTRANSIT
+    type: normal
+    variant: info
+    phase: pickup-sequence
+    description: "Driver en route to this stop. VR.TOSTOP → Stop.INTRANSIT. WithArrival() pending."
+
+  - id: atpu
+    label: ATPU
+    type: normal
+    variant: default
+    phase: pickup-sequence
+    description: "Driver arrived at pickup location. WithArrival(time, ATPU) creates new Stop instance. GPS validated against stop coordinates."
+
+  - id: boarded
+    label: BOARDED
+    type: normal
+    variant: success
+    phase: pickup-sequence
+    description: "Student boarded. WithArrival(time, BOARDED) — pickup completion recorded. PT transitions ATPU → ONBOARD."
+
+  - id: intransittodo
+    label: INTRANSITTODO
+    type: normal
+    variant: info
+    phase: dropoff-sequence
+    description: "En route to student's dropoff (school). VR is in TOSTOP phase between pickup and dropoff stops."
+
+  - id: atdo
+    label: ATDO
+    type: normal
+    variant: default
+    phase: dropoff-sequence
+    description: "Driver arrived at dropoff. WithArrival(time, ATDO). PtArrivedAtDropoffEvent fires."
+
+  - id: completed
+    label: COMPLETED
+    type: terminal
+    phase: terminal
+    description: "Student dropped off. WithDeparture(time, isCompleted=true). IsCompleted=true. ActualDepartureTime recorded."
+
+  - id: cancelled
+    label: CANCELLED
+    type: terminal
+    phase: terminal
+    description: "Stop cancelled (student NoShow or trip cancellation). WithArrival(time, CANCELLED) or set directly."
+
+transitions:
+  # SGR → route start
+  - { id: ts1, source: scheduled,    target: intransit,     trigger: "VR.Start() / DepartPreviousStop", note: "VR transitions to TOSTOP" }
+
+  # Pickup sequence
+  - { id: ts2, source: intransit,    target: atpu,          trigger: "VR.ArriveAtStop()",  note: "WithArrival(time, ATPU) — new Stop instance" }
+  - { id: ts3, source: atpu,         target: boarded,       trigger: "PT.BoardPassenger()", note: "WithArrival(time, BOARDED) — custody transfer" }
+
+  # Transition to dropoff
+  - { id: ts4, source: boarded,      target: intransittodo, trigger: "VR.DepartFromStop()", note: "WithDeparture(time, isCompleted=false) — en route to dropoff" }
+
+  # Dropoff sequence
+  - { id: ts5, source: intransittodo,target: atdo,          trigger: "VR.ArriveAtStop()",  note: "WithArrival(time, ATDO)" }
+  - { id: ts6, source: atdo,         target: completed,     trigger: "PT.DropOffPassenger()", note: "WithDeparture(time, isCompleted=true) — PtDroppedOffEvent ⚡" }
+
+  # No-show path
+  - { id: tn1, source: atpu,         target: cancelled,     trigger: "PT.RecordNoShow()",  note: "Student didn't board — stop cancelled" }
+  - { id: tn2, source: intransit,    target: cancelled,     trigger: "PT.Cancel()",        note: "Trip cancelled before arrival" }
+  - { id: tn3, source: scheduled,    target: cancelled,     trigger: "PT.Cancel()",        note: "Pre-departure cancellation" }
+
+steps:
+  - id: step-1
+    title: "The Stop VO — Immutable JSONB Record"
+    narrative: >
+      Every VehicleRun has a Stops collection stored as JSONB in PostgreSQL.
+      Each Stop is an immutable C# record — a value object. It tracks a single
+      pickup or dropoff location's execution state through the 8-state
+      StopDisposition enum. Mutation uses copy-with-change: WithArrival(),
+      WithDeparture(), WithPassengerTripId() each return a NEW Stop instance.
+    activeStates: [scheduled]
+    activeTransitions: []
+    duration: 5500
+    narration:
+      speaker: Architect
+      message: "The Stop VO is created by SGR from SubscriptionTrip templates. It lives in VehicleRun.Stops as JSONB — one per pickup and dropoff."
+
+  - id: step-2
+    title: "Driver En Route — INTRANSIT"
+    narrative: >
+      When the VR starts or the driver departs a previous stop, this Stop
+      transitions to INTRANSIT. This mirrors the VR's TOSTOP status — the
+      driver is navigating toward this stop's coordinates.
+      Stop.SequenceNumber determines the order in the route.
+    activeStates: [intransit]
+    activeTransitions: [ts1]
+    duration: 4500
+    narration:
+      speaker: Domain Expert
+      message: "INTRANSIT mirrors TOSTOP on the VR. The stop 'knows' the driver is heading to it."
+
+  - id: step-3
+    title: "The Pickup Sequence — ATPU → BOARDED"
+    narrative: >
+      ArriveAtStop() validates GPS position (driver must be within range of stop coords)
+      and calls WithArrival(time, ATPU) — creating a NEW Stop instance (immutable).
+      When the student boards, BoardPassenger() calls WithArrival(time, BOARDED).
+      Both transitions raise StopArrivedEvent with the actual arrival time.
+    activeStates: [atpu, boarded]
+    activeTransitions: [ts2, ts3]
+    duration: 5500
+    narration:
+      speaker: Domain Expert
+      message: "ATPU and BOARDED are copy-with-change mutations. Each returns a new Stop record. The VR.Stops collection is rebuilt on every state change."
+
+  - id: step-4
+    title: "Between Stops — INTRANSITTODO"
+    narrative: >
+      After the student boards, DepartFromStop() calls WithDeparture(time, isCompleted=false)
+      — the stop is departed but NOT yet completed (the student needs to be dropped off).
+      The Stop transitions to INTRANSITTODO — tracking the driver's journey to the dropoff.
+      ActualDepartureTime is now recorded.
+    activeStates: [intransittodo]
+    activeTransitions: [ts4]
+    duration: 5000
+    narration:
+      speaker: Architecture Lead
+      message: "INTRANSITTODO is the bridge between pickup and dropoff. The stop knows the student is onboard and heading to school."
+
+  - id: step-5
+    title: "The Dropoff — ATDO → COMPLETED"
+    narrative: >
+      ArriveAtStop() at the dropoff triggers WithArrival(time, ATDO).
+      DropOffPassenger() calls WithDeparture(time, isCompleted=true) — Stop.COMPLETED.
+      IsCompleted=true. ActualArrivalTime and ActualDepartureTime both recorded.
+      This is the moment PtDroppedOffEvent fires — the revenue-critical transition.
+    activeStates: [atdo, completed]
+    activeTransitions: [ts5, ts6]
+    duration: 5500
+    narration:
+      speaker: Architect
+      message: "COMPLETED = stop fully executed. WithDeparture(isCompleted=true) seals the record. PtDroppedOffEvent fires on this transition."
+
+  - id: step-6
+    title: "Exception — CANCELLED Stop"
+    narrative: >
+      A stop can be cancelled from SCHEDULED (pre-departure), INTRANSIT (before arrival),
+      or ATPU (NoShow — student didn't board). CANCELLED stops are included in the
+      VehicleRun's validation check — ValidateCompletenessTask verifies all stops
+      are either COMPLETED or CANCELLED before POSTREADINESS is reached.
+    activeStates: [cancelled]
+    activeTransitions: [tn1, tn2, tn3]
+    duration: 5000
+    narration:
+      speaker: Domain Expert
+      message: "A CANCELLED stop is still 'accounted for' during post-trip validation. ValidateCompletenessTask accepts CANCELLED as a valid terminal state."
+
+  - id: step-7
+    title: "The Complete Stop Disposition Machine"
+    narrative: >
+      8 states. The lifecycle of a single pickup stop: SCHEDULED → INTRANSIT → ATPU →
+      BOARDED → INTRANSITTODO → ATDO → COMPLETED. This micro-machine runs in parallel
+      for every student on the route — 8 students means 8 parallel Stop VO state
+      machines embedded in the parent VehicleRun's JSONB Stops collection.
+    activeStates: [scheduled, intransit, atpu, boarded, intransittodo, atdo, completed, cancelled]
+    activeTransitions: [ts1, ts2, ts3, ts4, ts5, ts6, tn1, tn2, tn3]
+    duration: 6000
+    narration:
+      speaker: Architecture Lead
+      message: "8 states. One per student stop. All stored as JSONB on VehicleRun. The nested micro-machine inside the 16-state VR lifecycle."

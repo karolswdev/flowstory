@@ -1,0 +1,151 @@
+id: trip-ops-sgr-machine
+title: "ScheduledGenerationRun — 5-State Batch Lifecycle"
+description: >
+  The ScheduledGenerationRun (SGR) aggregate manages the nightly batch generation
+  of VehicleRuns and PassengerTrips from SubscriptionRun templates. Governed by
+  SgrStateMachine.cs with a 5-state transition matrix. Created and driven by the
+  sgr-generation-workflow in Orkes Conductor — running every night for every tenant.
+renderer: state-diagram
+direction: LR
+
+phases:
+  - id: pre-execution
+    label: "Pre-Execution"
+    color: "rgba(59, 130, 246, 0.07)"
+    order: 1
+  - id: executing
+    label: "Executing"
+    color: "rgba(245, 158, 11, 0.08)"
+    order: 2
+  - id: terminal
+    label: "Terminal"
+    color: "rgba(139, 92, 246, 0.07)"
+    order: 3
+
+states:
+  - id: queued
+    label: Queued
+    type: initial
+    phase: pre-execution
+    description: "SGR created by TriggerSgrCommand. GenerationDate set. Fires SgrStartedEvent to ASB. Conductor workflow starts."
+
+  - id: running
+    label: Running
+    type: normal
+    variant: warning
+    phase: executing
+    description: "CreateSgrInstanceTask transitions Queued → Running. StartedAt recorded. Batch generation underway. Up to 10 min for 500K trips."
+
+  - id: completed
+    label: Completed
+    type: terminal
+    phase: terminal
+    description: "All VRs and PTs generated successfully. Fires SgrCompletedEvent ⚡ → Assignment BC triggers batch matching. VehicleRunsCreated + PassengerTripsCreated + ConflictCount + DurationSeconds recorded."
+
+  - id: failed
+    label: Failed
+    type: terminal
+    phase: terminal
+    description: "Conductor compensation workflow activated. Partial VRs/PTs rolled back. FailureReason recorded. Fires SgrFailedEvent → Monitoring creates Critical alert."
+
+  - id: cancelled
+    label: Cancelled
+    type: terminal
+    phase: terminal
+    description: "Manual cancellation from Queued or Running. Partial data cleaned up. No SgrCompletedEvent — Assignment BC does NOT trigger matching."
+
+transitions:
+  - { id: ts1, source: queued,    target: running,    trigger: "CreateSgrInstanceTask",    note: "Conductor task worker" }
+  - { id: ts2, source: running,   target: completed,  trigger: "CompleteSgrTask",           note: "SgrCompletedEvent ⚡ → Assignment BC" }
+  - { id: ts3, source: running,   target: failed,     trigger: "GenerateSubscriptionTripsTask throws", note: "SgrFailedEvent → Critical monitoring alert" }
+  - { id: ts4, source: queued,    target: cancelled,  trigger: "Cancel(reason)" }
+  - { id: ts5, source: running,   target: cancelled,  trigger: "Cancel(reason)",            note: "Compensation workflow rollsback partial batch" }
+
+steps:
+  - id: step-1
+    title: "The Nightly Trigger"
+    narrative: >
+      Every night at 9 PM (tenant-local time), TriggerSgrCommand creates a
+      ScheduledGenerationRun in QUEUED state for the target date (typically Day+5).
+      The Conductor sgr-generation-workflow is immediately started.
+      SgrStartedEvent publishes to the trip-operations ASB topic.
+    activeStates: [queued]
+    activeTransitions: []
+    duration: 5000
+    narration:
+      speaker: Architect
+      message: "Queued means the SGR exists but Conductor hasn't started processing yet. The 1-hour workflow timeout clock starts here."
+
+  - id: step-2
+    title: "Batch Execution — RUNNING"
+    narrative: >
+      CreateSgrInstanceTask (the first Conductor task worker) transitions QUEUED → RUNNING.
+      GenerateSubscriptionTripsTask fetches all active SubscriptionTrips for the tenant,
+      checks CalendarExclusions (holidays, snow days), then batch-creates VehicleRuns
+      and PassengerTrips. Conflict detection runs in parallel — overlapping student
+      schedules produce TripConflict VOs (Warning <30 min, Critical ≥30 min).
+    activeStates: [running]
+    activeTransitions: [ts1]
+    duration: 6000
+    narration:
+      speaker: Domain Expert
+      message: "Running for up to 10 minutes. 500K trips. CalendarExclusions checked — if it's a holiday, generation skips gracefully."
+
+  - id: step-3
+    title: "Success — SgrCompletedEvent ⚡"
+    narrative: >
+      CompleteSgrTask transitions RUNNING → COMPLETED, recording four metrics:
+      VehicleRunsCreated, PassengerTripsCreated, ConflictCount, DurationSeconds.
+      PublishSgrCompletionTask fires SgrCompletedEvent to the trip-operations ASB topic.
+      The Assignment BC consumes this event and triggers its nightly batch matching run —
+      pairing drivers to newly-created VRs. This is the handoff from Conductor to choreography.
+    activeStates: [completed]
+    activeTransitions: [ts2]
+    duration: 6000
+    narration:
+      speaker: Architecture Lead
+      message: "SgrCompletedEvent is the trigger that sets the entire morning dispatch chain in motion. Assignment, routing, notifications — all start here."
+
+  - id: step-4
+    title: "Failure — Compensation Workflow"
+    narrative: >
+      If GenerateSubscriptionTripsTask fails mid-batch (e.g., created 400 VRs but
+      fails on #401), the sgr-generation-compensation-workflow activates.
+      It deletes all partially-created VRs and PTs, transitions SGR to FAILED,
+      records the FailureReason, and fires SgrFailedEvent — which triggers a
+      Critical alert in the Monitoring & Exceptions BC (PagerDuty escalation).
+    activeStates: [failed]
+    activeTransitions: [ts3]
+    duration: 6000
+    narration:
+      speaker: Architect
+      message: "Compensation is why Conductor is used for SGR. A 10-minute batch can't rely on a DB transaction alone. Partial failures must be cleanly rolled back."
+
+  - id: step-5
+    title: "Cancellation"
+    narrative: >
+      Manual cancellation is possible from QUEUED (before work starts) or RUNNING
+      (mid-execution). Cancellation from RUNNING triggers the compensation workflow
+      to clean up partial data. No SgrCompletedEvent fires — Assignment BC
+      will not trigger batch matching for this date.
+    activeStates: [cancelled]
+    activeTransitions: [ts4, ts5]
+    duration: 5000
+    narration:
+      speaker: Domain Expert
+      message: "Cancellation from RUNNING is rare — typically used for emergency operator overrides. Compensation cleans up any partial trip data."
+
+  - id: step-6
+    title: "The Complete SGR State Machine"
+    narrative: >
+      5 states. Three terminal states: Completed (happy path), Failed (compensated),
+      Cancelled (manual). SgrStateMachine.IsSuccessful() returns true only for
+      Completed. SgrStateMachine.IsActiveRun() returns true for Running.
+      The simplicity of this machine contrasts with the complexity it orchestrates —
+      500K trip records created in a single workflow execution.
+    activeStates: [queued, running, completed, failed, cancelled]
+    activeTransitions: [ts1, ts2, ts3, ts4, ts5]
+    duration: 5500
+    narration:
+      speaker: Architecture Lead
+      message: "5 states. Simple machine, massive scale. SgrCompletedEvent kicks off the entire day's dispatch operations."

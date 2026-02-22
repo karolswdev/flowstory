@@ -7,47 +7,44 @@
 
 Visual story-driven flow diagrams for user journeys, system architecture, and process documentation.
 
-## 🎬 See It In Action
-
-### User Story Flow
-Walk through user journeys step by step with actors, actions, and system interactions.
-
-![User Story Demo](docs/demos/demo-user-story.gif)
-
-### HTTP Flow
-Visualize REST API sequences with request/response details, status codes, and headers.
-
-![HTTP Flow Demo](docs/demos/demo-http-flow.gif)
+## See It In Action
 
 ### Service Flow
 Map microservice communication patterns with sync/async calls and message queues.
 
 ![Service Flow Demo](docs/demos/demo-service-flow.gif)
 
+### State Diagram
+UML state machines with dagre auto-layout, phase grouping, and transition animations.
+
+![State Diagram Demo](docs/demos/demo-state-diagram.gif)
+
 ### CI/CD Pipeline
 Document build pipelines with stages, jobs, gates, and status indicators.
 
 ![Pipeline Demo](docs/demos/demo-pipeline.gif)
 
-### BC Deployment
-Visualize Kubernetes deployments with Helm charts, secrets, services, and infrastructure relationships.
+### BC Composition
+Progressive reveal of bounded context internals — API, database, cache, events.
 
-![BC Deployment Demo](docs/demos/demo-bc-deployment.gif)
+![BC Composition Demo](docs/demos/demo-bc-composition.gif)
+
+### HTTP Flow
+Visualize REST API sequences with request/response details, status codes, and headers.
+
+![HTTP Flow Demo](docs/demos/demo-http-flow.gif)
 
 ## Features
 
-- **YAML-based stories** - Define flows in simple, readable YAML
-- **Multiple visualization types**:
-  - User Stories - Actor-driven user journeys
-  - HTTP Flows - REST API request/response sequences
-  - Service Flows - Microservice communication diagrams
-  - Pipelines - CI/CD and workflow visualizations
-  - **BC Deployments** - Kubernetes/DevOps topology views
-- **Step-by-step playback** - Walk through flows one step at a time
-- **Export options** - PNG, SVG, PDF, and animated GIF (in-browser + CLI recorder)
-- **Keyboard navigation** - Space, arrows, Home/End for playback
-- **React Flow powered** - Smooth, interactive diagrams
-- **Three layout modes** - Radial, hierarchical, and layered (BC Deployment)
+- **YAML-based stories** — Define flows in simple, readable YAML
+- **12 renderer types** — Service Flow, HTTP Flow, Pipeline, BC Deployment, BC Composition, State Diagram, C4 Context, Tech Radar, Event Storming, ADR Timeline, Cloud Cost, Story Flow
+- **Cinematic step transitions** — Spring-overshoot camera, node glow/dim lifecycle, edge draw animations
+- **Presentation mode** — Press `P` for fullscreen CTO-ready demos
+- **Export options** — PNG, SVG, PDF, animated GIF (in-browser + CLI recorder)
+- **Auto-focus camera** — Smooth pan/zoom to active elements each step
+- **Dark/light themes** — Full token-based theming with `data-theme` switching
+- **Embed mode** — `?embed=true` for clean iframe embedding
+- **Shareable URLs** — `?story=id&step=N` for direct linking
 
 ## Quick Start
 
@@ -280,29 +277,41 @@ npm run record-gif   # Record animated GIF (see above)
 ```
 flowstory/
 ├── src/
-│   ├── components/     # React components
-│   │   ├── nodes/      # Node type components
-│   │   └── edges/      # Edge type components
-│   ├── hooks/          # Custom React hooks
-│   ├── utils/          # Utilities (parser, export, layout)
-│   ├── schemas/        # Zod validation schemas
-│   └── types/          # TypeScript types
-├── stories/            # YAML story definitions
-│   ├── http/           # HTTP flow examples
-│   ├── service/        # Service flow examples
-│   └── pipeline/       # Pipeline examples
-├── e2e/                # Playwright E2E tests
-└── public/             # Static assets
+│   ├── schemas/          # Zod schemas per renderer type
+│   ├── components/
+│   │   ├── shared/       # StepOverlay (unified step info card)
+│   │   ├── nodes/        # Shared node components + sizes
+│   │   ├── edges/        # FlowEdge, AnimatedEventEdge, EdgeParticle
+│   │   ├── service/      # ServiceFlowCanvas
+│   │   ├── http/         # HttpFlowCanvas
+│   │   ├── pipeline/     # PipelineCanvas
+│   │   ├── bc-deployment/  # BCDeploymentCanvas
+│   │   ├── bc-composition/ # BCCompositionCanvas
+│   │   ├── state-diagram/  # StateDiagramCanvas
+│   │   └── ...           # c4-context, tech-radar, event-storming, etc.
+│   ├── hooks/            # Camera, step nav, presentation, shareable URL
+│   ├── animations/       # Timing config, motion variants, step transitions
+│   ├── effects/          # Pluggable effects (pulse, glow, shake, particles)
+│   ├── renderers/        # Renderer registry (specialized.ts)
+│   ├── themes/           # Light/dark theme provider + tokens
+│   └── styles/           # Design tokens (tokens.css), global styles
+├── stories/              # Example YAML stories by renderer type
+├── scripts/              # CLI GIF recorder, screenshot tools
+├── e2e/                  # Playwright E2E tests
+└── docs/demos/           # README showcase GIFs
 ```
 
 ## Keyboard Shortcuts
 
 | Key | Action |
 |-----|--------|
-| `Space` | Play/Pause |
-| `←` / `→` | Previous/Next step |
-| `Home` | First step |
-| `End` | Last step |
+| `Space` / `→` | Next step |
+| `←` | Previous step |
+| `Home` / `End` | First / Last step |
+| `P` | Toggle presentation mode |
+| `ESC` | Exit presentation |
+| `?` | Keyboard help overlay |
+| `N` | Toggle presenter notes |
 
 ## Export Formats
 

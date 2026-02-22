@@ -1,6 +1,6 @@
+import { motion, AnimatePresence } from 'motion/react';
 import { memo, useEffect, useState, useId } from 'react';
 import { BaseEdge, EdgeLabelRenderer, getBezierPath } from '@xyflow/react';
-import { motion, AnimatePresence } from 'framer-motion';
 import type { EventEdgeProps } from './types';
 import './edges.css';
 import './animated-edges.css';

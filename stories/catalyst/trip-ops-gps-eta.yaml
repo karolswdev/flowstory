@@ -1,0 +1,319 @@
+id: trip-ops-gps-eta
+title: "GPS Telemetry & ETA Confidence Pipeline"
+description: >
+  How a raw GPS fix from the driver's mobile device travels through GpsReading VO
+  validation, PostGIS persistence, ETA recalculation with confidence intervals,
+  and real-time SignalR broadcast to the parent portal and dispatch board.
+  The complete technical data path — from 30-second GPS pulse to parent's live tracker.
+renderer: service-flow
+schemaVersion: "2.0"
+layout: sequence
+
+services:
+  - id: driver-mdd
+    name: Driver App (MDD)
+    type: external
+    technology: "Mobile Data Device"
+    status: healthy
+
+  - id: trip-ops-api
+    name: Trip Ops API
+    type: api
+    technology: ".NET 10 — IngestGpsLocationCommand"
+    status: healthy
+    instances: 2
+
+  - id: gps-reading-vo
+    name: GpsReading VO
+    type: worker
+    technology: "Domain Value Object"
+    status: healthy
+
+  - id: trip-ops-db
+    name: trip_operations DB
+    type: database
+    technology: "PostgreSQL 16 + PostGIS (GIST index)"
+
+  - id: eta-service
+    name: ETA Calculation
+    type: worker
+    technology: "EstimatedTimeOfArrival VO"
+    status: healthy
+
+  - id: outbox
+    name: outbox_messages
+    type: database
+    technology: "PostgreSQL — Transactional Outbox"
+
+  - id: asb-topic
+    name: trip-operations (ASB)
+    type: database
+    technology: "Azure Service Bus Topic"
+
+  - id: trip-ops-ep
+    name: Trip Ops EventProcessor
+    type: worker
+    technology: ".NET 10 — GpsLocationUpdatedEventHandler"
+    status: healthy
+
+  - id: trip-hq
+    name: Trip HQ (SignalR)
+    type: external
+    technology: "Next.js 15 — TripOperationsHub"
+
+queues:
+  - id: asb-gps
+    name: GpsLocationUpdatedEvent (ASB)
+    type: topic
+    broker: servicebus
+    consumers: 3
+
+calls:
+  # GPS ingestion
+  - id: gps-post
+    type: sync
+    from: driver-mdd
+    to: trip-ops-api
+    method: POST
+    path: "/trip-operations/v1/gps/ingest"
+    protocol: http
+    duration: 35
+    status: 200
+    note: "Every 30 seconds per vehicle. Body: { vehicleRunId, latitude, longitude, heading, speedMph }"
+
+  # GpsReading VO validation
+  - id: validate-reading
+    type: sync
+    from: trip-ops-api
+    to: gps-reading-vo
+    method: INVOKE
+    path: "GpsReading.IsValid — accuracy < 50m, staleness < 30s"
+    duration: 1
+    status: ok
+    note: "AccuracyThreshold=50m, StalenessThreshold=30s. Invalid readings return 422."
+
+  # PostGIS persistence
+  - id: persist-gps
+    type: sync
+    from: trip-ops-api
+    to: trip-ops-db
+    method: INSERT
+    path: "GpsLocations (geometry Point SRID 4326, GIST index)"
+    duration: 8
+    status: ok
+    note: "GIST spatial index enables sub-100ms current-location and radius queries. 90-day retention."
+
+  # ETA recalculation
+  - id: calc-eta
+    type: sync
+    from: trip-ops-api
+    to: eta-service
+    method: INVOKE
+    path: "EstimatedTimeOfArrival.Create(baseEta, distance, duration, confidence, adjustments)"
+    duration: 12
+    status: ok
+    note: "Adjustments: IsRushHour (+10%), DriverBehaviorFactor (−5% to +15%), RouteType, HistoricalErrorSeconds."
+
+  # Outbox write (atomic with GPS insert)
+  - id: outbox-gps
+    type: sync
+    from: trip-ops-api
+    to: outbox
+    method: INSERT
+    path: "GpsLocationUpdatedEvent + EtaUpdatedEvent (same transaction)"
+    duration: 3
+    status: ok
+    note: "Atomic: GPS insert + event write in same DB transaction. Never lose an update."
+
+  # HTTP 200 returned here — sync path complete
+  - id: http-200
+    type: sync
+    from: trip-ops-api
+    to: driver-mdd
+    method: RESPONSE
+    path: "HTTP 200 OK"
+    duration: 2
+    status: 200
+    note: "Total sync latency: ~35ms. Everything below is async."
+
+  # Outbox relay to ASB
+  - id: relay-to-asb
+    type: publish
+    from: outbox
+    to: asb-topic
+    messageType: "GpsLocationUpdatedEvent + EtaUpdatedEvent"
+    note: "Background relay: poll every 5s, publish, mark delivered. Exponential backoff on failure."
+
+  # EP receives
+  - id: ep-gps-handler
+    type: subscribe
+    from: asb-topic
+    to: trip-ops-ep
+    messageType: "GpsLocationUpdatedEvent"
+    action: "GpsLocationUpdatedEventHandler — IHubContext<TripOperationsHub>.SendAsync"
+
+  - id: ep-eta-handler
+    type: subscribe
+    from: asb-topic
+    to: trip-ops-ep
+    messageType: "EtaUpdatedEvent"
+    action: "EtaUpdatedEventHandler — SignalR broadcast"
+
+  # SignalR broadcast
+  - id: signalr-gps
+    type: sync
+    from: trip-ops-ep
+    to: trip-hq
+    method: WebSocket
+    path: "SendAsync('GpsLocationUpdated') → Groups: vr-{vrId}, district-{tenantId}"
+    protocol: http
+    duration: 15
+    status: ok
+    note: "~150-250ms after HTTP 200. Errors swallowed — next GPS fix supersedes."
+
+  - id: signalr-eta
+    type: sync
+    from: trip-ops-ep
+    to: trip-hq
+    method: WebSocket
+    path: "SendAsync('EtaUpdated') → Groups: vr-{vrId}"
+    protocol: http
+    duration: 15
+    status: ok
+    note: "Parent portal live ETA countdown updates here."
+
+steps:
+  - id: step-1
+    title: "The GPS Pulse — Every 30 Seconds"
+    narrative: >
+      Every 30 seconds, the driver's Mobile Data Device (MDD) sends a GPS fix to
+      POST /trip-operations/v1/gps/ingest. The body contains vehicleRunId, latitude,
+      longitude, heading (degrees), and speedMph. With 33 vehicles active at peak,
+      that's ~66 GPS events per minute hitting the API.
+    activeCalls:
+      - gps-post
+    duration: 4500
+    narration:
+      speaker: Domain Expert
+      message: "33 vehicles × 2 per min = 66 GPS events/min at peak. The API must handle this without blocking."
+
+  - id: step-2
+    title: "GpsReading VO — Domain Validation"
+    narrative: >
+      IngestGpsLocationCommandHandler creates a GpsReading value object and validates:
+      IsAccurate (accuracy < 50 metres) and IsFresh (staleness < 30 seconds).
+      Invalid readings return HTTP 422 immediately. The VO also computes IsFresh
+      using GetAge() and exposes WithTimestamp() / WithAccuracy() for mutation.
+      This domain validation prevents bad GPS data from reaching PostGIS.
+    activeCalls:
+      - validate-reading
+    duration: 5000
+    narration:
+      speaker: Architecture Lead
+      message: "Domain validation at the boundary. 50m accuracy threshold, 30s staleness threshold — defined as domain constants, not magic numbers."
+
+  - id: step-3
+    title: "PostGIS — geometry(Point, 4326)"
+    narrative: >
+      The validated GpsReading is converted to a GpsLocation entity with a
+      PostGIS geometry(Point, 4326) column. The GIST spatial index enables three
+      query patterns: current location (<100ms), GPS trail for playback (<2s),
+      and radius-based fleet search (<500ms). 90-day retention via PurgeOlderThanAsync().
+    activeCalls:
+      - persist-gps
+    duration: 5000
+    narration:
+      speaker: Architect
+      message: "PostGIS GIST index is what makes sub-100ms spatial queries possible. geometry(Point, 4326) = WGS84 coordinate system — same as GPS hardware."
+
+  - id: step-4
+    title: "ETA Recalculation — Confidence Intervals"
+    narrative: >
+      Every GPS fix triggers an ETA recalculation via EstimatedTimeOfArrival.Create().
+      The VO produces three arrival estimates: LikelyArrival, OptimisticArrival,
+      PessimisticArrival, plus a Confidence score (0.0–1.0). Adjustments applied:
+      IsRushHour (+10% delay), DriverBehaviorFactor (−5% to +15% based on history),
+      HistoricalErrorSeconds (from EtaAccuracyRecords), RouteType (Urban/Highway/Mixed).
+    activeCalls:
+      - calc-eta
+    duration: 5500
+    narration:
+      speaker: Domain Expert
+      message: "Three ETA values, not one. Pessimistic/Likely/Optimistic give the parent a range. DriverBehaviorFactor adjusts based on this specific driver's history."
+
+  - id: step-5
+    title: "Atomic Outbox Write — HTTP 200"
+    narrative: >
+      GpsLocationUpdatedEvent and EtaUpdatedEvent are written to the outbox_messages
+      table in the SAME database transaction as the GpsLocation INSERT. This guarantees
+      the event is never lost — even if the process crashes between DB commit and
+      ASB publish. HTTP 200 returns to the driver at this point. Total: ~35ms.
+    activeCalls:
+      - outbox-gps
+      - http-200
+    duration: 4500
+    narration:
+      speaker: Architecture Lead
+      message: "HTTP 200 at ~35ms. Everything after is async. The driver's throughput is never limited by SignalR connection count."
+
+  - id: step-6
+    title: "Async Path — Outbox → ASB → EP"
+    narrative: >
+      A background relay process polls outbox_messages every 5 seconds, publishes
+      to the trip-operations ASB topic, marks messages as delivered. Exponential
+      backoff on failure; dead-letter after 10 attempts. The EventProcessor pod
+      subscribes to the topic — GpsLocationUpdatedEventHandler and EtaUpdatedEventHandler
+      each receive their events.
+    activeCalls:
+      - relay-to-asb
+      - ep-gps-handler
+      - ep-eta-handler
+    duration: 5000
+    narration:
+      speaker: Architect
+      message: "The async path runs independently of the sync HTTP path. GPS events at 66/min are absorbed without any impact on the driver's response time."
+
+  - id: step-7
+    title: "SignalR — Live Fleet Map & ETA Update"
+    narrative: >
+      The EventProcessor injects IHubContext<TripOperationsHub> and broadcasts to
+      two SignalR groups: vr-{vrId} (subscribed by the specific run's observers)
+      and district-{tenantId} (the dispatch board with all vehicles).
+      EtaUpdatedEvent goes to vr-{vrId} only — the parent portal countdown updates.
+      Total latency from GPS fix to parent's screen: ~150–250ms.
+    activeCalls:
+      - signalr-gps
+      - signalr-eta
+    duration: 5000
+    narration:
+      speaker: Domain Expert
+      message: "150–250ms from GPS pulse to parent's live tracker update. Self-consumption through ASB keeps the sync path clean."
+
+  - id: step-8
+    title: "The Complete GPS + ETA Pipeline"
+    narrative: >
+      30-second GPS pulse → GpsReading VO validation → PostGIS GIST insert →
+      EstimatedTimeOfArrival VO (3 confidence intervals) → atomic outbox write →
+      HTTP 200 (35ms) → background relay → ASB → EventProcessor → SignalR
+      to dispatch board + parent portal (150–250ms end-to-end).
+      This pipeline runs for every active vehicle, every 30 seconds, at full scale.
+    activeCalls:
+      - gps-post
+      - validate-reading
+      - persist-gps
+      - calc-eta
+      - outbox-gps
+      - http-200
+      - relay-to-asb
+      - ep-gps-handler
+      - ep-eta-handler
+      - signalr-gps
+      - signalr-eta
+    duration: 7000
+    narration:
+      speaker: Architecture Lead
+      message: "The complete GPS + ETA pipeline. Domain validation, spatial indexing, confidence intervals, transactional outbox, real-time broadcast — all in 250ms."
+
+camera:
+  center: [0, 0]
+  zoom: 1

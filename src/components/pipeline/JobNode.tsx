@@ -1,6 +1,6 @@
+import { motion } from 'motion/react';
 import { memo } from 'react';
 import { NodeHandles } from '../nodes/NodeHandles';
-import { motion } from 'framer-motion';
 import type { JobDef, JobStatus } from '../../schemas/pipeline';
 import { JOB_STATUS_COLORS, JOB_STATUS_ICONS } from '../../schemas/pipeline';
 

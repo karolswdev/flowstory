@@ -1,162 +1,181 @@
 id: trip-ops-vr-state-machine
 title: "VehicleRun — 16-State Machine Lifecycle"
 description: >
-  The complete VehicleRun lifecycle from SGR creation through driver offer,
-  active route, post-trip validation, settlement, and archival.
-  Four distinct phases — each enforced by VrStateMachine.cs in the Domain layer.
-version: "1.0"
+  The complete VehicleRun lifecycle from SGR creation through the driver offer
+  negotiation, active stop-to-stop routing, post-trip Conductor validation, and
+  settlement archival. Four distinct phases enforced by VrStateMachine.cs.
+renderer: state-diagram
+direction: TB
 
-camera:
-  center: [0, 1200]
-  zoom: 0.3
+phases:
+  - id: pre-dispatch
+    label: "Pre-Dispatch · Offer"
+    color: "rgba(59, 130, 246, 0.06)"
+    order: 1
+  - id: active-route
+    label: "Active Route"
+    color: "rgba(5, 150, 105, 0.07)"
+    order: 2
+  - id: post-trip
+    label: "Post-Trip Validation"
+    color: "rgba(245, 158, 11, 0.07)"
+    order: 3
+  - id: settlement
+    label: "Settlement & Archive"
+    color: "rgba(139, 92, 246, 0.07)"
+    order: 4
 
-actors:
-  - id: trip-ops
-    name: Trip Operations
-    type: system
-    color: "#059669"
-
-nodes:
-  # ── Phase 1: Pre-Dispatch (x=0, vertical chain, 180px gaps) ──
+states:
+  # ── Phase 1: Pre-Dispatch ──
   - id: new
-    type: event
     label: NEW
-    size: m
-    position: { x: 0, y: 0 }
-    data: { variant: info }
+    type: initial
+    phase: pre-dispatch
+    description: "Created by SGR generation or ad-hoc dispatch. Zero dependencies — pure domain state."
 
   - id: reserved
-    type: action
     label: RESERVED
-    size: m
-    position: { x: 0, y: 180 }
+    type: normal
+    variant: info
+    phase: pre-dispatch
+    description: "Driver + vehicle matched by Assignment BC. Fires VrStateChangedEvent."
 
   - id: offer-queued
-    type: action
     label: OFFERQUEUED
-    size: m
-    position: { x: 0, y: 360 }
+    type: normal
+    variant: info
+    phase: pre-dispatch
+    description: "Offer queued in system. 30-minute expiry prevents indefinite locks."
 
   - id: offer-sent
-    type: action
     label: OFFERSENT
-    size: m
-    position: { x: 0, y: 540 }
+    type: normal
+    variant: info
+    phase: pre-dispatch
+    description: "Firebase push notification sent to driver's mobile device (MDD)."
 
   - id: offer-confirmed
-    type: action
     label: OFFERCONFIRMED
-    size: m
-    position: { x: 0, y: 720 }
+    type: normal
+    variant: info
+    phase: pre-dispatch
+    description: "Driver confirmed receipt. Awaiting explicit acceptance."
 
   - id: offer-accepted
-    type: action
     label: OFFERACCEPTED
-    size: l
-    position: { x: 0, y: 920 }
-    data: { variant: success }
+    type: normal
+    variant: success
+    phase: pre-dispatch
+    description: "Driver accepted — FleetEngineVehicleId registered. Fires VrDispatchedEvent ⚡"
 
-  # ── Phase 2: Active Route (horizontal row, 500px apart, y=1200) ──
-  - id: break
-    type: system
-    label: BREAK
-    size: m
-    position: { x: -700, y: 1200 }
-
+  # ── Phase 2: Active Route ──
   - id: tostop
-    type: system
     label: TOSTOP
-    size: l
-    position: { x: -250, y: 1200 }
+    type: normal
+    variant: default
+    phase: active-route
+    description: "Driving to next stop. GPS telemetry flows every 30s. SignalR broadcasts live."
 
   - id: atstop
-    type: system
     label: ATSTOP
-    size: l
-    position: { x: 400, y: 1200 }
+    type: normal
+    variant: default
+    phase: active-route
+    description: "Arrived at stop. Fires StopArrivedEvent. Loading or unloading passengers."
 
-  # ── Phase 3: Post-Trip Validation (x=0, 180px gaps, starting y=1500) ──
+  - id: break
+    label: BREAK
+    type: normal
+    variant: warning
+    phase: active-route
+    description: "Driver on a scheduled break. Returns to TOSTOP via EndBreak()."
+
+  # ── Phase 3: Post-Trip Validation ──
   - id: postservice
-    type: state
     label: POSTSERVICE
-    size: m
-    position: { x: 0, y: 1500 }
-    data: { variant: warning }
+    type: normal
+    variant: warning
+    phase: post-trip
+    description: "Last stop departed. Conductor ValidateCompletenessTask begins."
 
   - id: postcompleteness
-    type: state
     label: POSTCOMPLETENESS
-    size: m
-    position: { x: 0, y: 1680 }
-    data: { variant: warning }
+    type: normal
+    variant: warning
+    phase: post-trip
+    description: "All stops accounted for. GPS trails verified. Conductor ValidateBillingReadinessTask next."
 
   - id: postreadiness
-    type: state
     label: POSTREADINESS
-    size: m
-    position: { x: 0, y: 1860 }
-    data: { variant: warning }
+    type: normal
+    variant: warning
+    phase: post-trip
+    description: "Billing data validated. Ready for CompleteVr → settlement gate."
 
-  # ── Phase 4: Settlement (x=0, 180px gaps, starting y=2100) ──
+  # ── Phase 4: Settlement ──
   - id: booked
-    type: state
     label: BOOKED
-    size: l
-    position: { x: 0, y: 2100 }
-    data: { variant: success }
+    type: normal
+    variant: success
+    phase: settlement
+    description: "Settlement-ready. Fires VehicleRunCompletedEvent ⚡ → Settlement BC calculates BC/PD/PM."
 
   - id: settled
-    type: state
     label: SETTLED
-    size: l
-    position: { x: 0, y: 2280 }
-    data: { variant: success }
+    type: normal
+    variant: success
+    phase: settlement
+    description: "BC/PD/PM calculations complete. Driver payment locked."
 
   - id: archived
-    type: event
     label: ARCHIVED
-    size: m
-    position: { x: 0, y: 2460 }
-    data: { variant: info }
+    type: terminal
+    phase: settlement
+    description: "Terminal state. Allowed-transitions list is empty. Journey complete."
 
-  # ── Terminal: Cancellation (far right, vertically centered with offer chain) ──
+  # ── Terminal: Cancellation ──
   - id: cancelled
-    type: event
     label: CANCELLED
-    size: l
-    position: { x: 700, y: 550 }
-    data: { variant: danger }
+    type: terminal
+    description: "Irreversible cancellation from any pre-settlement state. Fires VrCancelledEvent → Assignment BC re-matches PTs."
 
-edges:
-  # Pre-Dispatch chain
-  - { id: e1,  source: new,              target: reserved,         type: flow }
-  - { id: e2,  source: reserved,         target: offer-queued,     type: flow }
-  - { id: e3,  source: offer-queued,     target: offer-sent,       type: flow }
-  - { id: e4,  source: offer-sent,       target: offer-confirmed,  type: flow }
-  - { id: e5,  source: offer-confirmed,  target: offer-accepted,   type: flow }
+transitions:
+  # Pre-Dispatch offer chain
+  - { id: t1,  source: new,             target: reserved,         trigger: "ReserveVr",    note: "Assignment BC matched" }
+  - { id: t2,  source: reserved,        target: offer-queued,     trigger: "QueueOffer",   note: "30-min expiry starts" }
+  - { id: t3,  source: offer-queued,    target: offer-sent,       trigger: "SendOffer",    note: "FCM push → driver app" }
+  - { id: t4,  source: offer-sent,      target: offer-confirmed,  trigger: "ConfirmOffer", note: "Driver confirmed receipt" }
+  - { id: t5,  source: offer-confirmed, target: offer-accepted,   trigger: "AcceptOffer",  note: "VrDispatchedEvent ⚡" }
 
-  # Active Route
-  - { id: e6,  source: offer-accepted,   target: tostop,           type: flow,  label: StartVr }
-  - { id: e7,  source: tostop,           target: atstop,           type: flow,  label: ArriveAtStop }
-  - { id: e8,  source: atstop,           target: tostop,           type: flow,  label: DepartStop }
-  - { id: e9,  source: tostop,           target: break,            type: flow }
-  - { id: e10, source: break,            target: tostop,           type: flow,  label: Resume }
+  # Active Route cycling
+  - { id: t6,  source: offer-accepted,  target: tostop,           trigger: "StartVr",         note: "VehicleRunStartedEvent ⚡" }
+  - { id: t7,  source: tostop,          target: atstop,           trigger: "ArriveAtStop",    note: "StopArrivedEvent → GPS validated" }
+  - { id: t8,  source: atstop,          target: tostop,           trigger: "DepartStop",      note: "StopDepartedEvent — not last stop" }
+  - { id: t9,  source: tostop,          target: break,            trigger: "StartBreak" }
+  - { id: t10, source: break,           target: tostop,           trigger: "EndBreak" }
+  - { id: t11, source: atstop,          target: break,            trigger: "StartBreak" }
 
-  # Post-Trip
-  - { id: e11, source: tostop,           target: postservice,      type: flow,  label: PostService }
-  - { id: e12, source: postservice,      target: postcompleteness, type: flow }
-  - { id: e13, source: postcompleteness, target: postreadiness,    type: flow }
-  - { id: e14, source: postreadiness,    target: booked,           type: flow,  label: CompleteVr }
+  # Post-Trip entry from ATSTOP (last stop departure)
+  - { id: t12, source: atstop,          target: postservice,      trigger: "DepartLastStop",       note: "ATSTOP → POSTSERVICE — Conductor kicks in" }
+
+  # Post-Trip validation (Conductor-orchestrated)
+  - { id: t13, source: postservice,     target: postcompleteness, trigger: "ValidateCompleteness", note: "All stops complete?" }
+  - { id: t14, source: postcompleteness,target: postreadiness,    trigger: "ValidateReadiness",    note: "Billing data valid?" }
+  - { id: t15, source: postreadiness,   target: booked,           trigger: "CompleteVr",           note: "VehicleRunCompletedEvent ⚡" }
 
   # Settlement
-  - { id: e15, source: booked,           target: settled,          type: flow }
-  - { id: e16, source: settled,          target: archived,         type: flow }
+  - { id: t16, source: booked,          target: settled,          trigger: "Settle",   note: "Settlement BC processed" }
+  - { id: t17, source: settled,         target: archived,         trigger: "Archive",  note: "Terminal — empty transitions" }
 
-  # Cancellation paths
-  - { id: ec1, source: new,              target: cancelled,        type: error }
-  - { id: ec2, source: reserved,         target: cancelled,        type: error }
-  - { id: ec3, source: offer-accepted,   target: cancelled,        type: error }
-  - { id: ec4, source: tostop,           target: cancelled,        type: error }
+  # Cancellation paths — from VrStateMachine._allowedTransitions (all pre-settlement states except BREAK)
+  - { id: tc1, source: new,             target: cancelled,        trigger: "Cancel" }
+  - { id: tc2, source: reserved,        target: cancelled,        trigger: "Cancel" }
+  - { id: tc3, source: offer-queued,    target: cancelled,        trigger: "Cancel" }
+  - { id: tc4, source: offer-sent,      target: cancelled,        trigger: "Cancel" }
+  - { id: tc5, source: offer-confirmed, target: cancelled,        trigger: "Cancel" }
+  - { id: tc6, source: offer-accepted,  target: cancelled,        trigger: "Cancel" }
+  - { id: tc7, source: tostop,          target: cancelled,        trigger: "Cancel" }
+  - { id: tc8, source: atstop,          target: cancelled,        trigger: "Cancel",  note: "VrCancelledEvent ⚡" }
 
 steps:
   - id: step-1
@@ -164,121 +183,96 @@ steps:
     narrative: >
       Every VehicleRun starts in NEW — created either by the nightly SGR generation
       (SubscriptionRun templates → VRs) or manually via CreateAdHocTripCommand.
-      The 16-state machine in VrStateMachine.cs governs every transition from here.
-    nodeIds: [new]
-    edgeIds: []
-    camera:
-      center: [0, 0]
-      zoom: 1.2
-      transition: 400
+      The 16-state machine in VrStateMachine.cs is a static Dictionary<VrStatus, List<VrStatus>>
+      transition matrix. CanTransition() is called before any state change occurs.
+    activeStates: [new]
+    activeTransitions: []
     duration: 5000
     narration:
       speaker: Architect
-      message: "Every VR begins here. NEW is the genesis state — created by SGR or ad-hoc dispatch."
+      message: "Every VR begins here. NEW is the genesis state — SGR or ad-hoc. The state machine is immutable by design."
 
   - id: step-2
-    title: "Pre-Dispatch: The Offer Negotiation"
+    title: "Phase 1 — The Offer Negotiation"
     narrative: >
-      The Assignment BC matches a driver to this VR. Then the 4-step offer
-      workflow unfolds: ReserveVr → QueueOffer → SendOffer (push notification
-      to driver) → ConfirmOffer → AcceptOffer. Each transition is guarded
-      by VrStateMachine.CanTransition().
-    nodeIds: [new, reserved, offer-queued, offer-sent, offer-confirmed, offer-accepted]
-    edgeIds: [e1, e2, e3, e4, e5]
-    camera:
-      center: [0, 460]
-      zoom: 0.45
-      transition: 500
+      The Assignment BC matches a driver, then the 4-step offer workflow unfolds:
+      ReserveVr → QueueOffer → SendOffer (Firebase push to driver's MDD) →
+      ConfirmOffer → AcceptOffer. Each transition is guarded by VrStateMachine.CanTransition().
+      AcceptOffer registers the FleetEngineVehicleId — GPS tracking starts here.
+    activeStates: [new, reserved, offer-queued, offer-sent, offer-confirmed, offer-accepted]
+    activeTransitions: [t1, t2, t3, t4, t5]
     duration: 6000
     narration:
       speaker: Domain Expert
-      message: "Six states just for pre-dispatch. The offer workflow ensures drivers explicitly accept before they're committed."
+      message: "Six pre-dispatch states. The offer workflow guarantees no driver is committed without explicit acceptance."
 
   - id: step-3
-    title: "Active Route: Stop-to-Stop Cycling"
+    title: "Phase 2 — Active Route: Stop Cycling"
     narrative: >
-      Once accepted, StartVrCommand transitions to TOSTOP. The driver cycles
-      between TOSTOP ↔ ATSTOP as they navigate from pickup to dropoff.
-      This is the real-time phase — GPS telemetry flows in every 30 seconds,
-      SignalR broadcasts to the dispatch board, parents see live ETAs.
-    nodeIds: [offer-accepted, tostop, atstop, break]
-    edgeIds: [e6, e7, e8, e9, e10]
-    camera:
-      center: [0, 1150]
-      zoom: 0.5
-      transition: 500
+      StartVr transitions to TOSTOP. The driver cycles TOSTOP ↔ ATSTOP for each
+      stop on the route. Each ArriveAtStop validates GPS position. DepartStop
+      from a non-final stop returns to TOSTOP. BREAK is available from both TOSTOP
+      and ATSTOP. GPS telemetry flows every 30 seconds; SignalR broadcasts live.
+    activeStates: [offer-accepted, tostop, atstop, break]
+    activeTransitions: [t6, t7, t8, t9, t10, t11]
     duration: 6000
     narration:
       speaker: Domain Expert
-      message: "This is the operational heartbeat. TOSTOP and ATSTOP cycle for every stop on the route. BREAK allows driver rest periods."
+      message: "TOSTOP and ATSTOP cycle for every stop. BREAK from either state. This is the operational heartbeat."
 
   - id: step-4
-    title: "Post-Trip: 3-Step Validation Chain"
+    title: "Phase 3 — Post-Trip: From ATSTOP to Conductor"
     narrative: >
-      After the last stop, AdvanceToPostService kicks off the Conductor-orchestrated
-      post-trip pipeline: POSTSERVICE → POSTCOMPLETENESS → POSTREADINESS.
-      Each step validates data quality — were all students accounted for?
-      Are GPS trails complete? Is billing data ready?
-    nodeIds: [postservice, postcompleteness, postreadiness]
-    edgeIds: [e11, e12, e13]
-    camera:
-      center: [0, 1680]
-      zoom: 0.55
-      transition: 500
-    duration: 5000
+      The last stop's departure from ATSTOP goes directly to POSTSERVICE — not through
+      TOSTOP. This is the transition that starts the Conductor post-trip-processing-workflow:
+      ValidateCompletenessTask → ValidateBillingReadinessTask → BookVehicleRunTask.
+      The VR is blocked from settlement until all three Conductor tasks complete.
+    activeStates: [postservice, postcompleteness, postreadiness]
+    activeTransitions: [t12, t13, t14]
+    duration: 5500
     narration:
       speaker: Architecture Lead
-      message: "The 3-step post-trip chain is orchestrated by Conductor. Each step must pass before the VR can be booked for settlement."
+      message: "ATSTOP → POSTSERVICE directly on last stop departure. Conductor validates everything before the settlement gate opens."
 
   - id: step-5
-    title: "Settlement & Archive"
+    title: "Phase 4 — Settlement & Archival"
     narrative: >
-      CompleteVr transitions to BOOKED — settlement-ready. The Settlement BC
-      processes BC/PD/PM calculations. Once settled, the VR moves to ARCHIVED —
-      a terminal state with an empty allowed-transitions list. The journey is complete.
-    nodeIds: [booked, settled, archived]
-    edgeIds: [e14, e15, e16]
-    camera:
-      center: [0, 2280]
-      zoom: 0.55
-      transition: 500
+      CompleteVr → BOOKED fires VehicleRunCompletedEvent. The Settlement BC
+      processes BC/PD/PM calculations. Once SETTLED, Archive() moves the VR
+      to ARCHIVED — a terminal state with an empty allowed-transitions list.
+      The route lifecycle is complete.
+    activeStates: [booked, settled, archived]
+    activeTransitions: [t15, t16, t17]
     duration: 5000
     narration:
       speaker: Architect
-      message: "BOOKED to SETTLED to ARCHIVED. Three states, one direction, no going back. Terminal states have empty transition lists."
+      message: "BOOKED → SETTLED → ARCHIVED. Three states, one direction, no reversal. Terminal states have empty transition lists."
 
   - id: step-6
-    title: "The Escape Hatch: Cancellation"
+    title: "The Escape Hatch — Cancellation from 8 States"
     narrative: >
-      CANCELLED is reachable from NEW, RESERVED, OFFERACCEPTED, and TOSTOP.
-      Once cancelled, the transition list is empty — no resurrection.
-      Cancellation triggers VrCancelledEvent, which the Assignment BC
-      consumes to re-match affected students.
-    nodeIds: [cancelled]
-    edgeIds: [ec1, ec2, ec3, ec4]
-    camera:
-      center: [350, 550]
-      zoom: 0.35
-      transition: 500
+      CANCELLED is reachable from 8 states: NEW, RESERVED, OFFERQUEUED, OFFERSENT,
+      OFFERCONFIRMED, OFFERACCEPTED, TOSTOP, and ATSTOP. Notably NOT from BREAK,
+      POSTSERVICE, POSTCOMPLETENESS, or POSTREADINESS — the VrStateMachine transition
+      matrix is explicit. VrCancelledEvent fires → Assignment BC re-matches all PTs.
+    activeStates: [cancelled]
+    activeTransitions: [tc1, tc2, tc3, tc4, tc5, tc6, tc7, tc8]
     duration: 5000
     narration:
       speaker: Domain Expert
-      message: "Cancellation is irreversible. It fires VrCancelledEvent — the Assignment BC re-matches all affected passenger trips."
+      message: "8 cancellation entry points — more than expected! Once in post-trip validation, cancellation is no longer possible."
 
   - id: step-7
-    title: "The Complete VR Lifecycle"
+    title: "The Complete 16-State VR Lifecycle"
     narrative: >
       16 states. 4 phases. One static Dictionary<VrStatus, List<VrStatus>>.
-      Every transition validated in the domain layer before any persistence occurs.
-      Invalid transitions raise DomainException — not a database error, not a 500.
-      This is ADR-008's transition matrix pattern in its canonical form.
-    nodeIds: [new, reserved, offer-queued, offer-sent, offer-confirmed, offer-accepted, tostop, atstop, break, postservice, postcompleteness, postreadiness, booked, settled, archived, cancelled]
-    edgeIds: [e1, e2, e3, e4, e5, e6, e7, e8, e9, e10, e11, e12, e13, e14, e15, e16, ec1, ec2, ec3, ec4]
-    camera:
-      center: [0, 1100]
-      zoom: 0.18
-      transition: 600
+      Every legal transition validated before any persistence. Invalid transitions
+      raise DomainException — not a database error, not a 500. This is ADR-008's
+      transition matrix pattern in its canonical form. Key insight: ATSTOP → POSTSERVICE
+      on the last stop, not TOSTOP → POSTSERVICE.
+    activeStates: [new, reserved, offer-queued, offer-sent, offer-confirmed, offer-accepted, tostop, atstop, break, postservice, postcompleteness, postreadiness, booked, settled, archived, cancelled]
+    activeTransitions: [t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11, t12, t13, t14, t15, t16, t17, tc1, tc2, tc3, tc4, tc5, tc6, tc7, tc8]
     duration: 6000
     narration:
       speaker: Architecture Lead
-      message: "The full 16-state VehicleRun lifecycle — the most complex state machine in the platform."
+      message: "The full 16-state VehicleRun lifecycle. 8 states can cancel. ATSTOP is the post-trip gate. ARCHIVED is the end."

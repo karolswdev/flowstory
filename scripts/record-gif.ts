@@ -158,7 +158,7 @@ function parseArgs(): CliOptions {
 async function waitForCanvasReady(page: Page): Promise<void> {
   try {
     await page.waitForSelector(
-      '.react-flow, [data-testid="architectural-canvas"], .bc-deployment-canvas, .pipeline-canvas, .service-flow-canvas, .http-flow-canvas, .bc-composition-canvas, .es-canvas',
+      '.react-flow, [data-testid="architectural-canvas"], .bc-deployment-canvas, .pipeline-canvas, .service-flow-canvas, .http-flow-canvas, .bc-composition-canvas, .state-diagram-canvas, .es-canvas, .step-overlay',
       { timeout: 15000 }
     );
     // Wait for nodes to render
@@ -166,8 +166,8 @@ async function waitForCanvasReady(page: Page): Promise<void> {
     // Let initial render + fit-view animation settle
     await page.waitForTimeout(2000);
   } catch {
-    // Fallback: wait for any story panel
-    await page.waitForSelector('.story-panel, [data-testid="story-panel"], .bc-step-overlay', { timeout: 5000 });
+    // Fallback: wait for any story panel or step overlay
+    await page.waitForSelector('.story-panel, [data-testid="story-panel"], .bc-step-overlay, .step-overlay', { timeout: 5000 });
     await page.waitForTimeout(1000);
   }
 }
@@ -191,9 +191,18 @@ async function detectStepCount(page: Page): Promise<number> {
     const m = text.match(/(\d+)\s*\/\s*(\d+)/);
     if (m) return parseInt(m[2], 10);
   }
+  // Try StepOverlay badge (shared component: "Step 1 / 5")
+  text = await page.locator('.step-overlay__badge').first().textContent({ timeout: 1500 }).catch(() => null);
+  if (text) {
+    const m = text.match(/(\d+)\s*\/\s*(\d+)/);
+    if (m) return parseInt(m[2], 10);
+  }
   // Try step-dot count (BC canvases)
   const dotCount = await page.locator('.bc-step-dot').count().catch(() => 0);
   if (dotCount > 0) return dotCount;
+  // Try StepOverlay dots (shared component used by most renderers)
+  const overlayDots = await page.locator('.step-overlay__dot').count().catch(() => 0);
+  if (overlayDots > 0) return overlayDots;
   // Try progress dots (presentation mode)
   const progressDots = await page.locator('.progress-dot').count().catch(() => 0);
   if (progressDots > 0) return progressDots;
@@ -279,17 +288,21 @@ async function recordGif(opts: CliOptions): Promise<void> {
     await page.goto(url, { waitUntil: 'networkidle' });
     await waitForCanvasReady(page);
 
+    // Detect step count BEFORE hiding chrome (step counters may be in the chrome)
+    const totalSteps = await detectStepCount(page);
+
     // In clean mode, hide all UI chrome so only the canvas is visible
     if (opts.clean) {
       await page.addStyleTag({
         content: `
-          /* Hide toolbar, panels, playback controls, step overlays */
+          /* Hide toolbar, panels, playback controls */
           .app-toolbar,
           .story-panel,
           .playback-controls,
           .step-badge,
           .es-nav,
           .bc-step-overlay,
+          .step-overlay,
           .pipeline-step-info,
           .service-flow-step-info,
           .http-flow-step-info,
@@ -308,9 +321,6 @@ async function recordGif(opts: CliOptions): Promise<void> {
       // Let layout reflow after hiding chrome
       await page.waitForTimeout(500);
     }
-
-    // Detect step count
-    const totalSteps = await detectStepCount(page);
     console.log(`   Detected ${totalSteps} steps`);
 
     // Reset to step 1

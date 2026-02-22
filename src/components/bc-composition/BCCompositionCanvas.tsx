@@ -20,6 +20,7 @@ import {
   type Node,
   type Edge,
 } from '@xyflow/react';
+import { motion } from 'motion/react';
 import { StepOverlay } from '../shared';
 import type {
   BCCompositionStory,

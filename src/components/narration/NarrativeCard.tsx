@@ -1,5 +1,5 @@
+import { motion, AnimatePresence } from 'motion/react';
 import { memo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import './narrative-card.css';
 
 /**

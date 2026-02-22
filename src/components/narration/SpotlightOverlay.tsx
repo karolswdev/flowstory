@@ -1,5 +1,5 @@
+import { motion, AnimatePresence } from 'motion/react';
 import { memo, useLayoutEffect, useState, useId } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import './spotlight.css';
 
 /**

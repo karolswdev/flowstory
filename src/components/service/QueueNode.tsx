@@ -1,6 +1,6 @@
+import { motion } from 'motion/react';
 import { memo } from 'react';
 import { NodeHandles } from '../nodes/NodeHandles';
-import { motion } from 'framer-motion';
 import type { QueueDef, QueueType } from '../../schemas/service-flow';
 import { QUEUE_TYPE_ICONS } from '../../schemas/service-flow';
 

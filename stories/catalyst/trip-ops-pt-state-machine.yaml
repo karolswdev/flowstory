@@ -1,328 +1,326 @@
 id: trip-ops-pt-state-machine
 title: "PassengerTrip — 16-State Machine Lifecycle"
 description: >
-  The complete PassengerTrip lifecycle from creation through pre-dispatch,
-  the active trip (pickup → board → dropoff), post-trip validation,
-  and settlement. Features the revenue-critical ATDO → POSTSERVICE transition
-  that fires PtDroppedOffEvent — the single most important domain event in Catalyst.
-version: "1.0"
+  The complete PassengerTrip lifecycle from creation through pre-dispatch grouping,
+  the active trip sequence (pickup → board → dropoff), post-trip Conductor validation,
+  and settlement. Features the revenue-critical ATDO → POSTSERVICE transition that fires
+  PtDroppedOffEvent — the single most important domain event in the entire Catalyst platform.
+renderer: state-diagram
+direction: TB
 
-camera:
-  center: [0, 1000]
-  zoom: 0.3
+phases:
+  - id: pre-dispatch
+    label: "Pre-Dispatch · Grouping"
+    color: "rgba(59, 130, 246, 0.06)"
+    order: 1
+  - id: active-trip
+    label: "Active Trip · Pickup → Board → Dropoff"
+    color: "rgba(5, 150, 105, 0.07)"
+    order: 2
+  - id: post-trip
+    label: "Post-Trip Validation"
+    color: "rgba(245, 158, 11, 0.07)"
+    order: 3
+  - id: settlement
+    label: "Settlement"
+    color: "rgba(139, 92, 246, 0.07)"
+    order: 4
 
-actors:
-  - id: trip-ops
-    name: Trip Operations
-    type: system
-    color: "#D97706"
-
-nodes:
-  # ── Phase 1: Pre-Dispatch (x=0, 180px gaps) ──
+states:
+  # ── Phase 1: Pre-Dispatch ──
   - id: new
-    type: event
     label: NEW
-    size: m
-    position: { x: 0, y: 0 }
-    data: { variant: info }
+    type: initial
+    phase: pre-dispatch
+    description: "Created by SGR generation or CreateAdHocTripCommand. One PT per student per VR."
 
   - id: grouping
-    type: action
     label: GROUPING
-    size: m
-    position: { x: 0, y: 180 }
+    type: normal
+    variant: info
+    phase: pre-dispatch
+    description: "PT grouped into a VehicleRun by geographic proximity. UpdateSettlementData() copies DriverId + ServiceProviderId + MonitorId from parent VR."
 
   - id: dispatching
-    type: action
     label: DISPATCHING
-    size: m
-    position: { x: 0, y: 360 }
+    type: normal
+    variant: info
+    phase: pre-dispatch
+    description: "VR offer accepted by driver. PT is confirmed on this run."
 
   - id: accepted
-    type: action
     label: ACCEPTED
-    size: l
-    position: { x: 0, y: 560 }
-    data: { variant: success }
+    type: normal
+    variant: success
+    phase: pre-dispatch
+    description: "Student is locked to this VR. Fires PtStateChangedEvent. Ready for TOPU."
 
-  # ── Phase 2: Active Trip (zigzag, 500px horizontal, 200px vertical) ──
+  # ── Phase 2: Active Trip ──
   - id: topu
-    type: system
     label: TOPU
-    size: l
-    position: { x: -250, y: 820 }
+    type: normal
+    variant: default
+    phase: active-trip
+    description: "Driver en route to student's pickup location. GPS+ETA visible to parent portal."
 
   - id: atpu
-    type: system
     label: ATPU
-    size: l
-    position: { x: 350, y: 820 }
+    type: normal
+    variant: default
+    phase: active-trip
+    description: "Driver arrived at pickup. Fires PtArrivedAtPickupEvent ⚡ → Communications SMS: 'Driver has arrived'."
 
   - id: onboard
-    type: system
     label: ONBOARD
-    size: l
-    position: { x: 0, y: 1040 }
+    type: normal
+    variant: success
+    phase: active-trip
+    description: "Student boarded — StudentIdScanned captured. Fires PtBoardedEvent ⚡ → SMS: 'Your child has been picked up'. Custody transfer moment."
 
   - id: todo
-    type: system
     label: TODO
-    size: l
-    position: { x: -250, y: 1260 }
+    type: normal
+    variant: default
+    phase: active-trip
+    description: "En route to dropoff (school). GPS feeds live ETA. Monitoring tracks lateness."
 
   - id: atdo
-    type: system
     label: ATDO
-    size: l
-    position: { x: 350, y: 1260 }
+    type: normal
+    variant: default
+    phase: active-trip
+    description: "Arrived at dropoff. Fires PtArrivedAtDropoffEvent. Driver confirms student exit."
 
-  # ── Revenue-Critical Transition ──
   - id: postservice
-    type: state
-    label: "POSTSERVICE"
-    size: l
-    position: { x: 0, y: 1520 }
-    data: { variant: danger }
+    label: POSTSERVICE
+    type: normal
+    variant: warning
+    phase: post-trip
+    description: "DropOffPassenger() fired PtDroppedOffEvent ⚡⚡ — THE revenue-critical event carrying DriverId, ServiceProviderId, MonitorId for Settlement BC/PD/PM. Published via transactional outbox."
 
-  # ── Phase 3: Post-Trip Validation (180px gaps) ──
+  # ── Phase 3: Post-Trip ──
   - id: postcompleteness
-    type: state
     label: POSTCOMPLETENESS
-    size: m
-    position: { x: 0, y: 1740 }
-    data: { variant: warning }
+    type: normal
+    variant: warning
+    phase: post-trip
+    description: "Conductor ValidateCompletenessTask — all trip data recorded."
 
   - id: postreadiness
-    type: state
     label: POSTREADINESS
-    size: m
-    position: { x: 0, y: 1920 }
-    data: { variant: warning }
+    type: normal
+    variant: warning
+    phase: post-trip
+    description: "Conductor ValidateBillingReadinessTask — trip data validated for billing."
 
-  # ── Phase 4: Settlement (180px gaps) ──
+  # ── Phase 4: Settlement ──
   - id: booked
-    type: state
     label: BOOKED
-    size: l
-    position: { x: 0, y: 2160 }
-    data: { variant: success }
+    type: normal
+    variant: success
+    phase: settlement
+    description: "Settlement-ready. Conductor BookPassengerTripsTask sets this status."
 
   - id: settled
-    type: state
     label: SETTLED
-    size: l
-    position: { x: 0, y: 2340 }
-    data: { variant: success }
+    type: terminal
+    phase: settlement
+    description: "Terminal. BC/PD/PM calculations complete. Student arrived safely."
 
-  # ── Terminal States (flanking, far from main flow) ──
+  # ── Terminal: Exception States ──
   - id: noshow
-    type: event
     label: NOSHOW
-    size: l
-    position: { x: -700, y: 920 }
-    data: { variant: danger }
+    type: terminal
+    description: "Student didn't board. Fires PtNoShowEvent ⚡ → Rescue Orchestration initiates replacement. Terminal."
 
   - id: cancelled
-    type: event
     label: CANCELLED
-    size: l
-    position: { x: 700, y: 280 }
-    data: { variant: danger }
+    type: terminal
+    description: "Trip cancelled before boarding. Fires PtCancelledEvent → Rescue/Assignment notified."
 
-edges:
+transitions:
   # Pre-Dispatch chain
-  - { id: e1,  source: new,               target: grouping,          type: flow }
-  - { id: e2,  source: grouping,          target: dispatching,       type: flow }
-  - { id: e3,  source: dispatching,       target: accepted,          type: flow }
+  - { id: t1,  source: new,               target: grouping,          trigger: "AssignToVehicleRun", note: "Grouped into VR by geography" }
+  - { id: t2,  source: grouping,          target: dispatching,       trigger: "Dispatch",            note: "VR offer accepted" }
+  - { id: t3,  source: dispatching,       target: accepted,          trigger: "Accept",              note: "PT locked to this run" }
 
-  # Active Trip
-  - { id: e4,  source: accepted,          target: topu,              type: flow, label: "To Pickup" }
-  - { id: e5,  source: topu,              target: atpu,              type: flow, label: "Arrive" }
-  - { id: e6,  source: atpu,              target: onboard,           type: flow, label: "Board" }
-  - { id: e7,  source: onboard,           target: todo,              type: flow, label: "To Dropoff" }
-  - { id: e8,  source: todo,              target: atdo,              type: flow, label: "Arrive" }
+  # Active Trip sequence
+  - { id: t4,  source: accepted,          target: topu,              trigger: "StartEnRouteToPickup", note: "GPS tracking begins" }
+  - { id: t5,  source: topu,              target: atpu,              trigger: "ArriveAtPickup",        note: "PtArrivedAtPickupEvent ⚡ → parent SMS" }
+  - { id: t6,  source: atpu,              target: onboard,           trigger: "BoardPassenger",        note: "PtBoardedEvent ⚡ → 'child picked up' SMS" }
+  - { id: t7,  source: onboard,           target: todo,              trigger: "StartEnRouteToDropoff", note: "En route to school" }
+  - { id: t8,  source: todo,              target: atdo,              trigger: "ArriveAtDropoff",        note: "PtArrivedAtDropoffEvent" }
 
-  # Revenue-Critical Transition
-  - { id: e9,  source: atdo,              target: postservice,       type: flow, label: "DropOff" }
+  # THE REVENUE MOMENT
+  - { id: t9,  source: atdo,              target: postservice,       trigger: "DropOffPassenger",      note: "⚡⚡ PtDroppedOffEvent — carries DriverId + ServiceProviderId + MonitorId for Settlement" }
 
-  # Post-Trip
-  - { id: e10, source: postservice,       target: postcompleteness,  type: flow }
-  - { id: e11, source: postcompleteness,  target: postreadiness,     type: flow }
-  - { id: e12, source: postreadiness,     target: booked,            type: flow }
+  # Post-Trip Conductor pipeline
+  - { id: t10, source: postservice,       target: postcompleteness,  trigger: "ValidateCompleteness" }
+  - { id: t11, source: postcompleteness,  target: postreadiness,     trigger: "ValidateReadiness" }
+  - { id: t12, source: postreadiness,     target: booked,            trigger: "Book",                  note: "Conductor BookPassengerTripsTask" }
+  - { id: t13, source: booked,            target: settled,           trigger: "Settle",                note: "Terminal" }
 
-  # Settlement
-  - { id: e13, source: booked,            target: settled,           type: flow }
+  # No-Show paths (from TOPU or ATPU — NOT after ONBOARD)
+  - { id: tn1, source: topu,              target: noshow,            trigger: "RecordNoShow",          note: "Driver never reached student — PtNoShowEvent" }
+  - { id: tn2, source: atpu,              target: noshow,            trigger: "RecordNoShow",          note: "Student didn't come out — 10-min wait — PtNoShowEvent ⚡" }
 
-  # No-Show paths
-  - { id: en1, source: topu,              target: noshow,            type: error, label: "NoShow" }
-  - { id: en2, source: atpu,              target: noshow,            type: error, label: "NoShow" }
-
-  # Cancellation paths
-  - { id: ec1, source: new,               target: cancelled,         type: error }
-  - { id: ec2, source: grouping,          target: cancelled,         type: error }
-  - { id: ec3, source: dispatching,       target: cancelled,         type: error }
-  - { id: ec4, source: accepted,          target: cancelled,         type: error }
+  # Cancellation paths (pre-boarding only — cannot cancel after ONBOARD)
+  - { id: tc1, source: new,               target: cancelled,         trigger: "Cancel" }
+  - { id: tc2, source: grouping,          target: cancelled,         trigger: "Cancel" }
+  - { id: tc3, source: dispatching,       target: cancelled,         trigger: "Cancel" }
+  - { id: tc4, source: accepted,          target: cancelled,         trigger: "Cancel",                note: "PtCancelledEvent" }
 
 steps:
   - id: step-1
     title: "A Student's Trip Begins"
     narrative: >
-      Every PassengerTrip starts in NEW — one per student per vehicle run.
-      Created by the nightly SGR generation or manually via CreateAdHocTripCommand.
-      The PT carries denormalized DriverId, ServiceProviderId, MonitorId from
-      its parent VehicleRun — copied at assignment time for settlement decoupling.
-    nodeIds: [new]
-    edgeIds: []
-    camera:
-      center: [0, 0]
-      zoom: 1.2
-      transition: 400
+      Every PassengerTrip starts in NEW — one per student per VehicleRun.
+      Created by the nightly SGR generation (SubscriptionTrip templates → PTs)
+      or manually via CreateAdHocTripCommand with TripOrigin.AdHoc.
+      The PT carries denormalized DriverId, ServiceProviderId, MonitorId
+      from its parent VehicleRun — copied at grouping time for settlement decoupling.
+    activeStates: [new]
+    activeTransitions: []
     duration: 5000
     narration:
       speaker: Architect
-      message: "One PassengerTrip per student per run. The settlement data is denormalized from the parent VehicleRun."
+      message: "One PT per student per run. Settlement data is denormalized from the parent VR — Settlement BC never queries Trip Ops directly."
 
   - id: step-2
-    title: "Pre-Dispatch: Grouping & Assignment"
+    title: "Phase 1 — Pre-Dispatch: Grouping & Assignment"
     narrative: >
-      NEW → GROUPING (PT grouped into a VR based on geographic proximity),
-      GROUPING → DISPATCHING (VR offer accepted by driver),
-      DISPATCHING → ACCEPTED (PT is confirmed on this run).
-      All pre-dispatch states allow cancellation.
-    nodeIds: [new, grouping, dispatching, accepted]
-    edgeIds: [e1, e2, e3]
-    camera:
-      center: [0, 280]
-      zoom: 0.5
-      transition: 500
+      NEW → GROUPING (PT grouped into a VR based on geographic proximity and
+      vehicle capacity). GROUPING → DISPATCHING (VR offer accepted by driver).
+      DISPATCHING → ACCEPTED (PT confirmed on this run).
+      All pre-dispatch states allow cancellation via PtStateMachine.CanTransition().
+    activeStates: [new, grouping, dispatching, accepted]
+    activeTransitions: [t1, t2, t3]
     duration: 5000
     narration:
       speaker: Domain Expert
       message: "Pre-dispatch mirrors the parent VR's offer workflow. Once ACCEPTED, the student is locked to this run."
 
   - id: step-3
-    title: "The Pickup Sequence"
+    title: "Phase 2 — En Route to Pickup"
     narrative: >
-      ACCEPTED → TOPU (en route to pickup) → ATPU (arrived at pickup location).
-      GPS geofence triggers the ATPU transition. PtArrivedAtPickupEvent fires —
-      Communications BC sends an SMS to the parent: 'Driver has arrived.'
-    nodeIds: [accepted, topu, atpu]
-    edgeIds: [e4, e5]
-    camera:
-      center: [0, 750]
-      zoom: 0.55
-      transition: 500
+      ACCEPTED → TOPU (StartEnRouteToPickup). The driver is navigating to the student's
+      home. GPS feeds live ETA to the parent portal via SignalR. Monitoring watches
+      for LateArrivalDetectedEvent if the driver runs behind schedule.
+    activeStates: [accepted, topu]
+    activeTransitions: [t4]
+    duration: 4500
+    narration:
+      speaker: Domain Expert
+      message: "TOPU is the first live GPS phase. Parents see the driver's real-time position approaching their home."
+
+  - id: step-4
+    title: "Arrived at Pickup — ATPU"
+    narrative: >
+      ArriveAtPickup() validates GPS coordinates against the stop's expected location.
+      Transition TOPU → ATPU fires PtArrivedAtPickupEvent — Communications BC
+      sends the parent an SMS: 'Your driver has arrived.' This is the 10-minute
+      window before a NoShow can be recorded.
+    activeStates: [atpu]
+    activeTransitions: [t5]
     duration: 5000
     narration:
       speaker: Domain Expert
-      message: "The driver arrives at the student's home. Geofence + GPS validates the arrival. Parent gets notified."
-
-  - id: step-4
-    title: "Student Boards — ONBOARD"
-    narrative: >
-      ATPU → ONBOARD via BoardPtCommand. The driver confirms the student boarded —
-      optionally scanning the student's ID. PtBoardedEvent triggers the parent
-      SMS: 'Your child has been picked up.' This is the custody transfer moment.
-    nodeIds: [onboard]
-    edgeIds: [e6]
-    camera:
-      center: [0, 1040]
-      zoom: 0.9
-      transition: 500
-    duration: 5000
-    narration:
-      speaker: Architecture Lead
-      message: "ONBOARD means custody transfer. From this point, EverDriven is responsible for the student's safety."
+      message: "ATPU starts the 10-minute boarding window. The parent gets an SMS. Monitoring watches for a NoShow if the student doesn't appear."
 
   - id: step-5
-    title: "En Route to Dropoff"
+    title: "Custody Transfer — ONBOARD"
+    narrative: >
+      BoardPassenger() transitions ATPU → ONBOARD. The driver optionally scans the
+      student's ID (StudentIdScanned captured). PtBoardedEvent fires — Communications
+      sends: 'Your child has been picked up.' From this moment, EverDriven is
+      legally responsible for the student's safety. NoShow is no longer possible.
+    activeStates: [onboard]
+    activeTransitions: [t6]
+    duration: 5500
+    narration:
+      speaker: Architecture Lead
+      message: "ONBOARD = custody transfer. Student is on the bus. NoShow is now impossible — the state machine enforces this."
+
+  - id: step-6
+    title: "En Route to Dropoff → Arrived"
     narrative: >
       ONBOARD → TODO (en route to school) → ATDO (arrived at dropoff).
-      During this phase, GPS telemetry feeds the ETA calculation.
-      Parents see a live ETA on the parent portal. Monitoring BC tracks
-      for late arrival exceptions.
-    nodeIds: [todo, atdo]
-    edgeIds: [e7, e8]
-    camera:
-      center: [0, 1260]
-      zoom: 0.6
-      transition: 500
+      GPS continues to flow during TODO. Parents see a live ETA countdown.
+      Monitoring BC tracks LateArrivalDetectedEvent if the driver is delayed.
+    activeStates: [todo, atdo]
+    activeTransitions: [t7, t8]
     duration: 5000
     narration:
       speaker: Domain Expert
       message: "The student is on the bus. GPS feeds the ETA. Parents watch the live tracker. Monitoring watches for delays."
 
-  - id: step-6
-    title: "THE REVENUE MOMENT — DropOff"
+  - id: step-7
+    title: "⚡ THE REVENUE MOMENT — DropOff"
     narrative: >
       ATDO → POSTSERVICE via DropOffPassenger(). This fires PtDroppedOffEvent —
       the single most important domain event in the entire Catalyst platform.
       It carries DriverId, ServiceProviderId, MonitorId — the three IDs that
-      Settlement needs for BC/PD/PM calculation. Published via transactional
-      outbox. A lost event means a missed payment.
-    nodeIds: [postservice]
-    edgeIds: [e9]
-    camera:
-      center: [0, 1480]
-      zoom: 0.7
-      transition: 500
+      Settlement needs to calculate BC/PD/PM billing. Published via the
+      transactional outbox (outbox_messages). A lost event means a missed payment.
+    activeStates: [postservice]
+    activeTransitions: [t9]
     duration: 7000
     narration:
       speaker: Architecture Lead
-      message: "This is it. The revenue-critical moment. PtDroppedOffEvent through the transactional outbox. Non-negotiable reliability."
-
-  - id: step-7
-    title: "Post-Trip & Settlement"
-    narrative: >
-      POSTSERVICE → POSTCOMPLETENESS → POSTREADINESS → BOOKED → SETTLED.
-      The 3-step post-trip validation is orchestrated by Conductor.
-      Once BOOKED, Settlement calculates BC/PD/PM. Once SETTLED,
-      the trip reaches its terminal state. The student arrived safely.
-    nodeIds: [postcompleteness, postreadiness, booked, settled]
-    edgeIds: [e10, e11, e12, e13]
-    camera:
-      center: [0, 2050]
-      zoom: 0.4
-      transition: 500
-    duration: 5000
-    narration:
-      speaker: Architect
-      message: "Post-trip validation, then settlement. SETTLED is terminal — the trip lifecycle is complete."
+      message: "This is THE moment. PtDroppedOffEvent through the transactional outbox. DriverId + ServiceProviderId + MonitorId for Settlement. Non-negotiable reliability."
 
   - id: step-8
-    title: "Exception Path: No-Show"
+    title: "Phase 3+4 — Post-Trip & Settlement"
     narrative: >
-      A student can be marked NOSHOW from TOPU (never arrived at pickup) or
-      ATPU (driver waited, student didn't board). PtNoShowEvent triggers
-      Rescue Orchestration to find a replacement. NOSHOW is terminal.
-      The state machine prevents NoShow after ONBOARD — if the student
-      boarded, they can't be marked absent.
-    nodeIds: [noshow]
-    edgeIds: [en1, en2]
-    camera:
-      center: [-450, 880]
-      zoom: 0.5
-      transition: 500
+      Conductor orchestrates: POSTSERVICE → POSTCOMPLETENESS → POSTREADINESS → BOOKED.
+      ValidateCompleteness (all times recorded?), ValidateBillingReadiness (data valid?),
+      Book (Conductor BookPassengerTripsTask). Once BOOKED, Settlement processes the
+      BC/PD/PM. SETTLED is terminal — the student arrived safely.
+    activeStates: [postcompleteness, postreadiness, booked, settled]
+    activeTransitions: [t10, t11, t12, t13]
+    duration: 5500
+    narration:
+      speaker: Architect
+      message: "Post-trip Conductor pipeline validates quality before settlement. SETTLED is terminal — the student's journey is complete."
+
+  - id: step-9
+    title: "Exception Path — No-Show"
+    narrative: >
+      NOSHOW is only reachable from TOPU (driver can't find student's stop)
+      or ATPU (driver arrived, student didn't board after 10 minutes).
+      PtNoShowEvent fires → Rescue Orchestration initiates a replacement search.
+      Critically: NoShow after ONBOARD is impossible — the state machine rejects it.
+    activeStates: [noshow]
+    activeTransitions: [tn1, tn2]
     duration: 5000
     narration:
       speaker: Domain Expert
-      message: "NoShow only from TOPU or ATPU. Once ONBOARD, the student is on the bus — NoShow is impossible. The state machine enforces this."
+      message: "NoShow only from TOPU or ATPU. Once ONBOARD, the student is on the bus — the state machine makes NoShow physically impossible."
 
-  - id: step-9
+  - id: step-10
+    title: "Exception Path — Cancellation"
+    narrative: >
+      CANCELLED is only reachable from pre-boarding states: NEW, GROUPING,
+      DISPATCHING, ACCEPTED. Once TOPU or beyond, cancellation is blocked —
+      the student is already in the pickup sequence. CanBeReassigned() returns
+      true for NEW through ATPU, allowing rescue re-routing.
+    activeStates: [cancelled]
+    activeTransitions: [tc1, tc2, tc3, tc4]
+    duration: 4500
+    narration:
+      speaker: Domain Expert
+      message: "Pre-boarding cancellation only. After TOPU, the PT must follow through to NOSHOW or completion."
+
+  - id: step-11
     title: "The Complete PT Lifecycle"
     narrative: >
       16 states. The happy path: NEW → GROUPING → DISPATCHING → ACCEPTED →
       TOPU → ATPU → ONBOARD → TODO → ATDO → POSTSERVICE → POSTCOMPLETENESS →
       POSTREADINESS → BOOKED → SETTLED. Two exception exits: NOSHOW and CANCELLED.
-      All governed by PtStateMachine.cs — a single static class with a
-      Dictionary<PtStatus, List<PtStatus>> transition matrix.
-    nodeIds: [new, grouping, dispatching, accepted, topu, atpu, onboard, todo, atdo, postservice, postcompleteness, postreadiness, booked, settled, noshow, cancelled]
-    edgeIds: [e1, e2, e3, e4, e5, e6, e7, e8, e9, e10, e11, e12, e13, en1, en2, ec1, ec2, ec3, ec4]
-    camera:
-      center: [0, 1100]
-      zoom: 0.17
-      transition: 600
-    duration: 6000
+      All governed by PtStateMachine.cs — a static Dictionary<PtStatus, List<PtStatus>>.
+    activeStates: [new, grouping, dispatching, accepted, topu, atpu, onboard, todo, atdo, postservice, postcompleteness, postreadiness, booked, settled, noshow, cancelled]
+    activeTransitions: [t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11, t12, t13, tn1, tn2, tc1, tc2, tc3, tc4]
+    duration: 7000
     narration:
       speaker: Architecture Lead
       message: "The complete PassengerTrip lifecycle. 16 states, one revenue-critical transition, zero tolerance for lost events."
