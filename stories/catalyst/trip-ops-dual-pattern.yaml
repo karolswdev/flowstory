@@ -1,0 +1,288 @@
+id: trip-ops-dual-pattern
+title: "ADR-008 — Dual CQRS + Conductor Pattern"
+description: >
+  Trip Operations validated the dual pattern that is now standard across
+  Catalyst. Real-time state transitions (sub-100ms) flow through MediatR.
+  Long-running batch workflows (10+ minutes) flow through Conductor.
+  This separation ensures the critical HTTP path is never blocked by batch workloads.
+renderer: service-flow
+schemaVersion: "2.0"
+layout: sequence
+
+services:
+  - id: trip-hq
+    name: Trip HQ
+    type: external
+    technology: "Next.js 15"
+
+  - id: driver-app
+    name: Driver App
+    type: external
+    technology: "Mobile (MDD)"
+
+  - id: trip-ops-api
+    name: Trip Ops API
+    type: api
+    technology: ".NET 10"
+    status: healthy
+    instances: 2
+
+  - id: mediatr
+    name: MediatR Pipeline
+    type: gateway
+    technology: "CQRS"
+    status: healthy
+
+  - id: conductor
+    name: Orkes Conductor
+    type: gateway
+    technology: "Saga Orchestrator"
+    status: healthy
+
+  - id: domain-layer
+    name: Domain Layer
+    type: worker
+    technology: "State Machines + Aggregates"
+    status: healthy
+
+  - id: trip-ops-db
+    name: trip_operations
+    type: database
+    technology: "PostgreSQL + PostGIS"
+
+  - id: asb
+    name: Azure Service Bus
+    type: database
+    technology: "trip-operations topic"
+
+  - id: task-workers
+    name: 23 Task Workers
+    type: worker
+    technology: ".NET 10"
+    status: healthy
+
+queues:
+  - id: conductor-queue
+    name: Conductor Task Queue
+    type: queue
+    broker: redis
+    consumers: 23
+
+calls:
+  # ── Sync Path: MediatR (sub-100ms) ──
+  - id: driver-boards
+    type: sync
+    from: driver-app
+    to: trip-ops-api
+    method: POST
+    path: "/v1/pt/{id}/board"
+    protocol: http
+    duration: 35
+    status: 200
+
+  - id: api-to-mediatr
+    type: sync
+    from: trip-ops-api
+    to: mediatr
+    method: SEND
+    path: "BoardPtCommand"
+    duration: 5
+    status: ok
+
+  - id: mediatr-to-domain
+    type: sync
+    from: mediatr
+    to: domain-layer
+    method: INVOKE
+    path: "PassengerTrip.Board() → PtStateMachine.Validate()"
+    duration: 2
+    status: ok
+
+  - id: domain-to-db-sync
+    type: sync
+    from: domain-layer
+    to: trip-ops-db
+    method: "SAVE"
+    path: "UnitOfWork.CommitAsync()"
+    duration: 12
+    status: ok
+
+  - id: publish-sync
+    type: publish
+    from: trip-ops-db
+    to: asb
+    messageType: "PtBoardedEvent (fire-and-forget)"
+
+  # ── Async Path: Conductor (10+ minutes) ──
+  - id: scheduler-trigger
+    type: sync
+    from: trip-ops-api
+    to: conductor
+    method: POST
+    path: "StartWorkflow(sgr-generation)"
+    duration: 50
+    status: ok
+
+  - id: conductor-dispatch
+    type: publish
+    from: conductor
+    to: conductor-queue
+    messageType: "Task: generate-trips-for-date"
+
+  - id: worker-execute
+    type: subscribe
+    from: conductor-queue
+    to: task-workers
+    messageType: "GenerateSubscriptionTripsTask"
+    action: "Batch create VRs + PTs"
+
+  - id: worker-to-db
+    type: sync
+    from: task-workers
+    to: trip-ops-db
+    method: "BATCH INSERT"
+    path: "VehicleRuns + PassengerTrips"
+    duration: 45000
+    status: ok
+
+  - id: worker-complete
+    type: sync
+    from: task-workers
+    to: conductor
+    method: "COMPLETE"
+    path: "Task result → next task"
+    duration: 10
+    status: ok
+
+  - id: publish-async
+    type: publish
+    from: task-workers
+    to: asb
+    messageType: "SgrCompletedEvent (via outbox)"
+
+steps:
+  - id: step-1
+    title: "The Decision: MediatR or Conductor?"
+    narrative: >
+      Trip Operations validated the dual CQRS + Conductor pattern (ADR-008).
+      The decision rule is simple: Use MediatR when the operation completes
+      within HTTP timeout, needs an immediate response, and rollback is DB-only.
+      Use Conductor when it may exceed timeout, needs compensation, or involves
+      multi-step orchestration.
+    activeCalls: []
+    duration: 5000
+    narration:
+      speaker: Architecture Lead
+      message: "One BC, two execution models. The key insight: don't force batch workloads through the HTTP request pipeline."
+
+  - id: step-2
+    title: "Sync Path: Driver Boards Student (35ms)"
+    narrative: >
+      A driver taps 'Board' on their mobile device. POST /v1/pt/{id}/board
+      hits the API. MediatR dispatches BoardPtCommand. The handler loads
+      the PassengerTrip aggregate, calls Board() which validates via
+      PtStateMachine, mutates state, raises PtBoardedEvent. UnitOfWork
+      commits. HTTP 200 returns in ~35ms. The parent gets an SMS.
+    activeCalls:
+      - driver-boards
+      - api-to-mediatr
+      - mediatr-to-domain
+      - domain-to-db-sync
+      - publish-sync
+    duration: 6000
+    narration:
+      speaker: Domain Expert
+      message: "35 milliseconds. Aggregate loaded, state machine validated, event raised, database committed, 200 OK returned. That's the MediatR path."
+
+  - id: step-3
+    title: "Why MediatR for State Transitions?"
+    narrative: >
+      PT state transitions MUST be fast. A driver boarding 8 students
+      shouldn't wait for a queue. The parent expects an immediate SMS.
+      The dispatch board must update in real-time. MediatR gives us
+      in-process execution, compile-time type safety, and pipeline behaviors
+      (validation, logging, tenant scoping) — all within the HTTP request.
+    activeCalls:
+      - driver-boards
+      - api-to-mediatr
+    duration: 5000
+    narration:
+      speaker: Architect
+      message: "Real-time operations need real-time execution. MediatR keeps us in-process with zero serialization overhead."
+
+  - id: step-4
+    title: "Async Path: Nightly SGR Generation (10 min)"
+    narrative: >
+      At 9 PM, TriggerSgrCommand starts the sgr-generation-workflow in Conductor.
+      The API returns 202 Accepted immediately. Conductor dispatches tasks to
+      the task queue. 23 task workers execute in sequence: create SGR instance,
+      fetch templates, batch-generate VRs and PTs, complete SGR, publish event.
+    activeCalls:
+      - scheduler-trigger
+      - conductor-dispatch
+      - worker-execute
+      - worker-to-db
+    duration: 6000
+    narration:
+      speaker: Architecture Lead
+      message: "10 minutes for 500K trips. Conductor orchestrates the pipeline. The API pod is free to serve real-time requests."
+
+  - id: step-5
+    title: "Conductor: Compensation & Durability"
+    narrative: >
+      What if SGR creates 400 VRs but fails on #401? Conductor's compensation
+      workflow kicks in — it deletes the partial batch and marks SGR as Failed
+      with a FailureReason. Each task has retry policies with exponential backoff.
+      Worker idempotency is Redis-based. The workflow state survives pod restarts.
+    activeCalls:
+      - worker-execute
+      - worker-complete
+      - worker-to-db
+    duration: 5000
+    narration:
+      speaker: Architect
+      message: "Compensation is why we use Conductor. A 10-minute batch job can't rely on database transactions alone."
+
+  - id: step-6
+    title: "The Handoff: Conductor → ASB"
+    narrative: >
+      After SGR completes, the final task publishes SgrCompletedEvent to
+      Azure Service Bus. The Assignment BC consumes it and triggers batch
+      matching — pairing drivers to the newly-created VRs. This is the
+      handoff from Conductor orchestration to event-driven choreography.
+    activeCalls:
+      - worker-complete
+      - publish-async
+    duration: 5000
+    narration:
+      speaker: Domain Expert
+      message: "Conductor orchestrates within the BC. Events choreograph across BCs. Orchestration stops at the boundary."
+
+  - id: step-7
+    title: "The Complete Dual Pattern"
+    narrative: >
+      Two paths, one bounded context. MediatR handles 39 commands for
+      sub-100ms state transitions. Conductor handles 23 task workers for
+      batch workflows. The critical real-time path (driver boarding →
+      parent SMS → 200ms) is never delayed by the batch generation
+      workload (nightly 10-minute run). This is ADR-008 in action.
+    activeCalls:
+      - driver-boards
+      - api-to-mediatr
+      - mediatr-to-domain
+      - domain-to-db-sync
+      - publish-sync
+      - scheduler-trigger
+      - conductor-dispatch
+      - worker-execute
+      - worker-to-db
+      - worker-complete
+      - publish-async
+    duration: 6000
+    narration:
+      speaker: Architecture Lead
+      message: "The dual pattern — validated in Trip Operations, now standard across Rescue and Identity-Access. ADR-008's lasting contribution."
+
+camera:
+  center: [0, 0]
+  zoom: 1

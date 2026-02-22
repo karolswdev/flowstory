@@ -1,8 +1,8 @@
 import { useMemo } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { fadeUp, TRANSITION } from '../../animation';
+import { motion } from 'motion/react';
+import { BaseCanvas } from '../base';
 import type { TeamOwnershipStory, TeamOwnershipStep, Team, Service } from '../../schemas/team-ownership';
-import { SERVICE_TYPE_ICONS, SERVICE_TYPE_COLORS } from '../../schemas/team-ownership';
+import { SERVICE_TYPE_ICONS } from '../../schemas/team-ownership';
 
 // Team type colors
 const TEAM_COLORS: Record<string, string> = {
@@ -69,7 +69,16 @@ export function TeamOwnershipCanvas({ story, currentStepIndex, onStepChange }: T
   }, [story.teams, story.services]);
   
   return (
-    <div className="team-ownership-canvas">
+    <BaseCanvas
+      className="team-ownership-canvas"
+      currentStepIndex={currentStepIndex}
+      totalSteps={story.steps.length}
+      stepTitle={currentStep?.title}
+      stepDescription={currentStep?.description}
+      onStepChange={onStepChange}
+      infoClassName="team-info"
+      navClassName="team-nav"
+    >
       <h2>{story.title}</h2>
       
       <div className="teams-grid">
@@ -83,20 +92,7 @@ export function TeamOwnershipCanvas({ story, currentStepIndex, onStepChange }: T
           />
         ))}
       </div>
-      
-      {currentStep && (
-        <motion.div className="team-info" initial={{ opacity: 0 }} animate={{ opacity: 1 }} key={currentStepIndex}>
-          <h3>{currentStep.title}</h3>
-          <p>{currentStep.description}</p>
-        </motion.div>
-      )}
-      
-      <div className="team-nav">
-        <button onClick={() => onStepChange?.(Math.max(0, currentStepIndex - 1))} disabled={currentStepIndex === 0}>← Previous</button>
-        <span>{currentStepIndex + 1} / {story.steps.length}</span>
-        <button onClick={() => onStepChange?.(Math.min(story.steps.length - 1, currentStepIndex + 1))} disabled={currentStepIndex >= story.steps.length - 1}>Next →</button>
-      </div>
-    </div>
+    </BaseCanvas>
   );
 }
 

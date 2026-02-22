@@ -1,0 +1,218 @@
+id: trip-ops-driver-offer
+title: "Driver Offer Workflow — 4-Step Negotiation"
+description: >
+  The driver offer workflow is a 4-step negotiation between the Assignment
+  engine and the driver. QueueOffer → SendOffer → AcceptOffer → ConfirmOffer.
+  Each step transitions the VR through the offer states in VrStateMachine.cs.
+renderer: http-flow
+schemaVersion: "2.0"
+layout: sequence
+
+participants:
+  - id: assignment
+    name: Assignment BC
+    type: service
+    icon: 🔗
+    baseUrl: http://api.catalyst.local/assignment
+
+  - id: trip-ops
+    name: Trip Ops API
+    type: service
+    icon: 🚐
+    baseUrl: http://api.catalyst.local/trip-operations
+
+  - id: driver-app
+    name: Driver App
+    type: client
+    icon: 📱
+
+  - id: comms
+    name: Communications BC
+    type: service
+    icon: 📨
+    baseUrl: http://api.catalyst.local/communications
+
+exchanges:
+  - id: queue-offer
+    request:
+      from: assignment
+      to: trip-ops
+      method: POST
+      path: /v1/vr/{vrId}/offers/queue
+      headers:
+        Authorization: "Bearer {service-account-jwt}"
+        X-Tenant-Id: "{tenantId}"
+        X-Correlation-Id: "{correlationId}"
+      body:
+        vehicleRunId: "vr-abc-123"
+        driverId: "drv-456"
+        assignmentId: "asg-789"
+        priority: 1
+    response:
+      status: 202
+      statusText: Accepted
+      headers:
+        Content-Type: application/json
+      body:
+        offerId: "offer-001"
+        status: OFFERQUEUED
+        expiresAt: "2026-02-22T06:30:00Z"
+    timing:
+      total: 45
+      ttfb: 35
+
+  - id: send-offer
+    request:
+      from: trip-ops
+      to: driver-app
+      method: PUSH
+      path: "Firebase Cloud Messaging"
+      headers:
+        Content-Type: application/json
+      body:
+        title: "New Route Available"
+        body: "DPS Morning Route #42 — 8 stops, 2.1 hrs"
+        data:
+          offerId: "offer-001"
+          vehicleRunId: "vr-abc-123"
+          stopCount: 8
+          estimatedDuration: "2h 6m"
+    response:
+      status: 200
+      statusText: Delivered
+      body:
+        deliveredAt: "2026-02-22T05:15:03Z"
+    timing:
+      total: 250
+      ttfb: 200
+
+  - id: accept-offer
+    request:
+      from: driver-app
+      to: trip-ops
+      method: POST
+      path: /v1/vr/{vrId}/offers/accept
+      headers:
+        Authorization: "Bearer {driver-jwt}"
+        X-Tenant-Id: "{tenantId}"
+      body:
+        offerId: "offer-001"
+        driverConfirmation: true
+    response:
+      status: 200
+      statusText: OK
+      headers:
+        Content-Type: application/json
+      body:
+        vehicleRunId: "vr-abc-123"
+        status: OFFERACCEPTED
+        driverId: "drv-456"
+        scheduledStartTime: "2026-02-22T06:45:00Z"
+    timing:
+      total: 65
+      ttfb: 50
+
+  - id: confirm-offer
+    request:
+      from: trip-ops
+      to: comms
+      method: POST
+      path: /v1/notifications/direct
+      headers:
+        Authorization: "Bearer {service-account-jwt}"
+        X-Correlation-Id: "{correlationId}"
+      body:
+        recipientId: "drv-456"
+        channel: PUSH
+        template: driver-route-confirmed
+        data:
+          routeName: "DPS Morning Route #42"
+          startTime: "6:45 AM"
+          stopCount: 8
+    response:
+      status: 201
+      statusText: Created
+      body:
+        notificationId: "notif-002"
+        status: QUEUED
+    timing:
+      total: 40
+      ttfb: 30
+
+steps:
+  - id: step-1
+    title: "Step 1: Queue the Offer"
+    narrative: >
+      The Assignment engine matches a driver to a VR and calls QueueOfferCommand.
+      VrStateMachine validates RESERVED → OFFERQUEUED. The offer is created with
+      a 30-minute expiration window. If the driver doesn't respond, the offer
+      expires and Assignment tries the next-best match.
+    activeExchanges:
+      - queue-offer
+    duration: 5000
+    narration:
+      speaker: Domain Expert
+      message: "Assignment picks the best driver. QueueOffer reserves the slot. 30-minute expiry prevents indefinite locks."
+
+  - id: step-2
+    title: "Step 2: Send to Driver"
+    narrative: >
+      SendOfferCommand transitions OFFERQUEUED → OFFERSENT and triggers a
+      Firebase push notification to the driver's mobile device. The notification
+      includes route details: stop count, estimated duration, and start time.
+      The driver sees this in the Driver Portal or as a push notification.
+    activeExchanges:
+      - send-offer
+    duration: 5000
+    narration:
+      speaker: Domain Expert
+      message: "Push notification to the driver. They see the route details and decide whether to accept."
+
+  - id: step-3
+    title: "Step 3: Driver Accepts"
+    narrative: >
+      The driver taps 'Accept' in the Driver App. AcceptOfferCommand validates
+      OFFERSENT → OFFERCONFIRMED → OFFERACCEPTED (two transitions in one command).
+      The VR is now committed to this driver. VrDispatchedEvent fires,
+      notifying Monitoring and updating the dispatch board via SignalR.
+    activeExchanges:
+      - accept-offer
+    duration: 5000
+    narration:
+      speaker: Architecture Lead
+      message: "The driver commits. VrDispatchedEvent fires. The dispatch board updates in real-time via SignalR."
+
+  - id: step-4
+    title: "Step 4: Confirmation Sent"
+    narrative: >
+      ConfirmOfferCommand sends a push notification confirming the route
+      assignment. The driver now has full route details in their Driver Portal —
+      stop addresses, student names, special instructions, start time.
+      The VR is ready for StartVrCommand when the driver begins their route.
+    activeExchanges:
+      - confirm-offer
+    duration: 5000
+    narration:
+      speaker: Domain Expert
+      message: "Confirmation sent. The driver has their route. Tomorrow morning, they tap 'Start Route' and the VR transitions to TOSTOP."
+
+  - id: step-5
+    title: "Complete Offer Flow"
+    narrative: >
+      Four steps, four state transitions: RESERVED → OFFERQUEUED → OFFERSENT →
+      OFFERCONFIRMED → OFFERACCEPTED. Each validated by VrStateMachine before
+      any persistence. If the driver declines or the offer expires, the VR
+      returns to RESERVED and Assignment tries the next match.
+    activeExchanges:
+      - queue-offer
+      - send-offer
+      - accept-offer
+      - confirm-offer
+    duration: 6000
+    narration:
+      speaker: Architect
+      message: "The offer workflow ensures explicit driver consent. No driver is ever assigned without accepting first."
+
+camera:
+  center: [0, 0]
+  zoom: 1

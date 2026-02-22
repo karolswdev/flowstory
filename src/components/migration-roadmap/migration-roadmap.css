@@ -252,36 +252,36 @@
    ============================================ */
 [data-theme="dark"] .mr-phase,
 [data-theme="dark"] .mr-task {
-  background: #2d2d2d;
-  border-color: #444;
+  background: var(--color-bg-secondary);
+  border-color: var(--color-border);
 }
 
 [data-theme="dark"] .mr-phase-name,
 [data-theme="dark"] .mr-task-name {
-  color: #e0e0e0;
+  color: var(--color-text);
 }
 
 [data-theme="dark"] .mr-phase-desc,
 [data-theme="dark"] .mr-task-desc {
-  color: #aaa;
+  color: var(--color-text-secondary);
 }
 
 [data-theme="dark"] .mr-timeline {
-  background: #3d3d3d;
-  color: #aaa;
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
 }
 
 [data-theme="dark"] .mr-progress-bar,
 [data-theme="dark"] .mr-task-progress-bar {
-  background: #444;
+  background: var(--color-border);
 }
 
 [data-theme="dark"] .mr-milestones {
-  border-top-color: #444;
+  border-top-color: var(--color-border);
 }
 
 [data-theme="dark"] .mr-milestone {
-  color: #888;
+  color: var(--color-text-muted);
 }
 
 .migration-canvas { position: relative; padding: 24px; height: 100%; background: var(--color-bg); overflow: auto; }
@@ -296,8 +296,8 @@
 .progress-bar { flex: 1; height: 6px; background: var(--color-bg); border-radius: 3px; }
 .progress-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
 .task-item { font-size: var(--fs-sm); padding: 4px 0; }
-.task-item.status-done { color: #4CAF50; }
-.task-item.status-blocked { color: #F44336; }
+.task-item.status-done { color: var(--color-success); }
+.task-item.status-blocked { color: var(--color-error); }
 .migration-info { position: absolute; bottom: calc(var(--space-16) + var(--space-6)); left: 50%; transform: translateX(-50%); background: var(--color-bg-elevated); border: var(--border-width) solid var(--color-border); border-radius: var(--radius-md); padding: var(--space-4) var(--space-6); max-width: 500px; }
 .migration-info h3 { margin: 0 0 var(--space-2); }
 .migration-info p { margin: 0; color: var(--color-text-secondary); }

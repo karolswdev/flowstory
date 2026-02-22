@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { Handle, Position } from '@xyflow/react';
+import { NodeHandles } from '../nodes/NodeHandles';
 import { motion } from 'motion/react';
 import type { ArtifactType, ChildArtifact } from '../../schemas/bc-deployment';
 import { ARTIFACT_ICONS, ARTIFACT_COLORS } from '../../schemas/bc-deployment';
@@ -70,9 +70,7 @@ export const ChildArtifactNode = memo(function ChildArtifactNode({
       {/* Name */}
       <span className="child-artifact-name">{name}</span>
 
-      {/* Handles */}
-      <Handle type="target" position={Position.Left} className="child-handle" />
-      <Handle type="source" position={Position.Right} className="child-handle" />
+      <NodeHandles />
     </motion.div>
   );
 });

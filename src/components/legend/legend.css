@@ -41,7 +41,7 @@
   border: none;
   cursor: pointer;
   width: 100%;
-  color: #f9fafb;
+  color: var(--color-text);
   font-size: 14px;
   font-weight: 600;
   transition: background 0.15s ease;
@@ -67,7 +67,7 @@
 
 .legend-chevron {
   font-size: 10px;
-  color: #9ca3af;
+  color: var(--color-text-muted);
 }
 
 /* ============================================
@@ -97,7 +97,7 @@
   font-weight: 700;
   letter-spacing: 1.2px;
   text-transform: uppercase;
-  color: #6b7280;
+  color: var(--color-text-secondary);
   margin-bottom: 8px;
   padding-bottom: 4px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
@@ -127,12 +127,12 @@
 }
 
 .legend-item-label {
-  color: #e5e7eb;
+  color: var(--color-text);
   font-weight: 500;
 }
 
 .legend-item-desc {
-  color: #9ca3af;
+  color: var(--color-text-muted);
   font-size: 11px;
   text-align: right;
 }
@@ -187,7 +187,7 @@
 }
 
 .legend-bc-name {
-  color: #d1d5db;
+  color: var(--color-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -203,7 +203,7 @@
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   text-align: center;
   font-size: 10px;
-  color: #6b7280;
+  color: var(--color-text-secondary);
 }
 
 .legend-hint kbd {
@@ -213,7 +213,7 @@
   border-radius: 4px;
   font-family: monospace;
   font-size: 10px;
-  color: #9ca3af;
+  color: var(--color-text-muted);
   margin: 0 2px;
 }
 

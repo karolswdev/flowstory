@@ -256,20 +256,22 @@ export function ADRTimelineCanvas({
       </div>
       
       {/* Info panel */}
-      {currentStep && (
-        <motion.div 
-          className="adr-info"
-          variants={fadeUp}
-          initial="initial"
-          animate="animate"
-          exit="exit"
-          transition={TRANSITION.default}
-          key={currentStepIndex}
-        >
-          <h3>{currentStep.title}</h3>
-          <p>{currentStep.description}</p>
-        </motion.div>
-      )}
+      <AnimatePresence mode="wait">
+        {currentStep && (
+          <motion.div 
+            className="adr-info"
+            variants={fadeUp}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            transition={TRANSITION.default}
+            key={currentStepIndex}
+          >
+            <h3>{currentStep.title}</h3>
+            <p>{currentStep.description}</p>
+          </motion.div>
+        )}
+      </AnimatePresence>
       
       {/* Navigation */}
       <div className="adr-nav">

@@ -197,11 +197,11 @@ export function isValidServiceFlowStory(data: unknown): data is ServiceFlowStory
 // ============================================================================
 
 export const SERVICE_FLOW_LAYOUT = {
-  LANE_WIDTH: 200,
-  LANE_SPACING: 50,
+  LANE_WIDTH: 220,
+  LANE_SPACING: 120,
   CALL_SPACING: 80,
   NODE_HEIGHT: 80,
   QUEUE_HEIGHT: 60,
   HEADER_HEIGHT: 50,
-  PADDING: 40,
+  PADDING: 80,
 } as const;

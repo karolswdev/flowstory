@@ -199,6 +199,37 @@
   }
 }
 
+/* Recording state */
+.export-button-recording {
+  border-color: #ef4444;
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.export-button-recording:hover:not(:disabled) {
+  border-color: #dc2626;
+  background: rgba(239, 68, 68, 0.14);
+}
+
+.export-recording-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ef4444;
+  flex-shrink: 0;
+  animation: recording-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes recording-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.85); }
+}
+
+.export-cancel-hint {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  margin-left: 4px;
+}
+
 /* Compact variant for toolbar */
 .export-button-container.export-compact .export-button {
   padding: 6px 10px;

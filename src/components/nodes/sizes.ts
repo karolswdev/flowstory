@@ -70,8 +70,8 @@ export const DEFAULT_NODE_SIZES: Record<string, NodeSize> = {
   // Systems are large (important, often have descriptions)
   system: 'l',
   
-  // Events are medium (names like "AccountCreatedEvent" need space)
-  event: 'm',
+  // Events are large (CamelCase names like "ResetEmailSentEvent" need space)
+  event: 'l',
   
   // Decisions are medium (diamonds)
   decision: 'm',

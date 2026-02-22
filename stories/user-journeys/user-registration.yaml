@@ -1,0 +1,104 @@
+id: user-registration
+title: User Registration Flow
+description: New user signs up for an account
+version: "1.0"
+
+actors:
+  - id: user
+    name: New User
+    type: user
+    avatar: "👤"
+    color: "#4CAF50"
+
+nodes:
+  - id: user-actor
+    type: actor
+    actorId: user
+    label: New User
+    position: { x: 50, y: 200 }
+  - id: visit-site
+    type: action
+    actorId: user
+    label: Visits Website
+    position: { x: 250, y: 200 }
+  - id: click-signup
+    type: action
+    actorId: user
+    label: Clicks Sign Up
+    position: { x: 450, y: 200 }
+  - id: enter-details
+    type: action
+    actorId: user
+    label: Enters Details
+    description: Email, password, name
+    position: { x: 650, y: 200 }
+  - id: validate-form
+    type: system
+    label: Validate Form
+    position: { x: 850, y: 120 }
+  - id: create-account
+    type: system
+    label: Create Account
+    position: { x: 1050, y: 120 }
+  - id: account-created-event
+    type: event
+    label: AccountCreatedEvent
+    position: { x: 1050, y: 320 }
+  - id: send-welcome-email
+    type: system
+    label: Send Welcome Email
+    position: { x: 1250, y: 320 }
+  - id: redirect-dashboard
+    type: action
+    actorId: user
+    label: Sees Dashboard
+    position: { x: 1250, y: 120 }
+  - id: success
+    type: state
+    label: Registration Complete
+    position: { x: 1450, y: 200 }
+    data:
+      variant: success
+
+edges:
+  - { id: e1, source: user-actor, target: visit-site, type: flow }
+  - { id: e2, source: visit-site, target: click-signup, type: flow }
+  - { id: e3, source: click-signup, target: enter-details, type: flow }
+  - { id: e4, source: enter-details, target: validate-form, type: flow }
+  - { id: e5, source: validate-form, target: create-account, type: flow }
+  - { id: e6, source: create-account, target: account-created-event, type: event, label: publishes }
+  - { id: e7, source: create-account, target: redirect-dashboard, type: flow }
+  - { id: e8, source: account-created-event, target: send-welcome-email, type: async }
+  - { id: e9, source: redirect-dashboard, target: success, type: flow }
+
+steps:
+  - id: step-1
+    order: 1
+    nodeIds: [user-actor]
+    edgeIds: []
+    narrative: "Meet Alex, a new user who wants to create an account."
+    duration: 2500
+  - id: step-2
+    order: 2
+    nodeIds: [user-actor, visit-site, click-signup]
+    edgeIds: [e1, e2]
+    narrative: "Alex visits the website and clicks the Sign Up button."
+    duration: 2500
+  - id: step-3
+    order: 3
+    nodeIds: [click-signup, enter-details, validate-form]
+    edgeIds: [e3, e4]
+    narrative: "Alex fills in their email, password, and name. The form validates the input."
+    duration: 3000
+  - id: step-4
+    order: 4
+    nodeIds: [validate-form, create-account, account-created-event]
+    edgeIds: [e5, e6]
+    narrative: "The system creates the account and publishes an AccountCreatedEvent."
+    duration: 2500
+  - id: step-5
+    order: 5
+    nodeIds: [account-created-event, send-welcome-email, redirect-dashboard, success]
+    edgeIds: [e7, e8, e9]
+    narrative: "Alex sees their new dashboard. A welcome email is sent in the background."
+    duration: 3000

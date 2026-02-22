@@ -1,8 +1,8 @@
 import { useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { fadeUp, TRANSITION } from '../../animation';
+import { BaseCanvas } from '../base';
 import type { DependencyGraphStory, DependencyGraphStep, ServiceNode } from '../../schemas/dependency-graph';
-import { HEALTH_COLORS, ServiceType } from '../../schemas/dependency-graph';
+import { HEALTH_COLORS } from '../../schemas/dependency-graph';
 
 // Service type colors
 const SERVICE_COLORS: Record<string, string> = {
@@ -81,7 +81,16 @@ export function DependencyGraphCanvas({ story, currentStepIndex, onStepChange }:
   const viewBox = "0 0 800 500";
   
   return (
-    <div className="dep-graph-canvas">
+    <BaseCanvas
+      className="dep-graph-canvas"
+      currentStepIndex={currentStepIndex}
+      totalSteps={story.steps.length}
+      stepTitle={currentStep?.title}
+      stepDescription={currentStep?.description}
+      onStepChange={onStepChange}
+      infoClassName="dep-info"
+      navClassName="dep-nav"
+    >
       <svg viewBox={viewBox} className="dep-graph-svg">
         {/* Dependencies (edges) */}
         {story.dependencies?.map((dep, i) => {
@@ -120,20 +129,7 @@ export function DependencyGraphCanvas({ story, currentStepIndex, onStepChange }:
           ))}
         </AnimatePresence>
       </svg>
-      
-      {currentStep && (
-        <motion.div className="dep-info" initial={{ opacity: 0 }} animate={{ opacity: 1 }} key={currentStepIndex}>
-          <h3>{currentStep.title}</h3>
-          <p>{currentStep.description}</p>
-        </motion.div>
-      )}
-      
-      <div className="dep-nav">
-        <button onClick={() => onStepChange?.(Math.max(0, currentStepIndex - 1))} disabled={currentStepIndex === 0}>← Previous</button>
-        <span>{currentStepIndex + 1} / {story.steps.length}</span>
-        <button onClick={() => onStepChange?.(Math.min(story.steps.length - 1, currentStepIndex + 1))} disabled={currentStepIndex >= story.steps.length - 1}>Next →</button>
-      </div>
-    </div>
+    </BaseCanvas>
   );
 }
 

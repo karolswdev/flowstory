@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { Handle, Position } from '@xyflow/react';
+import { NodeHandles } from '../nodes/NodeHandles';
 import { motion } from 'framer-motion';
 import type { QueueDef, QueueType } from '../../schemas/service-flow';
 import { QUEUE_TYPE_ICONS } from '../../schemas/service-flow';
@@ -40,8 +40,8 @@ export const QueueNode = memo(function QueueNode({ data, selected }: QueueNodePr
       }}
       transition={{ duration: 0.2 }}
     >
-      <Handle type="target" position={Position.Left} className="queue-handle" />
-      
+      <NodeHandles />
+
       <div className="queue-node__header">
         <span className="queue-node__icon">{icon}</span>
         <span className="queue-node__name">{name}</span>
@@ -73,7 +73,6 @@ export const QueueNode = memo(function QueueNode({ data, selected }: QueueNodePr
         </div>
       )}
       
-      <Handle type="source" position={Position.Right} className="queue-handle" />
     </motion.div>
   );
 });

@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { Handle, Position } from '@xyflow/react';
+import { NodeHandles } from '../nodes/NodeHandles';
 import { motion, AnimatePresence } from 'motion/react';
 import type { BCDeploymentNode } from '../../schemas/bc-deployment';
 import './bc-deployment.css';
@@ -87,11 +87,7 @@ export const BCCoreNode = memo(function BCCoreNode({ data, selected }: BCCoreNod
         </div>
       )}
 
-      {/* Connection handles (hidden, for edge routing) */}
-      <Handle type="source" position={Position.Right} className="bc-handle" />
-      <Handle type="source" position={Position.Bottom} className="bc-handle" />
-      <Handle type="source" position={Position.Left} className="bc-handle" />
-      <Handle type="source" position={Position.Top} className="bc-handle" />
+      <NodeHandles />
     </motion.div>
   );
 });

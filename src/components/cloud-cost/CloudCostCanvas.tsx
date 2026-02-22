@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { fadeUp, TRANSITION, useStaggeredChildren, STAGGER_PRESETS, slideInLeft } from '../../animation';
 import type { CloudCostStory, CloudCostStep, Category as CostCategory, Resource } from '../../schemas/cloud-cost';
 import { CATEGORY_COLORS, TREND_ICONS } from '../../schemas/cloud-cost';
@@ -142,20 +142,22 @@ export function CloudCostCanvas({
       )}
       
       {/* Info panel */}
-      {currentStep && (
-        <motion.div 
-          className="cost-info"
-          variants={fadeUp}
-          initial="initial"
-          animate="animate"
-          exit="exit"
-          transition={TRANSITION.default}
-          key={currentStepIndex}
-        >
-          <h3>{currentStep.title}</h3>
-          <p>{currentStep.description}</p>
-        </motion.div>
-      )}
+      <AnimatePresence mode="wait">
+        {currentStep && (
+          <motion.div 
+            className="cost-info"
+            variants={fadeUp}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            transition={TRANSITION.default}
+            key={currentStepIndex}
+          >
+            <h3>{currentStep.title}</h3>
+            <p>{currentStep.description}</p>
+          </motion.div>
+        )}
+      </AnimatePresence>
       
       {/* Navigation */}
       <div className="cost-nav">

@@ -101,9 +101,9 @@
   color: var(--node-system-text);
   font-size: var(--node-font-size, var(--font-size-md));
   line-height: var(--line-height-tight);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
 }
 
 .system-description {
@@ -112,9 +112,8 @@
   color: var(--node-system-text);
   opacity: 0.7;
   margin-top: 2px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  word-wrap: break-word;
 }
 
 .system-progress {
@@ -179,16 +178,17 @@
   color: var(--node-action-text);
   font-size: var(--node-font-size, var(--font-size-md));
   line-height: var(--line-height-tight);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
 }
 
 /* ============================================
    Event Node - Compact badge
    ============================================ */
 .event-node {
-  width: var(--node-width, 160px);
+  min-width: var(--node-width, 180px);
+  max-width: 280px;
   min-height: var(--node-height, 44px);
   padding: var(--node-padding, var(--space-2)) var(--space-3);
   background: var(--node-event-bg);
@@ -228,9 +228,9 @@
   color: var(--node-event-text);
   font-size: var(--node-font-size, var(--font-size-sm));
   line-height: var(--line-height-tight);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
   flex: 1;
   min-width: 0;
 }
@@ -360,9 +360,9 @@
   color: var(--node-decision-text);
   font-size: var(--node-font-size, var(--font-size-md));
   line-height: var(--line-height-tight);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
 }
 
 .decision-thinking {
@@ -436,9 +436,9 @@
    Dark Mode
    ============================================ */
 [data-theme="dark"] .complete-check {
-  border-color: #1e1e1e;
+  border-color: var(--color-bg);
 }
 
 [data-theme="dark"] .actor-label {
-  background: #2a2a2a;
+  background: var(--color-bg-secondary);
 }

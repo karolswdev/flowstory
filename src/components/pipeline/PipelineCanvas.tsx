@@ -26,6 +26,8 @@ import {
   JOB_STATUS_COLORS,
   TRIGGER_TYPE_ICONS,
 } from '../../schemas/pipeline';
+import { getSmartHandles, type NodeRect } from '../nodes/NodeHandles';
+import { NODE_DIMENSIONS } from '../nodes/dimensions';
 
 import './pipeline-nodes.css';
 
@@ -45,7 +47,7 @@ const nodeTypes = {
 
 interface PipelineCanvasProps {
   story: PipelineStory;
-  currentStep: number;
+  currentStepIndex: number;
   onStepChange?: (step: number) => void;
 }
 
@@ -128,7 +130,7 @@ function buildStagesLayout(
       });
     });
 
-    // Stage dependency edges
+    // Stage dependency edges (collected, resolved after nodeRects built)
     if (stage.needs) {
       stage.needs.forEach(depStageId => {
         edges.push({
@@ -158,6 +160,32 @@ function buildStagesLayout(
     }
   });
 
+  // Build node rects and assign smart handles to all edges
+  const nodeRects = new Map<string, NodeRect>();
+  for (const node of nodes) {
+    const dim = node.type === 'stage'
+      ? NODE_DIMENSIONS.stage
+      : node.type === 'gate'
+        ? NODE_DIMENSIONS.gate
+        : NODE_DIMENSIONS.job;
+    nodeRects.set(node.id, {
+      x: node.position.x,
+      y: node.position.y,
+      width: dim.width,
+      height: dim.height,
+    });
+  }
+
+  for (const edge of edges) {
+    const sourceRect = nodeRects.get(edge.source);
+    const targetRect = nodeRects.get(edge.target);
+    if (sourceRect && targetRect) {
+      const [sh, th] = getSmartHandles(sourceRect, targetRect);
+      edge.sourceHandle = sh;
+      edge.targetHandle = th;
+    }
+  }
+
   return { nodes, edges };
 }
 
@@ -167,7 +195,7 @@ function buildStagesLayout(
 
 export function PipelineCanvas({
   story,
-  currentStep,
+  currentStepIndex,
   onStepChange,
 }: PipelineCanvasProps) {
   // Compute active/completed elements based on current step
@@ -179,10 +207,10 @@ export function PipelineCanvas({
     const completedJobs = new Set<string>();
 
     story.steps.forEach((step, i) => {
-      if (i < currentStep) {
+      if (i < currentStepIndex) {
         step.activeStages?.forEach(id => completedStages.add(id));
         step.activeJobs?.forEach(id => completedJobs.add(id));
-      } else if (i === currentStep) {
+      } else if (i === currentStepIndex) {
         step.activeStages?.forEach(id => activeStages.add(id));
         step.activeJobs?.forEach(id => activeJobs.add(id));
         step.activeGates?.forEach(id => activeGates.add(id));
@@ -190,7 +218,7 @@ export function PipelineCanvas({
     });
 
     return { activeStages, activeJobs, activeGates, completedStages, completedJobs };
-  }, [story.steps, currentStep]);
+  }, [story.steps, currentStepIndex]);
 
   // Build layout
   const { nodes, edges } = useMemo(() => {
@@ -246,9 +274,9 @@ export function PipelineCanvas({
 
       {/* Step info overlay */}
       <div className="pipeline-step-info">
-        <div className="step-badge">Step {currentStep + 1} / {story.steps.length}</div>
-        <div className="step-title">{story.steps[currentStep]?.title}</div>
-        <div className="step-narrative">{story.steps[currentStep]?.narrative}</div>
+        <div className="step-badge">Step {currentStepIndex + 1} / {story.steps.length}</div>
+        <div className="step-title">{story.steps[currentStepIndex]?.title}</div>
+        <div className="step-narrative">{story.steps[currentStepIndex]?.narrative}</div>
       </div>
     </div>
   );

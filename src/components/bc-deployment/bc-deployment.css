@@ -134,7 +134,7 @@
 .artifact-name {
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);
-  color: #1a1a1a;
+  color: var(--color-text);
   text-align: center;
   word-break: break-word;
   max-width: 140px;
@@ -142,7 +142,7 @@
 
 .artifact-path {
   font-size: var(--font-size-xs);
-  color: #666;
+  color: var(--color-text-secondary);
   font-family: 'Fira Code', 'SF Mono', monospace;
   max-width: 140px;
   overflow: hidden;
@@ -192,7 +192,7 @@
 
 .artifact-description {
   font-size: 11px;
-  color: #555;
+  color: var(--color-text-secondary);
   line-height: var(--line-height-normal);
   margin: 0 0 var(--space-2) 0;
   text-align: center;
@@ -215,11 +215,11 @@
 }
 
 .highlight-key {
-  color: #666;
+  color: var(--color-text-secondary);
 }
 
 .highlight-value {
-  color: #1a1a1a;
+  color: var(--color-text);
   font-weight: var(--font-weight-semibold);
 }
 
@@ -264,7 +264,7 @@
    Canvas Background
    ============================================ */
 .bc-deployment-canvas {
-  background: #f8f9fa;
+  background: var(--color-bg-secondary);
 }
 
 .bc-deployment-canvas .react-flow__background {
@@ -313,13 +313,13 @@
 .bc-step-title {
   font-size: var(--font-size-xl);
   font-weight: var(--font-weight-bold);
-  color: #1a1a1a;
+  color: var(--color-text);
   margin: 0 0 var(--space-2) 0;
 }
 
 .bc-step-description {
   font-size: var(--font-size-md);
-  color: #555;
+  color: var(--color-text-secondary);
   line-height: var(--line-height-relaxed);
   margin: 0;
 }
@@ -385,7 +385,7 @@
 .child-artifact-name {
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
-  color: #333;
+  color: var(--color-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -450,7 +450,7 @@
   border-radius: var(--radius-lg);
   border-left: 3px solid var(--node-system-border);
   font-size: 13px;
-  color: #1a1a1a;
+  color: var(--color-text);
   line-height: var(--line-height-normal);
 }
 
@@ -479,7 +479,7 @@
 }
 
 .narration-message {
-  color: #333;
+  color: var(--color-text);
 }
 
 /* ============================================
@@ -493,12 +493,12 @@
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
-  background: white;
+  background: var(--color-bg);
   border: var(--node-border-width) solid var(--edge-default);
   border-radius: var(--radius-full);
   font-size: 11px;
   font-weight: var(--font-weight-semibold);
-  color: #666;
+  color: var(--color-text-secondary);
   text-transform: capitalize;
   box-shadow: var(--shadow-sm);
   z-index: 100;
@@ -516,60 +516,60 @@
 }
 
 [data-theme="dark"] .artifact-node {
-  background: #2d2d2d;
+  background: var(--color-bg-secondary);
 }
 
 [data-theme="dark"] .artifact-name {
-  color: #e0e0e0;
+  color: var(--color-text);
 }
 
 [data-theme="dark"] .artifact-path {
-  color: #aaa;
+  color: var(--color-text-secondary);
 }
 
 [data-theme="dark"] .artifact-details {
-  border-color: #444;
+  border-color: var(--color-border);
 }
 
 [data-theme="dark"] .artifact-description {
-  color: #bbb;
+  color: var(--color-text-secondary);
 }
 
 [data-theme="dark"] .artifact-highlight {
-  background: #1a1a1a;
+  background: var(--color-bg);
 }
 
 [data-theme="dark"] .highlight-key {
-  color: #888;
+  color: var(--color-text-muted);
 }
 
 [data-theme="dark"] .highlight-value {
-  color: #e0e0e0;
+  color: var(--color-text);
 }
 
 [data-theme="dark"] .bc-step-overlay {
   background: rgba(30, 30, 30, 0.95);
-  border-color: #444;
+  border-color: var(--color-border);
 }
 
 [data-theme="dark"] .bc-step-title {
-  color: #e0e0e0;
+  color: var(--color-text);
 }
 
 [data-theme="dark"] .bc-step-description {
-  color: #bbb;
+  color: var(--color-text-secondary);
 }
 
 [data-theme="dark"] .bc-deployment-canvas {
-  background: #1a1a1a;
+  background: var(--color-bg);
 }
 
 [data-theme="dark"] .child-artifact-node {
-  background: #2d2d2d;
+  background: var(--color-bg-secondary);
 }
 
 [data-theme="dark"] .child-artifact-name {
-  color: #e0e0e0;
+  color: var(--color-text);
 }
 
 [data-theme="dark"] .bc-narration {
@@ -582,11 +582,11 @@
 }
 
 [data-theme="dark"] .narration-message {
-  color: #e0e0e0;
+  color: var(--color-text);
 }
 
 [data-theme="dark"] .bc-layout-badge {
-  background: #2d2d2d;
-  border-color: #444;
-  color: #aaa;
+  background: var(--color-bg-secondary);
+  border-color: var(--color-border);
+  color: var(--color-text-secondary);
 }

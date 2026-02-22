@@ -1,0 +1,174 @@
+id: trip-ops-self-consumption
+title: "Trip Operations — SignalR Self-Consumption Pattern"
+description: >
+  How GPS telemetry flows from the driver's mobile device through the API pod,
+  transactional outbox, Azure Service Bus, EventProcessor pod, and into Trip HQ
+  via SignalR WebSocket — all non-blocking to the HTTP response.
+renderer: service-flow
+schemaVersion: "2.0"
+layout: sequence
+
+services:
+  - id: driver-app
+    name: Driver App
+    type: external
+    technology: Mobile (MDD)
+    status: healthy
+  - id: trip-ops-api
+    name: Trip Ops API
+    type: api
+    technology: ".NET 10"
+    status: healthy
+    instances: 2
+  - id: trip-ops-db
+    name: trip_operations
+    type: database
+    technology: PostgreSQL + PostGIS
+  - id: trip-ops-ep
+    name: Trip Ops EP
+    type: worker
+    technology: ".NET 10 EventProcessor"
+    status: healthy
+  - id: trip-hq
+    name: Trip HQ
+    type: external
+    technology: Next.js 15 + SignalR
+
+queues:
+  - id: outbox
+    name: outbox_messages
+    type: queue
+    broker: redis
+    consumers: 1
+  - id: asb-topic
+    name: trip-operations (ASB)
+    type: topic
+    broker: servicebus
+    consumers: 3
+
+calls:
+  - id: gps-ingest
+    type: sync
+    from: driver-app
+    to: trip-ops-api
+    method: POST
+    path: /v1/gps/location
+    protocol: http
+    duration: 35
+    status: 200
+
+  - id: persist-gps
+    type: sync
+    from: trip-ops-api
+    to: trip-ops-db
+    method: INSERT
+    path: GpsLocation (PostGIS Point)
+    duration: 8
+    status: ok
+
+  - id: write-outbox
+    type: sync
+    from: trip-ops-api
+    to: outbox
+    method: INSERT
+    path: GpsLocationUpdatedEvent
+    duration: 3
+    status: ok
+
+  - id: relay-to-asb
+    type: publish
+    from: outbox
+    to: asb-topic
+    messageType: GpsLocationUpdatedEvent
+
+  - id: ep-receives
+    type: subscribe
+    from: asb-topic
+    to: trip-ops-ep
+    messageType: GpsLocationUpdatedEvent
+    action: GpsLocationUpdatedEventHandler
+
+  - id: signalr-broadcast
+    type: sync
+    from: trip-ops-ep
+    to: trip-hq
+    method: WebSocket
+    path: "IHubContext.SendAsync(\"GpsLocationUpdated\")"
+    protocol: http
+    duration: 15
+    status: ok
+
+steps:
+  - id: step-1
+    title: "GPS Fix Received"
+    narrative: >
+      Driver's mobile device sends a GPS fix every 30 seconds.
+      The API pod receives it on POST /v1/gps/location with a GpsReading value object.
+      Validation: latitude ±90, longitude ±180, accuracy < 50m, staleness < 30s.
+    activeCalls:
+      - gps-ingest
+    duration: 4000
+
+  - id: step-2
+    title: "Persist to PostGIS"
+    narrative: >
+      The GpsReading is converted to a GpsLocation entity with geometry(Point, 4326)
+      and persisted via IngestGpsLocationCommand. GIST index enables sub-100ms spatial queries.
+    activeCalls:
+      - persist-gps
+    duration: 3500
+
+  - id: step-3
+    title: "Write to Transactional Outbox"
+    narrative: >
+      GpsLocationUpdatedEvent is written to the outbox_messages table in the SAME
+      database transaction as the GpsLocation insert. This guarantees the event is
+      never lost — even if the process crashes between DB commit and ASB publish.
+    activeCalls:
+      - write-outbox
+    duration: 4000
+
+  - id: step-4
+    title: "HTTP 200 OK — Sync Path Complete"
+    narrative: >
+      The driver receives 200 OK here — total latency ~35ms. Everything after this
+      point is asynchronous. The driver's GPS update throughput is never constrained
+      by SignalR connection count or downstream consumer speed.
+    activeCalls:
+      - gps-ingest
+    duration: 4500
+
+  - id: step-5
+    title: "Outbox Relay → Azure Service Bus"
+    narrative: >
+      A background relay process polls outbox_messages every 5 seconds, publishes
+      pending events to the trip-operations ASB topic, and marks them as delivered.
+      Exponential backoff on failure; dead-letter after 10 attempts.
+    activeCalls:
+      - relay-to-asb
+    duration: 4000
+
+  - id: step-6
+    title: "EventProcessor Receives Event"
+    narrative: >
+      The Trip Ops EventProcessor pod (separate from API pod) subscribes to the
+      trip-operations ASB topic. GpsLocationUpdatedEventHandler receives the event
+      with the full EventEnvelope (TenantId, CorrelationId, Timestamp).
+    activeCalls:
+      - ep-receives
+    duration: 4000
+
+  - id: step-7
+    title: "SignalR Broadcast to Trip HQ"
+    narrative: >
+      The handler injects IHubContext<TripOperationsHub> and broadcasts to two
+      SignalR groups: vr-{vrId} (specific run subscribers) and district-{tenantId}
+      (fleet-wide monitoring). Trip HQ updates the live fleet map in real-time.
+      150–250ms after HTTP 200. Errors are swallowed — next GPS fix supersedes.
+    activeCalls:
+      - signalr-broadcast
+    duration: 5000
+
+camera:
+  center: [0, 0]
+  zoom: 1

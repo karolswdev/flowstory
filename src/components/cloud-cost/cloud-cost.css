@@ -195,32 +195,32 @@
    Dark Mode
    ============================================ */
 [data-theme="dark"] .cc-block {
-  background: #2d2d2d;
-  border-color: #444;
+  background: var(--color-bg-secondary);
+  border-color: var(--color-border);
 }
 
 [data-theme="dark"] .cc-category {
-  background: var(--block-color-light, #1a1a1a);
+  background: var(--block-color-light, var(--color-bg));
 }
 
 [data-theme="dark"] .cc-name {
-  color: #e0e0e0;
+  color: var(--color-text);
 }
 
 [data-theme="dark"] .cc-spend {
-  color: #fff;
+  color: var(--color-text-inverse);
 }
 
 [data-theme="dark"] .cc-budget {
-  color: #aaa;
+  color: var(--color-text-secondary);
 }
 
 [data-theme="dark"] .cc-team {
-  color: #888;
+  color: var(--color-text-muted);
 }
 
 [data-theme="dark"] .cc-optimize {
-  background: #3d2a1a;
+  background: var(--color-warning-light);
 }
 
 /* ============================================
@@ -315,8 +315,8 @@
 .resource-name { font-size: var(--fs-sm); font-weight: var(--fw-medium); margin-bottom: 4px; }
 .resource-spend { font-size: 18px; font-weight: 700; }
 .resource-trend { font-size: var(--fs-sm); margin-top: 4px; }
-.trend-up { color: #F44336; }
-.trend-down { color: #4CAF50; }
+.trend-up { color: var(--color-error); }
+.trend-down { color: var(--color-success); }
 .trend-stable { color: var(--color-text-secondary); }
 
 .cost-info {

@@ -3,15 +3,13 @@
  * Based on SPEC-030
  */
 
-import { useMemo, useCallback, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   ReactFlow,
   Background,
   Controls,
   MiniMap,
   Panel,
-  useNodesState,
-  useEdgesState,
   type Node,
   type Edge,
 } from '@xyflow/react';
@@ -21,18 +19,21 @@ import { METHOD_COLORS, getStatusColor } from '../../schemas/http-flow';
 import { ParticipantNode } from './ParticipantNode';
 import { RequestNode } from './RequestNode';
 import { ResponseNode } from './ResponseNode';
+import { getSmartHandles, type NodeRect } from '../nodes/NodeHandles';
+import { NODE_DIMENSIONS } from '../nodes/dimensions';
+import { useAutoFocus } from '../../hooks/useCameraController';
 import './http-nodes.css';
 import '@xyflow/react/dist/style.css';
 
-// Layout constants
+// Layout constants — generous spacing for readability
 const LAYOUT = {
-  PADDING: 60,
-  PARTICIPANT_SPACING: 300,
+  PADDING: 100,
+  PARTICIPANT_SPACING: 620,
   PARTICIPANT_Y: 40,
-  EXCHANGE_START_Y: 180,
-  EXCHANGE_SPACING: 140,
-  REQUEST_OFFSET_X: 40,
-  RESPONSE_OFFSET_X: -40,
+  EXCHANGE_START_Y: 220,
+  EXCHANGE_SPACING: 440,
+  REQUEST_OFFSET_X: 30,
+  RESPONSE_OFFSET_X: 30,
 };
 
 // Node types registry
@@ -60,6 +61,32 @@ export function HttpFlowCanvas({
   const currentStep = story.steps[currentStepIndex];
   const activeExchangeIds = new Set(currentStep?.activeExchanges || []);
 
+  // Progressive reveal: collect all exchange IDs mentioned in steps 0..currentStepIndex
+  const revealedExchangeIds = useMemo(() => {
+    const revealed = new Set<string>();
+    for (let i = 0; i <= currentStepIndex; i++) {
+      const step = story.steps[i];
+      if (step?.activeExchanges) {
+        for (const id of step.activeExchanges) {
+          revealed.add(id);
+        }
+      }
+    }
+    return revealed;
+  }, [story.steps, currentStepIndex]);
+
+  // Determine which participants are involved in revealed exchanges
+  const revealedParticipantIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const exchange of story.exchanges) {
+      if (revealedExchangeIds.has(exchange.id)) {
+        ids.add(exchange.request.from);
+        ids.add(exchange.request.to);
+      }
+    }
+    return ids;
+  }, [story.exchanges, revealedExchangeIds]);
+
   // Build participant position map
   const participantPositions = useMemo(() => {
     const positions = new Map<string, { x: number; y: number }>();
@@ -72,34 +99,44 @@ export function HttpFlowCanvas({
     return positions;
   }, [story.participants]);
 
-  // Build nodes
+  // Build nodes — only revealed exchanges and their participants
   const nodes = useMemo(() => {
     const result: Node[] = [];
 
-    // Participant nodes
+    // Participant nodes — only show if involved in a revealed exchange
     story.participants.forEach((participant) => {
+      if (!revealedParticipantIds.has(participant.id)) {
+        return; // Hide unrevealed participants (including empty first step)
+      }
       const pos = participantPositions.get(participant.id)!;
+      const isInvolved = activeExchangeIds.size > 0 && story.exchanges.some(
+        ex => activeExchangeIds.has(ex.id) && (ex.request.from === participant.id || ex.request.to === participant.id)
+      );
       result.push({
         id: `participant-${participant.id}`,
         type: 'participant',
         position: pos,
         data: {
           participant,
-          isActive: false, // Could highlight based on active exchange
+          isActive: isInvolved,
         },
       });
     });
 
-    // Exchange nodes (request + response pairs)
+    // Exchange nodes — only show revealed exchanges
     story.exchanges.forEach((exchange, exchangeIndex) => {
+      if (!revealedExchangeIds.has(exchange.id)) {
+        return; // Hide unrevealed exchanges
+      }
+
       const fromPos = participantPositions.get(exchange.request.from);
       const toPos = participantPositions.get(exchange.request.to);
-      
+
       if (!fromPos || !toPos) return;
 
       const y = LAYOUT.EXCHANGE_START_Y + exchangeIndex * LAYOUT.EXCHANGE_SPACING;
       const isActive = activeExchangeIds.has(exchange.id);
-      const isComplete = !isActive && currentStepIndex > 0; // Simplified
+      const isComplete = revealedExchangeIds.has(exchange.id) && !isActive;
 
       // Request node (positioned near sender)
       result.push({
@@ -134,22 +171,61 @@ export function HttpFlowCanvas({
     });
 
     return result;
-  }, [story, participantPositions, activeExchangeIds, currentStepIndex]);
+  }, [story, participantPositions, activeExchangeIds, revealedExchangeIds, revealedParticipantIds, currentStepIndex]);
 
-  // Build edges
+  // Build node rect lookup for smart handle selection
+  const nodeRects = useMemo(() => {
+    const rects = new Map<string, NodeRect>();
+    for (const node of nodes) {
+      const dim = node.type === 'participant'
+        ? NODE_DIMENSIONS.participant
+        : node.type === 'request'
+          ? NODE_DIMENSIONS.request
+          : NODE_DIMENSIONS.response;
+      rects.set(node.id, {
+        x: node.position.x,
+        y: node.position.y,
+        width: dim.width,
+        height: dim.height,
+      });
+    }
+    return rects;
+  }, [nodes]);
+
+  // Build edges — only for revealed exchanges
   const edges = useMemo(() => {
     const result: Edge[] = [];
 
     story.exchanges.forEach((exchange) => {
+      if (!revealedExchangeIds.has(exchange.id)) return; // Hide unrevealed
       const isActive = activeExchangeIds.has(exchange.id);
       const methodColor = METHOD_COLORS[exchange.request.method];
       const statusColor = getStatusColor(exchange.response.status);
 
+      const reqSourceId = `participant-${exchange.request.from}`;
+      const reqTargetId = `request-${exchange.id}`;
+      const resSourceId = `response-${exchange.id}`;
+      const resTargetId = `participant-${exchange.request.from}`;
+
+      const reqSourceRect = nodeRects.get(reqSourceId);
+      const reqTargetRect = nodeRects.get(reqTargetId);
+      const [reqSH, reqTH] = reqSourceRect && reqTargetRect
+        ? getSmartHandles(reqSourceRect, reqTargetRect)
+        : ['source-bottom', 'target-top'];
+
+      const resSourceRect = nodeRects.get(resSourceId);
+      const resTargetRect = nodeRects.get(resTargetId);
+      const [resSH, resTH] = resSourceRect && resTargetRect
+        ? getSmartHandles(resSourceRect, resTargetRect)
+        : ['source-left', 'target-bottom'];
+
       // Request edge (from participant to request node)
       result.push({
         id: `edge-req-${exchange.id}`,
-        source: `participant-${exchange.request.from}`,
-        target: `request-${exchange.id}`,
+        source: reqSourceId,
+        target: reqTargetId,
+        sourceHandle: reqSH,
+        targetHandle: reqTH,
         type: 'default',
         animated: isActive,
         style: {
@@ -158,16 +234,22 @@ export function HttpFlowCanvas({
         },
         label: `${exchange.request.method} ${exchange.request.path}`,
         labelStyle: {
-          fontSize: 10,
+          fontSize: 11,
           fill: methodColor.text,
+          fontWeight: 600,
         },
+        labelBgStyle: { fill: '#fff', fillOpacity: 1, rx: 4, ry: 4, filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.15))' },
+        labelBgPadding: [6, 4] as [number, number],
+        zIndex: 1000,
       });
 
       // Response edge (from response node to requesting participant)
       result.push({
         id: `edge-res-${exchange.id}`,
-        source: `response-${exchange.id}`,
-        target: `participant-${exchange.request.from}`,
+        source: resSourceId,
+        target: resTargetId,
+        sourceHandle: resSH,
+        targetHandle: resTH,
         type: 'default',
         animated: isActive,
         style: {
@@ -177,23 +259,32 @@ export function HttpFlowCanvas({
         },
         label: `${exchange.response.status}`,
         labelStyle: {
-          fontSize: 10,
+          fontSize: 11,
           fill: statusColor.text,
+          fontWeight: 600,
         },
+        labelBgStyle: { fill: '#fff', fillOpacity: 1, rx: 4, ry: 4, filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.15))' },
+        labelBgPadding: [6, 4] as [number, number],
+        zIndex: 1000,
       });
     });
 
     return result;
+  }, [story.exchanges, activeExchangeIds, revealedExchangeIds, nodeRects]);
+
+  // Compute node IDs of currently active exchanges for camera focus
+  const activeNodeIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const exchange of story.exchanges) {
+      if (activeExchangeIds.has(exchange.id)) {
+        ids.push(`participant-${exchange.request.from}`);
+        ids.push(`participant-${exchange.request.to}`);
+        ids.push(`request-${exchange.id}`);
+        ids.push(`response-${exchange.id}`);
+      }
+    }
+    return ids;
   }, [story.exchanges, activeExchangeIds]);
-
-  const [nodesState, setNodes, onNodesChange] = useNodesState(nodes);
-  const [edgesState, setEdges, onEdgesChange] = useEdgesState(edges);
-
-  // Update nodes when step changes
-  useMemo(() => {
-    setNodes(nodes);
-    setEdges(edges);
-  }, [nodes, edges, setNodes, setEdges]);
 
   return (
     <div
@@ -202,13 +293,11 @@ export function HttpFlowCanvas({
       style={{ width: '100%', height: '100%' }}
     >
       <ReactFlow
-        nodes={nodesState}
-        edges={edgesState}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
+        nodes={nodes}
+        edges={edges}
         nodeTypes={nodeTypes}
         fitView
-        fitViewOptions={{ padding: 0.2 }}
+        fitViewOptions={{ padding: 0.3 }}
         minZoom={0.3}
         maxZoom={2}
       >
@@ -222,6 +311,9 @@ export function HttpFlowCanvas({
             return '#9E9E9E';
           }}
         />
+
+        {/* Camera auto-focus on active exchange nodes */}
+        <HttpFlowCameraController activeNodeIds={activeNodeIds} />
 
         {/* Story info panel */}
         <Panel position="top-left">
@@ -251,6 +343,20 @@ export function HttpFlowCanvas({
       </ReactFlow>
     </div>
   );
+}
+
+/**
+ * Inner component for camera auto-focus.
+ * Must be a child of <ReactFlow> to access useReactFlow().
+ */
+function HttpFlowCameraController({ activeNodeIds }: { activeNodeIds: string[] }) {
+  useAutoFocus(activeNodeIds, {
+    padding: 100,
+    duration: 600,
+    maxZoom: 1.3,
+    minZoom: 0.4,
+  });
+  return null;
 }
 
 export default HttpFlowCanvas;

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useStory, useCurrentStep } from '../context';
 import './StoryPanel.css';
@@ -9,6 +10,8 @@ export interface StoryPanelProps {
   showNextPreview?: boolean;
   /** Show step number badge */
   showStepBadge?: boolean;
+  /** Collapsible panel — starts compact, toggle to expand */
+  collapsible?: boolean;
 }
 
 /**
@@ -19,7 +22,9 @@ export function StoryPanel({
   showHeader = true,
   showNextPreview = true,
   showStepBadge = true,
+  collapsible = false,
 }: StoryPanelProps) {
+  const [expanded, setExpanded] = useState(false);
   const { story, isLoaded } = useStory();
   const { currentStep, currentStepIndex, totalSteps } = useCurrentStep();
 
@@ -35,10 +40,25 @@ export function StoryPanel({
   const steps = story.steps.sort((a, b) => a.order - b.order);
   const nextStep = currentStepIndex < totalSteps - 1 ? steps[currentStepIndex + 1] : null;
 
+  const isCompact = collapsible && !expanded;
+  const panelClass = `story-panel${isCompact ? ' story-panel--compact' : ''}`;
+
   return (
-    <div className="story-panel" data-testid="story-panel">
-      {/* Story header */}
-      {showHeader && (
+    <div className={panelClass} data-testid="story-panel">
+      {/* Collapse/expand toggle */}
+      {collapsible && (
+        <button
+          className="story-panel-toggle"
+          onClick={() => setExpanded(!expanded)}
+          aria-label={expanded ? 'Collapse panel' : 'Expand panel'}
+          title={expanded ? 'Collapse' : 'Expand'}
+        >
+          {expanded ? '▾' : '▴'}
+        </button>
+      )}
+
+      {/* Story header — hidden in compact mode */}
+      {showHeader && !isCompact && (
         <header className="story-panel-header" data-testid="story-header">
           <h2 className="story-title" data-testid="story-title">{story.title}</h2>
           <p className="story-description" data-testid="story-description">
@@ -57,7 +77,7 @@ export function StoryPanel({
             Step {currentStepIndex + 1}
           </span>
         )}
-        
+
         <AnimatePresence mode="wait">
           <motion.p
             key={currentStep?.id || 'empty'}
@@ -73,8 +93,8 @@ export function StoryPanel({
         </AnimatePresence>
       </div>
 
-      {/* Next step preview */}
-      {showNextPreview && nextStep && (
+      {/* Next step preview — hidden in compact mode */}
+      {showNextPreview && !isCompact && nextStep && (
         <div className="story-preview" data-testid="story-preview">
           <span className="preview-label">Coming up:</span>
           <p className="preview-text" data-testid="preview-text">
@@ -84,7 +104,7 @@ export function StoryPanel({
       )}
 
       {/* End of story indicator */}
-      {currentStepIndex === totalSteps - 1 && (
+      {!isCompact && currentStepIndex === totalSteps - 1 && (
         <div className="story-end" data-testid="story-end">
           <span className="end-icon">🎉</span>
           <span className="end-text">End of story</span>

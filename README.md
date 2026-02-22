@@ -44,7 +44,7 @@ Visualize Kubernetes deployments with Helm charts, secrets, services, and infras
   - Pipelines - CI/CD and workflow visualizations
   - **BC Deployments** - Kubernetes/DevOps topology views
 - **Step-by-step playback** - Walk through flows one step at a time
-- **Export options** - PNG, SVG, PDF, and animated GIF
+- **Export options** - PNG, SVG, PDF, and animated GIF (in-browser + CLI recorder)
 - **Keyboard navigation** - Space, arrows, Home/End for playback
 - **React Flow powered** - Smooth, interactive diagrams
 - **Three layout modes** - Radial, hierarchical, and layered (BC Deployment)
@@ -222,6 +222,39 @@ stages:
         status: running
 ```
 
+## CLI GIF Recorder
+
+Record any story as an animated GIF from the command line — no browser interaction needed. Great for CI pipelines, batch generation, and reproducible output.
+
+```bash
+# Start the dev server first
+npm run dev
+
+# Record a story — canvas only, no UI chrome
+npm run record-gif -- service-order-processing --clean
+
+# Record a custom YAML file
+npm run record-gif -- ./stories/service/order-processing.yaml -o demo.gif --clean
+
+# Customize output
+npm run record-gif -- pipeline-cicd --dwell 3000 --fps 15 --scale 1280
+```
+
+**Options:**
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--output, -o` | `<name>.gif` | Output GIF path |
+| `--fps` | `12` | GIF framerate |
+| `--dwell` | `2500` | Dwell time per step (ms) |
+| `--width` | `1440` | Viewport width |
+| `--height` | `900` | Viewport height |
+| `--scale` | `960` | Output GIF width (px) |
+| `--server` | `http://localhost:5173` | Dev server URL |
+| `--clean` | off | Canvas only — hide toolbar, panels, controls; add watermark |
+
+**Prerequisites:** Dev server running, [ffmpeg](https://ffmpeg.org/) installed, Playwright browsers installed.
+
 ## Scripts
 
 ```bash
@@ -239,6 +272,7 @@ npm run test:all     # All checks
 
 # Utilities
 npm run screenshots  # Capture story screenshots
+npm run record-gif   # Record animated GIF (see above)
 ```
 
 ## Project Structure

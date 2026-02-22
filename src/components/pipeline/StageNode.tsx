@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { Handle, Position } from '@xyflow/react';
+import { NodeHandles } from '../nodes/NodeHandles';
 import { motion } from 'framer-motion';
 import type { StageDef, GateDef } from '../../schemas/pipeline';
 import { GATE_STATUS_COLORS } from '../../schemas/pipeline';
@@ -49,8 +49,8 @@ export const StageNode = memo(function StageNode({ data, selected }: StageNodePr
       }}
       transition={{ duration: 0.2 }}
     >
-      <Handle type="target" position={Position.Left} className="stage-handle" />
-      
+      <NodeHandles />
+
       <div className="stage-node__header">
         <span className="stage-node__name">{name}</span>
         {environment && (
@@ -64,7 +64,6 @@ export const StageNode = memo(function StageNode({ data, selected }: StageNodePr
         {/* Jobs are rendered as children */}
       </div>
       
-      <Handle type="source" position={Position.Right} className="stage-handle" />
     </motion.div>
   );
 });

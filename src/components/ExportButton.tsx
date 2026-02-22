@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { exportAndDownload, getExportableElement, type ExportFormat, type ExportOptions } from '../utils/export';
+import { exportAndDownload, getExportableElement, recordAnimatedGif, downloadBlob, type ExportFormat, type ExportOptions, type RecordingSession } from '../utils/export';
 import { useStory, usePlayback } from '../context';
 import { useTheme } from '../themes';
 import './ExportButton.css';
@@ -33,11 +33,14 @@ export function ExportButton({
 }: ExportButtonProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingPhase, setRecordingPhase] = useState<'recording' | 'encoding' | null>(null);
   const [exportProgress, setExportProgress] = useState<{ current: number; total: number } | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const recordingSessionRef = useRef<RecordingSession | null>(null);
   const { story, currentStepIndex } = useStory();
-  const { totalSteps, goToStep, reset } = usePlayback();
+  const { isPlaying, totalSteps, goToStep, play, reset } = usePlayback();
   const { theme } = useTheme();
 
   // Close dropdown when clicking outside
@@ -64,8 +67,86 @@ export function ExportButton({
     return `${storyId}-step-${stepNum}`;
   }, [story, currentStepIndex]);
 
-  // Handle export
+  // When playback ends during recording, finalize the GIF
+  useEffect(() => {
+    if (isRecording && !isPlaying && recordingSessionRef.current) {
+      const session = recordingSessionRef.current;
+      recordingSessionRef.current = null;
+      setRecordingPhase('encoding');
+
+      const storyId = story?.id || 'story';
+      session.stop()
+        .then((blob) => {
+          downloadBlob(blob, `${storyId}-animated.gif`);
+          onExportComplete?.('gif');
+        })
+        .catch((error) => {
+          const err = error instanceof Error ? error : new Error('GIF encoding failed');
+          setExportError(err.message);
+          onExportError?.(err);
+        })
+        .finally(() => {
+          setIsExporting(false);
+          setIsRecording(false);
+          setRecordingPhase(null);
+        });
+    }
+  }, [isPlaying, isRecording, story, onExportComplete, onExportError]);
+
+  // Handle GIF recording
+  const handleRecordGif = useCallback(async () => {
+    setIsExporting(true);
+    setIsRecording(true);
+    setRecordingPhase('recording');
+    setExportError(null);
+    setIsOpen(false);
+    onExportStart?.();
+
+    try {
+      const element = getExportableElement();
+      if (!element) throw new Error('Could not find exportable element');
+
+      const backgroundColor = theme === 'dark' ? '#1e1e1e' : '#ffffff';
+
+      // Reset to step 0 and wait for full settle
+      reset();
+      await new Promise(r => setTimeout(r, 500));
+
+      // Start recording
+      const session = recordAnimatedGif(element, {
+        scale: 1,
+        targetFps: 12,
+        backgroundColor,
+        gifQuality: 10,
+        onProgress: (phase, pct) => {
+          setRecordingPhase(phase);
+          if (phase === 'encoding') {
+            setExportProgress({ current: Math.round(pct * 100), total: 100 });
+          }
+        },
+      });
+
+      recordingSessionRef.current = session;
+
+      // Start playback — the useEffect above handles the rest
+      play();
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error('Recording failed');
+      setExportError(err.message);
+      onExportError?.(err);
+      setIsExporting(false);
+      setIsRecording(false);
+      setRecordingPhase(null);
+    }
+  }, [theme, reset, play, onExportStart, onExportError]);
+
+  // Handle static export (PNG, SVG, PDF)
   const handleExport = useCallback(async (format: ExportFormat) => {
+    if (format === 'gif') {
+      handleRecordGif();
+      return;
+    }
+
     setIsExporting(true);
     setExportError(null);
     setExportProgress(null);
@@ -74,41 +155,15 @@ export function ExportButton({
 
     try {
       const element = getExportableElement();
-      if (!element) {
-        throw new Error('Could not find exportable element');
-      }
+      if (!element) throw new Error('Could not find exportable element');
 
-      // Determine background color based on theme
       const backgroundColor = theme === 'dark' ? '#1e1e1e' : '#ffffff';
 
-      // For GIF export, we need to capture all steps
-      if (format === 'gif') {
-        // Reset to first step
-        reset();
-        await new Promise(r => setTimeout(r, 200)); // Wait for render
-
-        await exportAndDownload(element, format, {
-          ...options,
-          filename: options.filename || getFilename(format),
-          backgroundColor,
-          totalSteps,
-          gifDelay: 1500, // 1.5 seconds per frame
-          onAdvanceStep: async () => {
-            // Advance to next step
-            goToStep(currentStepIndex + 1);
-            await new Promise(r => setTimeout(r, 300)); // Wait for animation
-          },
-          onProgress: (current, total) => {
-            setExportProgress({ current, total });
-          },
-        });
-      } else {
-        await exportAndDownload(element, format, {
-          ...options,
-          filename: options.filename || getFilename(format),
-          backgroundColor,
-        });
-      }
+      await exportAndDownload(element, format, {
+        ...options,
+        filename: options.filename || getFilename(format),
+        backgroundColor,
+      });
 
       onExportComplete?.(format);
     } catch (error) {
@@ -119,11 +174,26 @@ export function ExportButton({
       setIsExporting(false);
       setExportProgress(null);
     }
-  }, [story, theme, options, getFilename, totalSteps, goToStep, reset, currentStepIndex, onExportStart, onExportComplete, onExportError]);
+  }, [theme, options, getFilename, handleRecordGif, onExportStart, onExportComplete, onExportError]);
 
-  const progressText = exportProgress 
-    ? `Capturing ${exportProgress.current}/${exportProgress.total}...`
-    : 'Exporting...';
+  // Cancel recording
+  const handleCancelRecording = useCallback(() => {
+    if (recordingSessionRef.current) {
+      recordingSessionRef.current = null;
+    }
+    setIsExporting(false);
+    setIsRecording(false);
+    setRecordingPhase(null);
+    setExportProgress(null);
+  }, []);
+
+  const progressText = isRecording
+    ? recordingPhase === 'encoding'
+      ? `Encoding GIF${exportProgress ? ` ${exportProgress.current}%` : '...'}`
+      : 'Recording...'
+    : exportProgress
+      ? `Capturing ${exportProgress.current}/${exportProgress.total}...`
+      : 'Exporting...';
 
   return (
     <div 
@@ -132,15 +202,21 @@ export function ExportButton({
       data-testid="export-container"
     >
       <button
-        className={`export-button ${isOpen ? 'export-button-active' : ''}`}
-        onClick={() => setIsOpen(!isOpen)}
-        disabled={isExporting || !story}
+        className={`export-button ${isOpen ? 'export-button-active' : ''} ${isRecording ? 'export-button-recording' : ''}`}
+        onClick={isRecording ? handleCancelRecording : () => setIsOpen(!isOpen)}
+        disabled={isExporting && !isRecording || !story}
         data-testid="export-button"
         aria-expanded={isOpen}
         aria-haspopup="menu"
-        aria-label="Export"
+        aria-label={isRecording ? 'Cancel recording' : 'Export'}
       >
-        {isExporting ? (
+        {isRecording ? (
+          <>
+            <span className="export-recording-dot" />
+            {showLabels && <span className="export-label">{progressText}</span>}
+            <span className="export-cancel-hint">Cancel</span>
+          </>
+        ) : isExporting ? (
           <>
             <span className="export-icon export-icon-loading">⏳</span>
             {showLabels && <span className="export-label">{progressText}</span>}
@@ -208,11 +284,11 @@ export function ExportButton({
             >
               <span className="export-option-icon">🎬</span>
               <span className="export-option-text">
-                <span className="export-option-label">Animated GIF</span>
+                <span className="export-option-label">Record GIF</span>
                 <span className="export-option-desc">
-                  {totalSteps < 2 
-                    ? 'Need multiple steps' 
-                    : `Captures all ${totalSteps} steps`}
+                  {totalSteps < 2
+                    ? 'Need multiple steps'
+                    : `Records animated playback of all ${totalSteps} steps`}
                 </span>
               </span>
             </button>

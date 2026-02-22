@@ -24,8 +24,8 @@ interface PositionedElement {
  */
 function calculateLayout(story: C4ContextStory): PositionedElement[] {
   const elements: PositionedElement[] = [];
-  const centerX = 400;
-  const centerY = 300;
+  const centerX = 450;
+  const centerY = 350;
   
   // Central system
   elements.push({
@@ -59,7 +59,7 @@ function calculateLayout(story: C4ContextStory): PositionedElement[] {
   });
   
   externals.forEach((ext, index) => {
-    const radius = 220;
+    const radius = 280;
     const angle = angles[index] || Math.PI;
     elements.push({
       id: ext.id,
@@ -122,7 +122,7 @@ function SystemNodeSVG({ system, x, y, isHighlighted, isDimmed, delay }: {
   isDimmed?: boolean;
   delay?: number;
 }) {
-  const width = 160;
+  const width = 200;
   const height = 100;
   
   return (
@@ -145,7 +145,7 @@ function SystemNodeSVG({ system, x, y, isHighlighted, isDimmed, delay }: {
         {system.name}
       </text>
       <text x={x} y={y + 15} textAnchor="middle" className="c4-system-desc">
-        {system.description.slice(0, 30)}...
+        {system.description}
       </text>
     </motion.g>
   );
@@ -160,7 +160,7 @@ function ExternalNodeSVG({ system, x, y, isHighlighted, isDimmed, delay }: {
   isDimmed?: boolean;
   delay?: number;
 }) {
-  const width = 140;
+  const width = 160;
   const height = 80;
   
   return (
@@ -184,7 +184,7 @@ function ExternalNodeSVG({ system, x, y, isHighlighted, isDimmed, delay }: {
       </text>
       {system.description && (
         <text x={x} y={y + 15} textAnchor="middle" className="c4-external-desc">
-          {system.description.slice(0, 25)}
+          {system.description}
         </text>
       )}
     </motion.g>
@@ -225,7 +225,7 @@ export function C4ContextCanvas({
     return story.relationships;
   }, [story.relationships, currentStep]);
   
-  const viewBox = "0 0 800 600";
+  const viewBox = "0 0 900 700";
   
   const getPosition = (id: string) => {
     const el = elements.find(e => e.id === id);
@@ -250,8 +250,10 @@ export function C4ContextCanvas({
             const from = getPosition(rel.from);
             const to = getPosition(rel.to);
             const isCritical = rel.critical;
-            const midX = (from.x + to.x) / 2;
-            const midY = (from.y + to.y) / 2;
+            // Offset label along edge to avoid clustering (30%-70% range)
+            const labelT = 0.3 + (index % 5) * 0.1;
+            const labelX = from.x + (to.x - from.x) * labelT;
+            const labelY = from.y + (to.y - from.y) * labelT - 8;
             
             return (
               <motion.g
@@ -269,7 +271,7 @@ export function C4ContextCanvas({
                   markerEnd={isCritical ? "url(#c4-arrow-critical)" : "url(#c4-arrow)"}
                 />
                 {rel.description && (
-                  <text x={midX} y={midY - 8} textAnchor="middle" className="c4-rel-label">
+                  <text x={labelX} y={labelY} textAnchor="middle" className="c4-rel-label">
                     {rel.description}
                   </text>
                 )}
@@ -326,20 +328,22 @@ export function C4ContextCanvas({
       </svg>
       
       {/* Info panel */}
-      {currentStep && (
-        <motion.div 
-          className="c4-context-info"
-          variants={fadeUp}
-          initial="initial"
-          animate="animate"
-          exit="exit"
-          transition={TRANSITION.default}
-          key={currentStepIndex}
-        >
-          <h3>{currentStep.title}</h3>
-          <p>{currentStep.description}</p>
-        </motion.div>
-      )}
+      <AnimatePresence mode="wait">
+        {currentStep && (
+          <motion.div 
+            className="c4-context-info"
+            variants={fadeUp}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            transition={TRANSITION.default}
+            key={currentStepIndex}
+          >
+            <h3>{currentStep.title}</h3>
+            <p>{currentStep.description}</p>
+          </motion.div>
+        )}
+      </AnimatePresence>
       
       {/* Navigation */}
       <div className="c4-context-nav">

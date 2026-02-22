@@ -1,0 +1,245 @@
+/**
+ * Presenter Notes Styles
+ * 
+ * Styling for the presenter notes component.
+ * Designed to be visible only to the presenter, not the audience.
+ */
+
+/* ============================================
+   Toggle Button
+   ============================================ */
+
+.presenter-notes-toggle {
+  position: fixed;
+  top: var(--space-4);
+  left: var(--space-4);
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+  font-size: var(--fs-lg);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition-normal), transform var(--transition-fast);
+  z-index: var(--z-overlay);
+}
+
+.presentation-mode:hover .presenter-notes-toggle {
+  opacity: 1;
+}
+
+.presenter-notes-toggle:hover {
+  background: var(--color-bg-secondary);
+  transform: scale(1.05);
+}
+
+.presenter-notes-toggle:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+  opacity: 1;
+}
+
+/* ============================================
+   Notes Panel - Base
+   ============================================ */
+
+.presenter-notes {
+  position: fixed;
+  background: var(--color-bg-elevated);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  z-index: var(--z-overlay);
+  display: flex;
+  flex-direction: column;
+  max-height: 80vh;
+}
+
+/* ============================================
+   Position Variants
+   ============================================ */
+
+.presenter-notes--side {
+  top: var(--space-16);
+  left: var(--space-4);
+  width: 320px;
+  bottom: var(--space-16);
+}
+
+.presenter-notes--bottom {
+  bottom: var(--space-16);
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(600px, 90vw);
+  max-height: 200px;
+}
+
+.presenter-notes--overlay {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(500px, 90vw);
+  max-height: 60vh;
+}
+
+/* ============================================
+   Header
+   ============================================ */
+
+.presenter-notes__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: var(--border-width) solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.presenter-notes__step {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-secondary);
+}
+
+.presenter-notes__actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.presenter-notes__expand,
+.presenter-notes__close {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--fs-lg);
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.presenter-notes__expand:hover,
+.presenter-notes__close:hover {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+}
+
+/* ============================================
+   Content
+   ============================================ */
+
+.presenter-notes__content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-4);
+  min-height: 0;
+}
+
+.presenter-notes__text {
+  font-size: var(--fs-md);
+  line-height: var(--lh-relaxed);
+  color: var(--color-text);
+}
+
+.presenter-notes__text p {
+  margin: 0 0 var(--space-2);
+}
+
+.presenter-notes__text p:last-child {
+  margin-bottom: 0;
+}
+
+.presenter-notes__empty {
+  font-size: var(--fs-sm);
+  color: var(--color-text-muted);
+  font-style: italic;
+  text-align: center;
+  padding: var(--space-4);
+}
+
+/* ============================================
+   Footer
+   ============================================ */
+
+.presenter-notes__footer {
+  padding: var(--space-2) var(--space-4);
+  border-top: var(--border-width) solid var(--color-border);
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.presenter-notes__footer kbd {
+  display: inline-block;
+  padding: 1px var(--space-1);
+  margin: 0 2px;
+  background: var(--color-bg-secondary);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+}
+
+/* ============================================
+   Scrollbar
+   ============================================ */
+
+.presenter-notes__content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.presenter-notes__content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.presenter-notes__content::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+
+.presenter-notes__content::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-strong);
+}
+
+/* ============================================
+   Dark Mode
+   ============================================ */
+
+[data-theme="dark"] .presenter-notes {
+  background: var(--color-bg-secondary);
+}
+
+[data-theme="dark"] .presenter-notes-toggle {
+  background: var(--color-bg-secondary);
+}
+
+/* ============================================
+   Responsive
+   ============================================ */
+
+@media (max-width: 768px) {
+  .presenter-notes--side {
+    width: min(280px, 80vw);
+  }
+  
+  .presenter-notes--bottom {
+    width: 95vw;
+  }
+}
+
+/* ============================================
+   Reduced Motion
+   ============================================ */
+
+@media (prefers-reduced-motion: reduce) {
+  .presenter-notes-toggle,
+  .presenter-notes {
+    transition: none !important;
+  }
+}

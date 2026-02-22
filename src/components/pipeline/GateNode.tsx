@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { Handle, Position } from '@xyflow/react';
+import { NodeHandles } from '../nodes/NodeHandles';
 import { motion } from 'framer-motion';
 import type { GateDef, GateStatus, GateType } from '../../schemas/pipeline';
 import { GATE_STATUS_COLORS } from '../../schemas/pipeline';
@@ -52,8 +52,8 @@ export const GateNode = memo(function GateNode({ data, selected }: GateNodeProps
       }}
       transition={{ duration: 0.25 }}
     >
-      <Handle type="target" position={Position.Left} className="gate-handle" />
-      
+      <NodeHandles />
+
       <div className="gate-node__header">
         <span className="gate-node__icon">{icon}</span>
         <span className="gate-node__type">{type}</span>
@@ -78,7 +78,6 @@ export const GateNode = memo(function GateNode({ data, selected }: GateNodeProps
         </div>
       )}
       
-      <Handle type="source" position={Position.Right} className="gate-handle" />
     </motion.div>
   );
 });

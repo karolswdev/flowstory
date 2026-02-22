@@ -326,7 +326,7 @@
 [data-theme="dark"] .error-edge-label,
 [data-theme="dark"] .async-edge-label,
 [data-theme="dark"] .edge-label {
-  background: #1e1e2e;
+  background: var(--color-bg-secondary);
   border-color: rgba(255, 255, 255, 0.15);
 }
 
@@ -350,14 +350,14 @@
 [data-theme="dark"] .event-edge-icon,
 [data-theme="dark"] .async-edge-icon,
 [data-theme="dark"] .edge-icon {
-  background: #1e1e2e;
+  background: var(--color-bg-secondary);
   border-color: rgba(255, 255, 255, 0.2);
 }
 
 [data-theme="dark"] .event-edge-icon.icon-active {
-  background: #2a2a3e;
+  background: var(--color-bg-elevated);
 }
 
 [data-theme="dark"] .async-edge-icon.icon-active {
-  background: #2a2a3e;
+  background: var(--color-bg-elevated);
 }

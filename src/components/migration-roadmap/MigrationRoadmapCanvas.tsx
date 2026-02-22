@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 import { fadeUp, TRANSITION } from '../../animation';
+import { BaseCanvas } from '../base';
 import type { MigrationRoadmapStory, MigrationRoadmapStep, Phase, Task } from '../../schemas/migration-roadmap';
 import { STATUS_COLORS, STATUS_ICONS } from '../../schemas/migration-roadmap';
 import './migration-roadmap.css';
@@ -25,10 +26,8 @@ function PhaseCard({ phase, tasks, isHighlighted, delay = 0 }: {
     <motion.div
       className={`phase-card ${isHighlighted ? 'highlighted' : ''}`}
       variants={fadeUp}
-          initial="initial"
-          animate="animate"
-          exit="exit"
-          transition={TRANSITION.default}
+      initial="initial"
+      animate="animate"
       transition={{ delay: delay / 1000 }}
       style={{ borderLeftColor: color }}
     >
@@ -68,7 +67,16 @@ export function MigrationRoadmapCanvas({ story, currentStepIndex, onStepChange }
   }, [story.phases, story.tasks]);
   
   return (
-    <div className="migration-canvas">
+    <BaseCanvas
+      className="migration-canvas"
+      currentStepIndex={currentStepIndex}
+      totalSteps={story.steps.length}
+      stepTitle={currentStep?.title}
+      stepDescription={currentStep?.description}
+      onStepChange={onStepChange}
+      infoClassName="migration-info"
+      navClassName="migration-nav"
+    >
       <h2>{story.title}</h2>
       
       <div className="phases-grid">
@@ -82,20 +90,7 @@ export function MigrationRoadmapCanvas({ story, currentStepIndex, onStepChange }
           />
         ))}
       </div>
-      
-      {currentStep && (
-        <motion.div className="migration-info" initial={{ opacity: 0 }} animate={{ opacity: 1 }} key={currentStepIndex}>
-          <h3>{currentStep.title}</h3>
-          <p>{currentStep.description}</p>
-        </motion.div>
-      )}
-      
-      <div className="migration-nav">
-        <button onClick={() => onStepChange?.(Math.max(0, currentStepIndex - 1))} disabled={currentStepIndex === 0}>← Previous</button>
-        <span>{currentStepIndex + 1} / {story.steps.length}</span>
-        <button onClick={() => onStepChange?.(Math.min(story.steps.length - 1, currentStepIndex + 1))} disabled={currentStepIndex >= story.steps.length - 1}>Next →</button>
-      </div>
-    </div>
+    </BaseCanvas>
   );
 }
 

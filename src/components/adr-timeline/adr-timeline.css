@@ -300,59 +300,59 @@
    Dark Mode
    ============================================ */
 [data-theme="dark"] .adr-node {
-  background: #2d2d2d;
-  border-color: #444;
+  background: var(--color-bg-secondary);
+  border-color: var(--color-border);
 }
 
 [data-theme="dark"] .adr-title {
-  color: #e0e0e0;
+  color: var(--color-text);
 }
 
 [data-theme="dark"] .adr-title.adr-struck {
-  color: #666;
+  color: var(--color-text-muted);
 }
 
 [data-theme="dark"] .adr-number {
-  background: #3d3d3d;
-  color: #aaa;
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
 }
 
 [data-theme="dark"] .adr-date {
-  color: #888;
+  color: var(--color-text-muted);
 }
 
 [data-theme="dark"] .adr-details {
-  border-top-color: #444;
+  border-top-color: var(--color-border);
 }
 
 [data-theme="dark"] .adr-section p,
 [data-theme="dark"] .adr-section li {
-  color: #ccc;
+  color: var(--color-text);
 }
 
 [data-theme="dark"] .adr-section strong {
-  color: #888;
+  color: var(--color-text-muted);
 }
 
 [data-theme="dark"] .timeline-line {
-  background: #444;
+  background: var(--color-border);
 }
 
 [data-theme="dark"] .category-lane {
-  border-bottom-color: #444;
+  border-bottom-color: var(--color-border);
 }
 
 [data-theme="dark"] .category-lane-name {
-  color: #e0e0e0;
+  color: var(--color-text);
 }
 
 [data-theme="dark"] .category-lane-count {
-  background: #3d3d3d;
-  color: #aaa;
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
 }
 
 [data-theme="dark"] .adr-legend {
-  background: #2d2d2d;
+  background: var(--color-bg-secondary);
 }
 
 /* ============================================

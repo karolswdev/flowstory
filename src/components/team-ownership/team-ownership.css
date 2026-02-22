@@ -273,46 +273,46 @@
    Dark Mode
    ============================================ */
 [data-theme="dark"] .team-node {
-  background: #2d2d2d;
+  background: var(--color-bg-secondary);
 }
 
 [data-theme="dark"] .team-name {
-  color: #e0e0e0;
+  color: var(--color-text);
 }
 
 [data-theme="dark"] .team-info {
-  color: #999;
+  color: var(--color-text-secondary);
 }
 
 [data-theme="dark"] .info-label {
-  color: #666;
+  color: var(--color-text-muted);
 }
 
 [data-theme="dark"] .team-headcount {
-  background: #3d3d3d;
-  color: #bbb;
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
 }
 
 [data-theme="dark"] .service-node {
-  background: #2d2d2d;
-  border-color: #444;
+  background: var(--color-bg-secondary);
+  border-color: var(--color-border);
 }
 
 [data-theme="dark"] .service-name {
-  color: #e0e0e0;
+  color: var(--color-text);
 }
 
 [data-theme="dark"] .tech-tag {
-  background: #3d3d3d;
-  color: #aaa;
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
 }
 
 [data-theme="dark"] .service-node.service-gap {
-  background: #3d2a2a;
+  background: var(--color-error-light);
 }
 
 [data-theme="dark"] .handoff-label {
-  background: #2d2d2d;
+  background: var(--color-bg-secondary);
 }
 
 .team-ownership-canvas { position: relative; padding: 24px; height: 100%; background: var(--color-bg); overflow: auto; }

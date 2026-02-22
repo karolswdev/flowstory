@@ -3,7 +3,7 @@
  */
 
 import { memo, useState } from 'react';
-import { Handle, Position } from '@xyflow/react';
+import { NodeHandles } from '../nodes/NodeHandles';
 import { motion, AnimatePresence } from 'motion/react';
 import type { RequestDef, HttpMethod } from '../../schemas/http-flow';
 import { METHOD_COLORS } from '../../schemas/http-flow';
@@ -114,8 +114,7 @@ export const RequestNode = memo(function RequestNode({
         </div>
       )}
 
-      <Handle type="source" position={Position.Right} id="out" />
-      <Handle type="target" position={Position.Left} id="in" />
+      <NodeHandles />
     </motion.div>
   );
 });

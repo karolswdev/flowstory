@@ -49,7 +49,7 @@
   font-weight: 700;
   letter-spacing: 1.5px;
   text-transform: uppercase;
-  color: #9ca3af;
+  color: var(--color-text-muted);
   font-family: 'Inter', system-ui, sans-serif;
 }
 
@@ -58,27 +58,27 @@
    ============================================ */
 
 .layer-label-orchestration {
-  border-left-color: #7c4dff;
+  border-left-color: var(--svc-queue);
 }
 
 .layer-label-orchestration .layer-label-text {
-  color: #a78bfa;
+  color: var(--status-pending);
 }
 
 .layer-label-domain {
-  border-left-color: #4caf50;
+  border-left-color: var(--color-success);
 }
 
 .layer-label-domain .layer-label-text {
-  color: #86efac;
+  color: var(--color-success);
 }
 
 .layer-label-infrastructure {
-  border-left-color: #ff9800;
+  border-left-color: var(--color-warning);
 }
 
 .layer-label-infrastructure .layer-label-text {
-  color: #fcd34d;
+  color: var(--color-warning);
 }
 
 /* ============================================

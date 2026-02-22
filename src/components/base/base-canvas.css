@@ -1,0 +1,174 @@
+/**
+ * BaseCanvas Styles
+ * 
+ * Base styles for the abstract canvas component.
+ * Renderers can extend these by adding their own className.
+ */
+
+/* ============================================
+   Container
+   ============================================ */
+
+.base-canvas {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: var(--color-bg);
+  overflow: hidden;
+}
+
+/* ============================================
+   Content Area
+   ============================================ */
+
+.base-canvas__content {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+}
+
+/* ============================================
+   Info Panel
+   ============================================ */
+
+.base-canvas__info {
+  position: absolute;
+  bottom: calc(var(--space-16) + var(--space-6));
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--color-bg-elevated);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) var(--space-6);
+  max-width: 500px;
+  box-shadow: var(--shadow-lg);
+  z-index: var(--z-dropdown);
+}
+
+.base-canvas__title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text);
+  line-height: var(--lh-tight);
+}
+
+.base-canvas__description {
+  margin: 0;
+  font-size: var(--fs-md);
+  color: var(--color-text-secondary);
+  line-height: var(--lh-normal);
+}
+
+/* ============================================
+   Navigation
+   ============================================ */
+
+.base-canvas__nav {
+  position: absolute;
+  bottom: var(--space-5);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-4);
+  background: var(--color-bg-elevated);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-full);
+  box-shadow: var(--shadow-md);
+  z-index: var(--z-dropdown);
+}
+
+.base-canvas__nav-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.base-canvas__nav-btn:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+}
+
+.base-canvas__nav-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.base-canvas__nav-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.base-canvas__nav-progress {
+  font-size: var(--fs-sm);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================================
+   Presentation Mode Enhancements
+   ============================================ */
+
+.presentation-mode .base-canvas__nav {
+  transform: translateX(-50%) scale(1.1);
+  box-shadow: var(--shadow-xl);
+}
+
+.presentation-mode .base-canvas__info {
+  font-size: var(--fs-lg);
+  max-width: 600px;
+  box-shadow: var(--shadow-xl);
+}
+
+.presentation-mode .base-canvas__title {
+  font-size: var(--fs-xl);
+}
+
+/* ============================================
+   Dark Mode
+   ============================================ */
+
+[data-theme="dark"] .base-canvas__nav-btn {
+  background: var(--color-primary);
+}
+
+/* ============================================
+   Responsive
+   ============================================ */
+
+@media (max-width: 768px) {
+  .base-canvas__info {
+    max-width: calc(100vw - var(--space-8));
+    padding: var(--space-3) var(--space-4);
+  }
+  
+  .base-canvas__nav {
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+  }
+  
+  .base-canvas__nav-btn {
+    padding: var(--space-1) var(--space-2);
+    font-size: var(--fs-xs);
+  }
+}
+
+/* ============================================
+   Reduced Motion
+   ============================================ */
+
+@media (prefers-reduced-motion: reduce) {
+  .base-canvas__nav-btn {
+    transition: none;
+  }
+}

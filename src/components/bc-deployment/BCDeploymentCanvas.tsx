@@ -16,11 +16,13 @@ import { ArtifactNode } from './ArtifactNode';
 import { ChildArtifactNode } from './ChildArtifactNode';
 import type { BCDeploymentStory, BCDeploymentStep } from '../../schemas/bc-deployment';
 import { ARTIFACT_COLORS, EDGE_STYLES, BC_DEPLOYMENT_LAYOUT } from '../../schemas/bc-deployment';
-import { 
-  calculateBCDeploymentLayout, 
+import {
+  calculateBCDeploymentLayout,
   flattenPositions,
-  type PositionedNode 
+  type PositionedNode
 } from '../../utils/layout/bcDeploymentLayout';
+import { getSmartHandles, type NodeRect } from '../nodes/NodeHandles';
+import { NODE_DIMENSIONS } from '../nodes/dimensions';
 import './bc-deployment.css';
 
 interface BCDeploymentCanvasProps {
@@ -171,6 +173,30 @@ export function BCDeploymentCanvas({
     setNodes(resultNodes);
   }, [story, positions, currentStepIndex, focusNodeIds, expandedNodes, toggleExpand, setNodes]);
 
+  // Build node rect lookup for smart handles
+  const nodeRects = useMemo(() => {
+    const rects = new Map<string, NodeRect>();
+    // BC core
+    const bcPos = positions.get(story.bc.id);
+    if (bcPos) {
+      rects.set(story.bc.id, { x: bcPos.x, y: bcPos.y, ...NODE_DIMENSIONS.bcCore });
+    }
+    // Artifacts
+    story.artifacts.forEach(artifact => {
+      const pos = positions.get(artifact.id);
+      if (pos) {
+        rects.set(artifact.id, { x: pos.x, y: pos.y, ...NODE_DIMENSIONS.artifact });
+      }
+      // Children
+      if (pos && (pos as any).children) {
+        for (const childPos of (pos as any).children) {
+          rects.set(childPos.id, { x: childPos.x + pos.x, y: childPos.y + pos.y, ...NODE_DIMENSIONS.childArtifact });
+        }
+      }
+    });
+    return rects;
+  }, [positions, story.bc.id, story.artifacts]);
+
   // Build edges from story data
   useEffect(() => {
     const storyEdges: Edge[] = story.edges.map((edge) => {
@@ -178,10 +204,18 @@ export function BCDeploymentCanvas({
       const edgeStyle = EDGE_STYLES[edge.type];
       const isActive = activeEdgeIds.has(edgeId);
 
+      const sourceRect = nodeRects.get(edge.source);
+      const targetRect = nodeRects.get(edge.target);
+      const [sourceHandle, targetHandle] = sourceRect && targetRect
+        ? getSmartHandles(sourceRect, targetRect)
+        : ['source-right', 'target-left'];
+
       return {
         id: edgeId,
         source: edge.source,
         target: edge.target,
+        sourceHandle,
+        targetHandle,
         type: 'default',
         animated: isActive || edge.animated,
         label: edge.label,
@@ -208,10 +242,18 @@ export function BCDeploymentCanvas({
       const parent = story.artifacts.find(a => a.id === parentId);
       if (parent?.children) {
         parent.children.forEach(child => {
+          const sourceRect = nodeRects.get(parentId);
+          const targetRect = nodeRects.get(child.id);
+          const [sourceHandle, targetHandle] = sourceRect && targetRect
+            ? getSmartHandles(sourceRect, targetRect)
+            : ['source-bottom', 'target-top'];
+
           storyEdges.push({
             id: `${parentId}->child-${child.id}`,
             source: parentId,
             target: child.id,
+            sourceHandle,
+            targetHandle,
             type: 'default',
             className: 'bc-deployment-edge child-edge',
             style: {
@@ -225,7 +267,7 @@ export function BCDeploymentCanvas({
     });
 
     setEdges(storyEdges);
-  }, [story.edges, story.artifacts, activeEdgeIds, expandedNodes, setEdges]);
+  }, [story.edges, story.artifacts, activeEdgeIds, expandedNodes, nodeRects, setEdges]);
 
   // Focus camera on active nodes
   useEffect(() => {

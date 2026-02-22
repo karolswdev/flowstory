@@ -3,7 +3,7 @@
  */
 
 import { memo } from 'react';
-import { Handle, Position } from '@xyflow/react';
+import { NodeHandles } from '../nodes/NodeHandles';
 import { motion } from 'motion/react';
 import type { Participant, ParticipantType } from '../../schemas/http-flow';
 import './http-nodes.css';
@@ -45,8 +45,7 @@ export const ParticipantNode = memo(function ParticipantNode({
       {/* Lifeline indicator */}
       <div className="participant-lifeline" />
 
-      <Handle type="source" position={Position.Bottom} id="out" />
-      <Handle type="target" position={Position.Top} id="in" />
+      <NodeHandles />
     </motion.div>
   );
 });

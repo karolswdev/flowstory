@@ -62,7 +62,7 @@
    Service Node - Base
    ============================================ */
 .service-node {
-  min-width: 180px;
+  min-width: 200px;
   background: white;
   border: var(--node-border-width) solid var(--edge-default);
   border-radius: var(--radius-lg);
@@ -72,17 +72,22 @@
 }
 
 .service-node--active {
-  border-color: var(--node-system-border);
-  box-shadow: var(--shadow-focus);
+  border-color: #1565C0;
+  box-shadow: 0 0 20px 6px rgba(21, 101, 192, 0.5), 0 0 50px 12px rgba(21, 101, 192, 0.15);
+  animation: service-glow-pulse 1.8s ease-in-out infinite;
+  transform: scale(1.03);
+  z-index: 10;
 }
 
 .service-node--complete {
   border-color: var(--node-action-border);
-  opacity: 0.85;
+  opacity: 0.55;
+  filter: saturate(0.5);
 }
 
 .service-node--inactive {
-  opacity: 0.6;
+  opacity: 0.4;
+  filter: saturate(0.3);
 }
 
 .service-node__header {
@@ -103,10 +108,9 @@
   font-weight: var(--font-weight-semibold);
   font-size: var(--font-size-md);
   color: var(--node-system-text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   line-height: var(--line-height-tight);
+  flex: 1;
+  min-width: 0;
 }
 
 .service-node__divider {
@@ -198,15 +202,20 @@
 }
 
 .queue-node--active {
-  box-shadow: var(--shadow-focus);
+  box-shadow: 0 0 18px 5px rgba(156, 39, 176, 0.5), 0 0 45px 10px rgba(156, 39, 176, 0.15);
+  animation: service-glow-pulse 1.8s ease-in-out infinite;
+  transform: scale(1.03);
+  z-index: 10;
 }
 
 .queue-node--complete {
-  opacity: 0.85;
+  opacity: 0.55;
+  filter: saturate(0.5);
 }
 
 .queue-node--inactive {
-  opacity: 0.6;
+  opacity: 0.4;
+  filter: saturate(0.3);
 }
 
 .queue-node__header {
@@ -303,7 +312,9 @@
 }
 
 .database-node--active {
-  box-shadow: var(--shadow-focus);
+  box-shadow: 0 0 18px 5px rgba(121, 85, 72, 0.5), 0 0 45px 10px rgba(121, 85, 72, 0.15);
+  animation: service-glow-pulse 1.8s ease-in-out infinite;
+  transform: scale(1.03);
 }
 
 .database-node__header {
@@ -374,10 +385,22 @@
 }
 
 /* ============================================
+   Glow pulse animation for active nodes
+   ============================================ */
+@keyframes service-glow-pulse {
+  0%, 100% {
+    box-shadow: 0 0 16px 4px rgba(21, 101, 192, 0.4), 0 0 40px 8px rgba(21, 101, 192, 0.12);
+  }
+  50% {
+    box-shadow: 0 0 28px 10px rgba(21, 101, 192, 0.6), 0 0 64px 20px rgba(21, 101, 192, 0.2);
+  }
+}
+
+/* ============================================
    Dark Mode Overrides
    ============================================ */
 [data-theme="dark"] .service-flow-canvas {
-  background: #1a1a2e;
+  background: var(--color-bg);
 }
 
 [data-theme="dark"] .service-flow-step-info {
@@ -394,7 +417,7 @@
 }
 
 [data-theme="dark"] .service-node {
-  background: #1e1e2e;
+  background: var(--color-bg-secondary);
   border-color: rgba(255, 255, 255, 0.1);
 }
 
@@ -407,7 +430,7 @@
 }
 
 [data-theme="dark"] .queue-node {
-  background: #1e1e2e;
+  background: var(--color-bg-secondary);
 }
 
 [data-theme="dark"] .queue-node__header {
@@ -416,5 +439,5 @@
 
 [data-theme="dark"] .service-handle,
 [data-theme="dark"] .queue-handle {
-  border-color: #1e1e2e;
+  border-color: var(--color-bg-secondary);
 }

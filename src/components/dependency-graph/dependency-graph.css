@@ -64,9 +64,9 @@
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-bold);
   color: var(--node-system-text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  word-wrap: break-word;
+  text-align: center;
 }
 
 /* Health display */
@@ -268,39 +268,39 @@
    Dark Mode
    ============================================ */
 [data-theme="dark"] .dg-service-node {
-  background: #2d2d2d;
-  border-color: #444;
+  background: var(--color-bg-secondary);
+  border-color: var(--color-border);
 }
 
 [data-theme="dark"] .dg-name {
-  color: #e0e0e0;
+  color: var(--color-text);
 }
 
 [data-theme="dark"] .dg-metric {
-  background: #3d3d3d;
-  color: #aaa;
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
 }
 
 [data-theme="dark"] .dg-footer {
-  border-top-color: #444;
+  border-top-color: var(--color-border);
 }
 
 [data-theme="dark"] .dg-tech,
 [data-theme="dark"] .dg-owner {
-  color: #888;
+  color: var(--color-text-muted);
 }
 
 [data-theme="dark"] .dg-failing {
-  background: #3d2a2a;
+  background: var(--color-error-light);
 }
 
 [data-theme="dark"] .dg-edge-label {
-  background: #2d2d2d;
-  color: #ccc;
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
 }
 
 [data-theme="dark"] .dg-legend {
-  background: #2d2d2d;
+  background: var(--color-bg-secondary);
 }
 
 .dep-graph-canvas { position: relative; width: 100%; height: 100%; background: var(--color-bg); }

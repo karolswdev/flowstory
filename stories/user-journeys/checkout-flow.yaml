@@ -1,0 +1,121 @@
+id: checkout-flow
+title: E-commerce Checkout Flow
+description: Customer completes a purchase
+version: "1.0"
+
+actors:
+  - id: customer
+    name: Customer
+    type: user
+    avatar: "🛒"
+    color: "#2196F3"
+
+nodes:
+  - id: customer-actor
+    type: actor
+    actorId: customer
+    label: Customer
+    position: { x: 50, y: 200 }
+  - id: view-cart
+    type: action
+    actorId: customer
+    label: Views Cart
+    position: { x: 160, y: 200 }
+  - id: click-checkout
+    type: action
+    actorId: customer
+    label: Clicks Checkout
+    position: { x: 270, y: 200 }
+  - id: enter-shipping
+    type: action
+    actorId: customer
+    label: Enters Shipping
+    position: { x: 380, y: 200 }
+  - id: enter-payment
+    type: action
+    actorId: customer
+    label: Enters Payment
+    position: { x: 490, y: 200 }
+  - id: process-payment
+    type: system
+    label: Process Payment
+    position: { x: 600, y: 150 }
+  - id: decision-approved
+    type: decision
+    label: Payment OK?
+    position: { x: 710, y: 180 }
+  - id: create-order
+    type: system
+    label: Create Order
+    position: { x: 820, y: 100 }
+  - id: order-created-event
+    type: event
+    label: OrderCreatedEvent
+    position: { x: 820, y: 250 }
+  - id: send-confirmation
+    type: system
+    label: Send Confirmation
+    position: { x: 930, y: 250 }
+  - id: show-confirmation
+    type: action
+    actorId: customer
+    label: Sees Confirmation
+    position: { x: 930, y: 100 }
+  - id: order-complete
+    type: state
+    label: Order Complete
+    position: { x: 1040, y: 150 }
+    data:
+      variant: success
+  - id: payment-failed
+    type: state
+    label: Payment Failed
+    position: { x: 820, y: 340 }
+    data:
+      variant: error
+
+edges:
+  - { id: e1, source: customer-actor, target: view-cart, type: flow }
+  - { id: e2, source: view-cart, target: click-checkout, type: flow }
+  - { id: e3, source: click-checkout, target: enter-shipping, type: flow }
+  - { id: e4, source: enter-shipping, target: enter-payment, type: flow }
+  - { id: e5, source: enter-payment, target: process-payment, type: flow }
+  - { id: e6, source: process-payment, target: decision-approved, type: flow }
+  - { id: e7, source: decision-approved, target: create-order, type: flow, label: "Yes" }
+  - { id: e8, source: decision-approved, target: payment-failed, type: error, label: "No" }
+  - { id: e9, source: create-order, target: order-created-event, type: event }
+  - { id: e10, source: create-order, target: show-confirmation, type: flow }
+  - { id: e11, source: order-created-event, target: send-confirmation, type: async }
+  - { id: e12, source: show-confirmation, target: order-complete, type: flow }
+
+steps:
+  - id: step-1
+    order: 1
+    nodeIds: [customer-actor, view-cart]
+    edgeIds: [e1]
+    narrative: "Sarah reviews her shopping cart with 3 items totaling $79.99."
+    duration: 2500
+  - id: step-2
+    order: 2
+    nodeIds: [view-cart, click-checkout, enter-shipping]
+    edgeIds: [e2, e3]
+    narrative: "She proceeds to checkout and enters her shipping address."
+    duration: 2500
+  - id: step-3
+    order: 3
+    nodeIds: [enter-shipping, enter-payment, process-payment]
+    edgeIds: [e4, e5]
+    narrative: "She enters her credit card details. The payment gateway processes the charge."
+    duration: 3000
+  - id: step-4
+    order: 4
+    nodeIds: [process-payment, decision-approved, create-order, order-created-event]
+    edgeIds: [e6, e7, e9]
+    narrative: "Payment approved! An order is created and OrderCreatedEvent is published."
+    duration: 3000
+  - id: step-5
+    order: 5
+    nodeIds: [create-order, show-confirmation, order-complete, send-confirmation]
+    edgeIds: [e10, e11, e12]
+    narrative: "Sarah sees her order confirmation. An email receipt is sent automatically."
+    duration: 3000

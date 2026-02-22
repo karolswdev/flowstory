@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { Handle, Position } from '@xyflow/react';
+import { NodeHandles } from '../nodes/NodeHandles';
 import { motion } from 'framer-motion';
 import type { JobDef, JobStatus } from '../../schemas/pipeline';
 import { JOB_STATUS_COLORS, JOB_STATUS_ICONS } from '../../schemas/pipeline';
@@ -52,8 +52,8 @@ export const JobNode = memo(function JobNode({ data, selected }: JobNodeProps) {
       }}
       transition={{ duration: 0.2 }}
     >
-      <Handle type="target" position={Position.Left} className="job-handle" />
-      
+      <NodeHandles />
+
       <div className="job-node__header">
         <span className="job-node__icon">{statusIcon}</span>
         <span className="job-node__name">{name}</span>
@@ -73,7 +73,6 @@ export const JobNode = memo(function JobNode({ data, selected }: JobNodeProps) {
         />
       )}
       
-      <Handle type="source" position={Position.Right} className="job-handle" />
     </motion.div>
   );
 });

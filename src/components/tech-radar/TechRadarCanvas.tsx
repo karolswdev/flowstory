@@ -196,26 +196,28 @@ export function TechRadarCanvas({
       </svg>
       
       {/* Info panel for current step */}
-      {currentStep && (
-        <motion.div 
-          className="tech-radar-info"
-          variants={fadeUp}
-          initial="initial"
-          animate="animate"
-          exit="exit"
-          transition={TRANSITION.default}
-          key={currentStepIndex}
-        >
-          <h3>{currentStep.title}</h3>
-          <p>{currentStep.description}</p>
-          {currentStep.narration && (
-            <blockquote>
-              {currentStep.narration.speaker && <cite>{currentStep.narration.speaker}:</cite>}
-              {currentStep.narration.message}
-            </blockquote>
-          )}
-        </motion.div>
-      )}
+      <AnimatePresence mode="wait">
+        {currentStep && (
+          <motion.div 
+            className="tech-radar-info"
+            variants={fadeUp}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            transition={TRANSITION.default}
+            key={currentStepIndex}
+          >
+            <h3>{currentStep.title}</h3>
+            <p>{currentStep.description}</p>
+            {currentStep.narration && (
+              <blockquote>
+                {currentStep.narration.speaker && <cite>{currentStep.narration.speaker}:</cite>}
+                {currentStep.narration.message}
+              </blockquote>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
       
       {/* Step navigation */}
       <div className="tech-radar-nav">

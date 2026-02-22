@@ -1,0 +1,430 @@
+title: "Trip Operations — Domain Event Storm"
+version: 2
+type: event-storming
+domain: Trip Operations (Catalyst.TripOperations)
+
+actors:
+  - id: driver
+    name: Driver
+    icon: 🚐
+    description: Operates vehicle run, boards/drops off students
+  - id: dispatcher
+    name: Dispatcher
+    icon: 📡
+    description: Operations team managing live dispatch board
+  - id: parent
+    name: Parent
+    icon: 👨‍👩‍👧
+    description: Tracks student trip via parent portal
+  - id: sgr-scheduler
+    name: SGR Scheduler
+    icon: ⏰
+    description: Nightly Conductor workflow trigger
+    external: true
+  - id: assignment-bc
+    name: Assignment BC
+    icon: 🔗
+    description: Matches drivers to vehicle runs
+    external: true
+  - id: settlement-bc
+    name: Settlement BC
+    icon: 💰
+    description: Calculates BC/PD/PM payments
+    external: true
+
+aggregates:
+  - id: vehicle-run
+    name: VehicleRun
+    description: "Driver's daily route — 16-state machine (VrStatus)"
+    events:
+      - vr-created
+      - vr-dispatched
+      - vr-started
+      - vr-stop-arrived
+      - vr-stop-departed
+      - vr-completed
+      - vr-cancelled
+      - at-risk-detected
+    commands:
+      - reserve-vr
+      - queue-offer
+      - send-offer
+      - accept-offer
+      - start-vr
+      - complete-vr
+      - cancel-vr
+
+  - id: passenger-trip
+    name: PassengerTrip
+    description: "Single student pickup/dropoff — 16-state machine (PtStatus)"
+    events:
+      - pt-created
+      - pt-arrived-pickup
+      - pt-boarded
+      - pt-arrived-dropoff
+      - pt-dropped-off
+      - pt-no-show
+      - pt-cancelled
+    commands:
+      - arrive-pt
+      - board-pt
+      - dropoff-pt
+      - mark-no-show
+      - cancel-pt
+      - create-adhoc
+
+  - id: sgr
+    name: ScheduledGenerationRun
+    description: "Nightly batch generation — 5-state machine (SgrStatus)"
+    events:
+      - sgr-started
+      - sgr-completed
+      - sgr-failed
+      - sgr-conflict-detected
+    commands:
+      - trigger-sgr
+
+events:
+  - id: vr-created
+    name: VehicleRunCreatedEvent
+    aggregate: vehicle-run
+    triggeredBy: trigger-sgr
+    data: [vehicleRunId, tenantId, subscriptionRunId, scheduledDate, stopCount]
+    order: 1
+
+  - id: vr-dispatched
+    name: VrDispatchedEvent
+    aggregate: vehicle-run
+    triggeredBy: accept-offer
+    data: [vehicleRunId, driverId, vehicleId, monitorId, stopCount]
+    order: 2
+
+  - id: vr-started
+    name: VehicleRunStartedEvent
+    aggregate: vehicle-run
+    triggeredBy: start-vr
+    data: [vehicleRunId, driverId, vehicleId, actualStartTime, scheduledStartTime]
+    order: 3
+
+  - id: pt-arrived-pickup
+    name: PtArrivedAtPickupEvent
+    aggregate: passenger-trip
+    triggeredBy: arrive-pt
+    data: [passengerTripId, vehicleRunId, studentId, scheduledPickupTime, actualArrivalTime, latitude, longitude]
+    order: 4
+
+  - id: pt-boarded
+    name: PtBoardedEvent
+    aggregate: passenger-trip
+    triggeredBy: board-pt
+    data: [passengerTripId, vehicleRunId, studentId, studentIdScanned, actualPickupTime]
+    order: 5
+
+  - id: pt-arrived-dropoff
+    name: PtArrivedAtDropoffEvent
+    aggregate: passenger-trip
+    triggeredBy: arrive-pt
+    data: [passengerTripId, vehicleRunId, studentId, scheduledDropoffTime, actualArrivalTime]
+    order: 6
+
+  - id: pt-dropped-off
+    name: PtDroppedOffEvent ⚡
+    aggregate: passenger-trip
+    triggeredBy: dropoff-pt
+    data: [passengerTripId, vehicleRunId, studentId, driverId, serviceProviderId, monitorId, actualDropoffTime]
+    order: 7
+
+  - id: vr-completed
+    name: VehicleRunCompletedEvent
+    aggregate: vehicle-run
+    triggeredBy: complete-vr
+    data: [vehicleRunId, driverId, vehicleId, monitorId, stopCount, actualEndTime]
+    order: 8
+
+  - id: pt-no-show
+    name: PtNoShowEvent
+    aggregate: passenger-trip
+    triggeredBy: mark-no-show
+    data: [passengerTripId, vehicleRunId, studentId, noShowReason, latitude, longitude]
+    order: 9
+
+  - id: at-risk-detected
+    name: AtRiskDetectedEvent
+    aggregate: vehicle-run
+    data: [vehicleRunId, scheduledStartTime, currentStatus, minutesUntilStart]
+    order: 10
+
+  - id: sgr-completed
+    name: SgrCompletedEvent
+    aggregate: sgr
+    triggeredBy: trigger-sgr
+    data: [sgrId, targetDate, vehicleRunsCreated, passengerTripsCreated, conflictsDetected, executionDuration]
+    order: 11
+
+  - id: sgr-failed
+    name: SgrFailedEvent
+    aggregate: sgr
+    data: [sgrId, targetDate, failureReason]
+    order: 12
+
+commands:
+  - id: trigger-sgr
+    name: TriggerSgrCommand
+    actor: sgr-scheduler
+    aggregate: sgr
+    produces: [sgr-completed]
+
+  - id: reserve-vr
+    name: ReserveVrCommand
+    actor: dispatcher
+    aggregate: vehicle-run
+    produces: []
+
+  - id: queue-offer
+    name: QueueOfferCommand
+    aggregate: vehicle-run
+    produces: []
+
+  - id: accept-offer
+    name: AcceptOfferCommand
+    actor: driver
+    aggregate: vehicle-run
+    produces: [vr-dispatched]
+
+  - id: start-vr
+    name: StartVrCommand
+    actor: driver
+    aggregate: vehicle-run
+    produces: [vr-started]
+
+  - id: arrive-pt
+    name: ArrivePtCommand
+    actor: driver
+    aggregate: passenger-trip
+    produces: [pt-arrived-pickup, pt-arrived-dropoff]
+
+  - id: board-pt
+    name: BoardPtCommand
+    actor: driver
+    aggregate: passenger-trip
+    produces: [pt-boarded]
+
+  - id: dropoff-pt
+    name: DropOffPtCommand
+    actor: driver
+    aggregate: passenger-trip
+    produces: [pt-dropped-off]
+
+  - id: mark-no-show
+    name: MarkPtNoShowCommand
+    actor: dispatcher
+    aggregate: passenger-trip
+    produces: [pt-no-show]
+
+  - id: complete-vr
+    name: CompleteVrCommand
+    aggregate: vehicle-run
+    produces: [vr-completed]
+
+  - id: cancel-vr
+    name: CancelVrCommand
+    actor: dispatcher
+    aggregate: vehicle-run
+    produces: [vr-cancelled]
+
+  - id: cancel-pt
+    name: CancelTripCommand
+    actor: dispatcher
+    aggregate: passenger-trip
+    produces: [pt-cancelled]
+
+  - id: create-adhoc
+    name: CreateAdHocTripCommand
+    actor: dispatcher
+    aggregate: passenger-trip
+    produces: [pt-created]
+
+policies:
+  - id: sgr-triggers-assignment
+    name: "SgrCompleted → Assignment batch matching"
+    trigger: sgr-completed
+    action: trigger-assignment-matching
+
+  - id: dropoff-triggers-settlement
+    name: "PtDroppedOff → Settlement BC/PD/PM calculation"
+    trigger: pt-dropped-off
+    action: calculate-settlement
+
+  - id: noshow-triggers-rescue
+    name: "PtNoShow → Rescue Orchestration"
+    trigger: pt-no-show
+    action: initiate-rescue
+
+  - id: atrisk-triggers-monitoring
+    name: "AtRiskDetected → Monitoring exception"
+    trigger: at-risk-detected
+    action: create-exception
+
+  - id: boarded-notifies-parent
+    name: "PtBoarded → Communications SMS to parent"
+    trigger: pt-boarded
+    action: send-parent-notification
+
+  - id: vr-cancelled-triggers-reassign
+    name: "VrCancelled → Assignment re-match"
+    trigger: vr-cancelled
+    action: trigger-reassignment
+
+readModels:
+  - id: dispatch-board
+    name: Live Dispatch Board
+    description: Real-time VR status with SignalR updates
+    updatedBy: [vr-started, vr-completed, vr-cancelled, at-risk-detected]
+    consumedBy: [dispatcher]
+
+  - id: parent-portal
+    name: Parent Trip View
+    description: Student trip status with live ETA
+    updatedBy: [pt-boarded, pt-arrived-pickup, pt-arrived-dropoff, pt-dropped-off]
+    consumedBy: [parent]
+
+  - id: fleet-map
+    name: Fleet Map (GPS)
+    description: Real-time vehicle positions via SignalR
+    updatedBy: [vr-started]
+    consumedBy: [dispatcher]
+
+externalSystems:
+  - id: assignment-engine
+    name: Assignment BC
+    description: Matches drivers to VRs after SGR
+    consumes: [sgr-completed]
+    produces: []
+
+  - id: settlement-engine
+    name: Settlement BC
+    description: BC/PD/PM billing calculations
+    consumes: [pt-dropped-off, vr-completed]
+
+  - id: rescue-engine
+    name: Rescue Orchestration BC
+    description: Automated driver replacement
+    consumes: [pt-no-show, at-risk-detected]
+
+  - id: comms-engine
+    name: Communications BC
+    description: SMS/email/push to parents and drivers
+    consumes: [pt-boarded, pt-arrived-pickup, pt-dropped-off]
+
+  - id: monitoring-engine
+    name: Monitoring & Exceptions BC
+    description: Exception detection and alerting
+    consumes: [at-risk-detected, vr-cancelled, pt-no-show]
+
+hotspots:
+  - id: settlement-critical
+    note: "PtDroppedOffEvent is revenue-critical. Lost event = missed payment. Transactional outbox is non-optional."
+    type: risk
+    near: pt-dropped-off
+    raisedBy: Architecture Lead
+
+  - id: sgr-partial-failure
+    note: "What happens if SGR creates 400 VRs but fails on #401? Conductor compensation deletes partial batch."
+    type: question
+    near: sgr-completed
+    raisedBy: Tech Lead
+
+  - id: noshow-timing
+    note: "NoShow can be marked from TOPU or ATPU. What if driver marks NoShow after student is already ONBOARD?"
+    type: question
+    near: pt-no-show
+    raisedBy: Domain Expert
+
+steps:
+  - title: "Trip Operations Domain Overview"
+    description: "The largest bounded context in Catalyst — 3 aggregates, 30+ events, 6 downstream consumers"
+    zoomLevel: 0.7
+    duration: 5000
+
+  - title: "Nightly Generation (SGR)"
+    description: "Every night at 9 PM, the Conductor workflow generates tomorrow's VRs and PTs from SubscriptionRun templates"
+    focusAggregate: sgr
+    highlightCommands: [trigger-sgr]
+    highlightEvents: [sgr-completed]
+    showPolicies: true
+    zoomLevel: 1.1
+    duration: 5000
+
+  - title: "Driver Offer Workflow"
+    description: "Assignment BC matches a driver → ReserveVr → QueueOffer → SendOffer → AcceptOffer → VrDispatched"
+    focusAggregate: vehicle-run
+    highlightCommands: [reserve-vr, queue-offer, accept-offer]
+    highlightEvents: [vr-dispatched]
+    zoomLevel: 1.1
+    duration: 5000
+
+  - title: "Route Begins — VR Started"
+    description: "Driver taps 'Start Route' → StartVrCommand → OFFERACCEPTED → TOSTOP"
+    highlightCommands: [start-vr]
+    highlightEvents: [vr-started]
+    zoomLevel: 1.2
+    duration: 4000
+
+  - title: "The Pickup Sequence"
+    description: "Driver arrives at pickup → student boards → en route to dropoff"
+    focusAggregate: passenger-trip
+    highlightCommands: [arrive-pt, board-pt]
+    highlightEvents: [pt-arrived-pickup, pt-boarded]
+    showPolicies: true
+    zoomLevel: 1.1
+    duration: 5000
+    narration:
+      speaker: Domain Expert
+      message: "PtBoardedEvent triggers an SMS to the parent: 'Your child has been picked up'"
+
+  - title: "The Revenue Moment — DropOff ⚡"
+    description: >
+      ATDO → POSTSERVICE via DropOffPassenger(). PtDroppedOffEvent carries DriverId,
+      ServiceProviderId, MonitorId — the three IDs Settlement needs for BC/PD/PM.
+      Published via transactional outbox. A lost event means a missed payment.
+    highlightCommands: [dropoff-pt]
+    highlightEvents: [pt-dropped-off]
+    showPolicies: true
+    zoomLevel: 1.3
+    duration: 6000
+    narration:
+      speaker: Architecture Lead
+      message: "This is the single most important domain event in the entire platform"
+
+  - title: "Exception Path — No Show"
+    description: "Student not at pickup → MarkNoShow → PtNoShowEvent → Rescue Orchestration initiates replacement"
+    highlightCommands: [mark-no-show]
+    highlightEvents: [pt-no-show, at-risk-detected]
+    showPolicies: true
+    zoomLevel: 1.1
+    duration: 5000
+
+  - title: "VR Completion & Settlement"
+    description: "All stops visited → post-trip validation chain → VehicleRunCompletedEvent → Settlement calculates payments"
+    highlightCommands: [complete-vr]
+    highlightEvents: [vr-completed]
+    showPolicies: true
+    zoomLevel: 1.1
+    duration: 5000
+
+  - title: "Open Questions & Risks"
+    description: "Key architectural hotspots identified during event storming"
+    showHotspots: true
+    zoomLevel: 0.9
+    duration: 6000
+
+  - title: "Full Domain Model"
+    description: "Complete event storm — 3 aggregates, 12 events, 14 commands, 6 policies, 5 external consumers"
+    showPolicies: true
+    showHotspots: true
+    zoomLevel: 0.65
+    duration: 5000
+
+camera:
+  center: [0, 0]
+  zoom: 1

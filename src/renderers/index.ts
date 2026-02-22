@@ -18,6 +18,10 @@ export {
 export { FlowRenderer } from './FlowRenderer';
 export { ArchitecturalRenderer } from './ArchitecturalRenderer';
 
+// Specialized renderer registry
+export { RENDERER_MAP, SPECIALIZED_TYPES } from './specialized';
+export type { SpecializedRendererConfig, SpecializedStoryType, StoryType } from './specialized';
+
 // Auto-register built-in renderers
 import { registerRenderer, hasRenderer } from './registry';
 import { FlowRenderer } from './FlowRenderer';

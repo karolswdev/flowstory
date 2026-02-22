@@ -1,0 +1,324 @@
+id: trip-ops-event-fanout
+title: "Trip Operations — Cross-BC Event Fanout"
+description: >
+  Trip Operations publishes 29 event types consumed by 6 downstream bounded
+  contexts. This is the highest event fanout in the Catalyst platform —
+  Settlement, Assignment, Rescue, Communications, Monitoring, and Incidents
+  all depend on Trip Ops events for their core business logic.
+renderer: service-flow
+schemaVersion: "2.0"
+layout: sequence
+
+services:
+  - id: trip-ops
+    name: Trip Operations
+    type: api
+    technology: ".NET 10"
+    status: healthy
+    instances: 2
+
+  - id: settlement
+    name: Settlement BC
+    type: api
+    technology: ".NET 10"
+    status: healthy
+
+  - id: assignment
+    name: Assignment BC
+    type: api
+    technology: ".NET 10"
+    status: healthy
+
+  - id: rescue
+    name: Rescue Orchestration
+    type: api
+    technology: ".NET 10"
+    status: healthy
+
+  - id: comms
+    name: Communications BC
+    type: api
+    technology: ".NET 10"
+    status: healthy
+
+  - id: monitoring
+    name: Monitoring & Exceptions
+    type: api
+    technology: ".NET 10"
+    status: healthy
+
+  - id: incidents
+    name: Incidents & Safety
+    type: api
+    technology: ".NET 10"
+    status: healthy
+
+  - id: trip-hq
+    name: Trip HQ (SignalR)
+    type: external
+    technology: "Next.js 15"
+
+queues:
+  - id: trip-ops-topic
+    name: trip-operations
+    type: topic
+    broker: servicebus
+    consumers: 6
+
+  - id: outbox
+    name: outbox_messages
+    type: queue
+    broker: redis
+    consumers: 1
+
+calls:
+  # Revenue-critical (transactional outbox)
+  - id: pt-dropoff-outbox
+    type: sync
+    from: trip-ops
+    to: outbox
+    method: INSERT
+    path: "PtDroppedOffEvent (outbox)"
+    duration: 3
+    status: ok
+
+  - id: outbox-to-asb
+    type: publish
+    from: outbox
+    to: trip-ops-topic
+    messageType: "Revenue-Critical Events (4 types)"
+
+  # Settlement consumes
+  - id: settlement-pt-dropoff
+    type: subscribe
+    from: trip-ops-topic
+    to: settlement
+    messageType: PtDroppedOffEvent
+    action: "Calculate BC/PD/PM"
+
+  - id: settlement-vr-complete
+    type: subscribe
+    from: trip-ops-topic
+    to: settlement
+    messageType: VehicleRunCompletedEvent
+    action: "Finalize run settlement"
+
+  # Assignment consumes
+  - id: assignment-sgr
+    type: subscribe
+    from: trip-ops-topic
+    to: assignment
+    messageType: SgrCompletedEvent
+    action: "Trigger batch matching"
+
+  - id: assignment-vr-cancel
+    type: subscribe
+    from: trip-ops-topic
+    to: assignment
+    messageType: VrCancelledEvent
+    action: "Re-match affected PTs"
+
+  # Rescue consumes
+  - id: rescue-noshow
+    type: subscribe
+    from: trip-ops-topic
+    to: rescue
+    messageType: PtNoShowEvent
+    action: "Initiate rescue workflow"
+
+  - id: rescue-atrisk
+    type: subscribe
+    from: trip-ops-topic
+    to: rescue
+    messageType: AtRiskDetectedEvent
+    action: "Proactive rescue request"
+
+  # Communications consumes
+  - id: comms-boarded
+    type: subscribe
+    from: trip-ops-topic
+    to: comms
+    messageType: PtBoardedEvent
+    action: "SMS: Student picked up"
+
+  - id: comms-arrived-pickup
+    type: subscribe
+    from: trip-ops-topic
+    to: comms
+    messageType: PtArrivedAtPickupEvent
+    action: "SMS: Driver arrived"
+
+  - id: comms-dropoff
+    type: subscribe
+    from: trip-ops-topic
+    to: comms
+    messageType: PtDroppedOffEvent
+    action: "SMS: Student dropped off"
+
+  # Monitoring consumes
+  - id: monitoring-atrisk
+    type: subscribe
+    from: trip-ops-topic
+    to: monitoring
+    messageType: AtRiskDetectedEvent
+    action: "Create exception alert"
+
+  - id: monitoring-vr-events
+    type: subscribe
+    from: trip-ops-topic
+    to: monitoring
+    messageType: "VR/PT state changes"
+    action: "Anomaly detection"
+
+  # Incidents consumes
+  - id: incidents-reported
+    type: subscribe
+    from: trip-ops-topic
+    to: incidents
+    messageType: TripIncidentReportedEvent
+    action: "Initiate investigation"
+
+  # Self-consumption (SignalR)
+  - id: signalr-gps
+    type: subscribe
+    from: trip-ops-topic
+    to: trip-hq
+    messageType: GpsLocationUpdatedEvent
+    action: "Live fleet map update"
+
+steps:
+  - id: step-1
+    title: "The Hub — Trip Operations"
+    narrative: >
+      Trip Operations is the event hub of the platform. With 29 outbound event
+      types and 6 downstream consumers, it has the highest fanout of any bounded
+      context. Every significant state change — from SGR completion to student
+      dropoff — ripples through the architecture.
+    activeCalls: []
+    duration: 5000
+    narration:
+      speaker: Architect
+      message: "29 event types. 6 downstream consumers. Trip Ops is the event epicenter of Catalyst."
+
+  - id: step-2
+    title: "The Revenue Pipeline — Settlement"
+    narrative: >
+      Settlement is the most critical consumer. PtDroppedOffEvent carries
+      DriverId, ServiceProviderId, MonitorId — everything needed for
+      BC/PD/PM calculation. VehicleRunCompletedEvent finalizes the run.
+      Both transit via transactional outbox — a lost event means unpaid drivers.
+    activeCalls:
+      - pt-dropoff-outbox
+      - outbox-to-asb
+      - settlement-pt-dropoff
+      - settlement-vr-complete
+    duration: 6000
+    narration:
+      speaker: Architecture Lead
+      message: "Settlement can't query Trip Ops for this data. It's denormalized into the event. Outbox guarantees delivery."
+
+  - id: step-3
+    title: "Assignment — Matching & Re-matching"
+    narrative: >
+      Assignment consumes SgrCompletedEvent to trigger its nightly batch
+      matching run — pairing drivers to newly-created VRs. It also handles
+      VrCancelledEvent — when a run is cancelled, affected PTs must be
+      re-matched to a different driver.
+    activeCalls:
+      - assignment-sgr
+      - assignment-vr-cancel
+    duration: 5000
+    narration:
+      speaker: Domain Expert
+      message: "SGR creates the VRs, then Assignment fills them. Cancellation triggers re-matching for orphaned students."
+
+  - id: step-4
+    title: "Rescue — Automated Recovery"
+    narrative: >
+      Rescue Orchestration reacts to failures. PtNoShowEvent triggers a
+      search for a replacement driver. AtRiskDetectedEvent enables proactive
+      rescue — the system intervenes before a late arrival becomes a missed trip.
+    activeCalls:
+      - rescue-noshow
+      - rescue-atrisk
+    duration: 5000
+    narration:
+      speaker: Domain Expert
+      message: "Rescue is proactive, not reactive. AtRisk fires before the failure happens, giving the system time to find a replacement."
+
+  - id: step-5
+    title: "Communications — Parent Notifications"
+    narrative: >
+      Parents receive real-time SMS at every key moment: 'Driver arrived'
+      (PtArrivedAtPickupEvent), 'Student picked up' (PtBoardedEvent),
+      'Student dropped off' (PtDroppedOffEvent). Three events, three
+      SMS messages — the parent always knows where their child is.
+    activeCalls:
+      - comms-arrived-pickup
+      - comms-boarded
+      - comms-dropoff
+    duration: 5000
+    narration:
+      speaker: Domain Expert
+      message: "Three SMS messages per trip. Parents never have to wonder where their child is."
+
+  - id: step-6
+    title: "Monitoring & Incidents"
+    narrative: >
+      Monitoring BC creates exception alerts from AtRiskDetectedEvent and
+      tracks all VR/PT state changes for anomaly detection. Incidents & Safety
+      consumes TripIncidentReportedEvent to initiate driver investigations.
+    activeCalls:
+      - monitoring-atrisk
+      - monitoring-vr-events
+      - incidents-reported
+    duration: 5000
+    narration:
+      speaker: Architect
+      message: "Monitoring watches everything. Incidents responds to safety events. Both downstream from Trip Ops."
+
+  - id: step-7
+    title: "Self-Consumption — Real-Time Fleet"
+    narrative: >
+      Trip Ops also consumes its own events. GpsLocationUpdatedEvent flows
+      through ASB to the EventProcessor pod, which broadcasts to Trip HQ
+      via SignalR. This self-consumption pattern decouples GPS ingestion
+      throughput from WebSocket fan-out capacity.
+    activeCalls:
+      - signalr-gps
+    duration: 5000
+    narration:
+      speaker: Architecture Lead
+      message: "Self-consumption separates the sync HTTP path from the async WebSocket path. 33 GPS events per second absorbed without blocking."
+
+  - id: step-8
+    title: "The Full Fanout"
+    narrative: >
+      29 event types. 4 via transactional outbox (revenue/safety-critical).
+      25 via fire-and-forget async. 6 downstream BCs + 1 self-consumption
+      channel. This is the event-driven architecture that makes Catalyst
+      a loosely-coupled, independently-deployable microservice platform.
+    activeCalls:
+      - pt-dropoff-outbox
+      - outbox-to-asb
+      - settlement-pt-dropoff
+      - settlement-vr-complete
+      - assignment-sgr
+      - assignment-vr-cancel
+      - rescue-noshow
+      - rescue-atrisk
+      - comms-boarded
+      - comms-arrived-pickup
+      - comms-dropoff
+      - monitoring-atrisk
+      - monitoring-vr-events
+      - incidents-reported
+      - signalr-gps
+    duration: 6000
+    narration:
+      speaker: Architecture Lead
+      message: "The complete event fanout. Every arrow represents a business capability that depends on Trip Operations being reliable."
+
+camera:
+  center: [0, 0]
+  zoom: 1

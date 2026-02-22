@@ -1,0 +1,307 @@
+title: "Trip Operations — BC Composition"
+version: 1
+type: bc-composition
+layout:
+  mode: radial
+  centerSize: 180
+  spacing: 220
+
+core:
+  id: trip-operations
+  name: Trip Operations
+  icon: 🚐
+  description: "Largest BC in Catalyst — 12 controllers, 39 commands, 941 tests"
+  color: "#059669"
+
+elements:
+  # ── Layer 1: Domain (Zero Dependencies) ──
+  - id: domain-aggregates
+    name: Aggregates (5)
+    type: domain
+    icon: 🏛️
+    description: "VehicleRun, PassengerTrip, ScheduledGenerationRun, SubscriptionRun, TripIncident"
+    layer: 1
+    effect:
+      type: grow
+      duration: 500
+    children:
+      - id: vr-aggregate
+        name: VehicleRun
+        type: aggregate
+        icon: 🚐
+      - id: pt-aggregate
+        name: PassengerTrip
+        type: aggregate
+        icon: 🎒
+      - id: sgr-aggregate
+        name: ScheduledGenerationRun
+        type: aggregate
+        icon: ⏰
+
+  - id: domain-state-machines
+    name: State Machines (3)
+    type: domain
+    icon: ⚙️
+    description: "VrStateMachine (16 states), PtStateMachine (16 states), SgrStateMachine (5 states)"
+    layer: 1
+    effect:
+      type: pulse
+    children:
+      - id: vr-sm
+        name: VrStateMachine
+        type: state-machine
+        icon: 🔄
+      - id: pt-sm
+        name: PtStateMachine
+        type: state-machine
+        icon: 🔄
+      - id: sgr-sm
+        name: SgrStateMachine
+        type: state-machine
+        icon: 🔄
+
+  - id: domain-events
+    name: Domain Events (30+)
+    type: event-bus
+    icon: 📨
+    description: "Highest fanout in platform — 6 downstream consumers"
+    layer: 1
+    effect:
+      type: pulse
+    children:
+      - id: pt-dropped-off
+        name: PtDroppedOffEvent ⚡
+        type: event
+      - id: vr-completed
+        name: VrCompletedEvent
+        type: event
+      - id: gps-updated
+        name: GpsLocationUpdated
+        type: event
+
+  - id: domain-value-objects
+    name: Value Objects (5)
+    type: domain
+    icon: 💎
+    description: "Stop (record), GpsReading (sealed), EstimatedTimeOfArrival, TripConflict, EtaAdjustments"
+    layer: 1
+    effect:
+      type: fade
+
+  # ── Layer 1: Application (CQRS) ──
+  - id: app-commands
+    name: Commands (39)
+    type: api
+    icon: ✏️
+    description: "Largest write surface in Catalyst — VR lifecycle, PT transitions, offers, GPS, SGR"
+    layer: 1
+    effect:
+      type: slide
+      direction: up
+    children:
+      - id: cmd-start-vr
+        name: StartVrCommand
+        type: command
+      - id: cmd-dropoff
+        name: DropOffPtCommand
+        type: command
+      - id: cmd-ingest-gps
+        name: IngestGpsCommand
+        type: command
+
+  - id: app-queries
+    name: Queries (20)
+    type: api
+    icon: 🔍
+    description: "Three consumer personas: dispatchers, drivers, parents"
+    layer: 1
+    effect:
+      type: slide
+      direction: up
+    children:
+      - id: qry-vr-detail
+        name: GetVrByIdQuery
+        type: query
+      - id: qry-driver-trips
+        name: ListDriverTripsQuery
+        type: query
+      - id: qry-parent-trips
+        name: GetParentStudentTripsQuery
+        type: query
+
+  - id: app-conductor-tasks
+    name: Conductor Tasks (23)
+    type: worker
+    icon: 🎭
+    description: "SGR generation, booking, assignment, post-trip validation, escalation"
+    layer: 1
+    effect:
+      type: grow
+      duration: 500
+
+  # ── Layer 2: Infrastructure ──
+  - id: infra-db
+    name: trip_operations DB
+    type: database
+    icon: 🗄️
+    description: "PostgreSQL 16 + PostGIS — 13 DbSets, 4 EF migrations, transactional outbox"
+    layer: 2
+    effect:
+      type: radiate
+    children:
+      - id: db-vehicle-runs
+        name: VehicleRuns
+        type: table
+        icon: 📋
+      - id: db-passenger-trips
+        name: PassengerTrips
+        type: table
+        icon: 📋
+      - id: db-gps-locations
+        name: GpsLocations (PostGIS)
+        type: table
+        icon: 📋
+      - id: db-outbox
+        name: outbox_messages
+        type: table
+        icon: 📋
+
+  - id: infra-asb
+    name: Azure Service Bus
+    type: external
+    icon: 📡
+    description: "trip-operations topic — 29 outbound event types"
+    layer: 2
+    effect:
+      type: radiate
+
+  - id: infra-signalr
+    name: SignalR Hub
+    type: external
+    icon: 🔌
+    description: "TripOperationsHub — real-time fleet visibility via WebSocket"
+    layer: 2
+    effect:
+      type: radiate
+
+  - id: infra-redis
+    name: Redis
+    type: external
+    icon: ⚡
+    description: "Idempotency keys (1h TTL), PT cache, GPS dedup (30s TTL)"
+    layer: 2
+    effect:
+      type: radiate
+
+  - id: infra-conductor
+    name: Orkes Conductor
+    type: external
+    icon: 🎼
+    description: "sgr-generation-workflow, post-trip validation, assignment orchestration"
+    layer: 2
+    effect:
+      type: radiate
+
+edges:
+  # Domain → Nothing (zero dependencies)
+  - { id: agg-to-sm,     source: domain-aggregates,    target: domain-state-machines, type: depends, label: "validates via" }
+  - { id: agg-to-events, source: domain-aggregates,    target: domain-events,         type: publishes, label: "raises" }
+
+  # Application → Domain
+  - { id: cmd-to-agg,    source: app-commands,          target: domain-aggregates,     type: depends, label: "loads & mutates" }
+  - { id: qry-to-db,     source: app-queries,           target: infra-db,              type: depends, label: "reads (AsNoTracking)" }
+  - { id: tasks-to-agg,  source: app-conductor-tasks,   target: domain-aggregates,     type: depends, label: "orchestrates" }
+
+  # Infrastructure
+  - { id: cmd-to-db,     source: app-commands,          target: infra-db,              type: depends, label: "persists" }
+  - { id: events-to-asb, source: domain-events,         target: infra-asb,             type: publishes, label: "publishes via outbox" }
+  - { id: asb-to-signalr,source: infra-asb,             target: infra-signalr,         type: publishes, label: "self-consumption" }
+  - { id: tasks-to-cond, source: app-conductor-tasks,   target: infra-conductor,       type: depends, label: "registered with" }
+
+steps:
+  - id: step-1
+    title: "Trip Operations — The Core"
+    description: "The operational heartbeat of Catalyst. The largest, most complex, and highest-fanout bounded context."
+    reveal: []
+    focus:
+      - trip-operations
+    narration:
+      speaker: Architect
+      message: "Trip Operations is the operational heartbeat — 12 controllers, 39 commands, 30+ events, 941 tests."
+
+  - id: step-2
+    title: "Domain Layer: Zero Dependencies"
+    description: "5 aggregates, 3 state machines, 30+ domain events, 5 value objects — all with zero external dependencies."
+    reveal:
+      - domain-aggregates
+      - domain-state-machines
+    focus:
+      - domain-aggregates
+      - domain-state-machines
+    expand:
+      - domain-aggregates
+      - domain-state-machines
+    narration:
+      speaker: Architect
+      message: "The domain layer owns the truth. Three state machines govern every transition. Zero external dependencies."
+
+  - id: step-3
+    title: "Domain Events — 30+ Types"
+    description: "The highest event fanout in the platform — consumed by 6 downstream bounded contexts."
+    reveal:
+      - domain-events
+      - domain-value-objects
+    focus:
+      - domain-events
+    expand:
+      - domain-events
+    narration:
+      speaker: Architecture Lead
+      message: "PtDroppedOffEvent is revenue-critical. 4 events via transactional outbox. 25 via fire-and-forget."
+
+  - id: step-4
+    title: "Application Layer: CQRS + Conductor"
+    description: "39 commands (MediatR), 20 queries (AsNoTracking), 23 Conductor task workers."
+    reveal:
+      - app-commands
+      - app-queries
+      - app-conductor-tasks
+    focus:
+      - app-commands
+      - app-queries
+    expand:
+      - app-commands
+      - app-queries
+    narration:
+      speaker: Domain Expert
+      message: "The dual pattern — MediatR for sub-100ms state transitions, Conductor for multi-minute batch workflows."
+
+  - id: step-5
+    title: "Infrastructure: The Persistence & Messaging Layer"
+    description: "PostgreSQL + PostGIS, Azure Service Bus, SignalR, Redis, Conductor."
+    reveal:
+      - infra-db
+      - infra-asb
+      - infra-signalr
+      - infra-redis
+      - infra-conductor
+    focus:
+      - infra-db
+    expand:
+      - infra-db
+    narration:
+      speaker: Architect
+      message: "13 DbSets, PostGIS for GPS, transactional outbox, SignalR self-consumption, Redis caching."
+
+  - id: step-6
+    title: "Complete Composition"
+    description: "All layers working together — Domain → Application → Infrastructure → External. Clean Architecture dependency rules enforced at compile time."
+    focus: []
+    zoomLevel: 0.7
+    narration:
+      speaker: Architecture Lead
+      message: "The complete Trip Operations bounded context. Every dependency points inward. Clean Architecture at scale."
+
+camera:
+  center: [0, 0]
+  zoom: 1

@@ -1,0 +1,222 @@
+id: trip-ops-sgr-pipeline
+title: "SGR Generation — Nightly Batch Pipeline"
+description: >
+  The Conductor-orchestrated workflow that runs every night to generate tomorrow's
+  VehicleRuns and PassengerTrips from SubscriptionRun templates.
+  4 sequential tasks, 30-minute timeout, compensation on partial failure.
+renderer: service-flow
+schemaVersion: "2.0"
+layout: sequence
+
+services:
+  - id: conductor
+    name: Conductor
+    type: gateway
+    technology: Orkes Conductor
+    status: healthy
+
+  - id: create-sgr
+    name: CreateSgrInstanceTask
+    type: worker
+    technology: ".NET 10"
+    status: healthy
+
+  - id: generate-trips
+    name: GenerateSubscriptionTripsTask
+    type: worker
+    technology: ".NET 10"
+    status: healthy
+
+  - id: complete-sgr
+    name: CompleteSgrTask
+    type: worker
+    technology: ".NET 10"
+    status: healthy
+
+  - id: publish-event
+    name: PublishSgrCompletionTask
+    type: worker
+    technology: ".NET 10"
+    status: healthy
+
+  - id: trip-ops-db
+    name: trip_operations
+    type: database
+    technology: PostgreSQL
+
+  - id: asb
+    name: trip-operations (ASB)
+    type: database
+    technology: Azure Service Bus
+
+  - id: assignment-bc
+    name: Assignment BC
+    type: api
+    technology: ".NET 10"
+    status: healthy
+
+queues:
+  - id: task-queue
+    name: Conductor Task Queue
+    type: queue
+    broker: redis
+    consumers: 4
+
+calls:
+  - id: dispatch-create
+    type: sync
+    from: conductor
+    to: create-sgr
+    method: TASK
+    path: create-sgr-instance
+    duration: 50
+    status: ok
+
+  - id: create-sgr-record
+    type: sync
+    from: create-sgr
+    to: trip-ops-db
+    method: INSERT
+    path: "ScheduledGenerationRun (Queued → Running)"
+    duration: 15
+    status: ok
+
+  - id: dispatch-generate
+    type: sync
+    from: conductor
+    to: generate-trips
+    method: TASK
+    path: generate-trips-for-date
+    duration: 600000
+    status: ok
+
+  - id: fetch-templates
+    type: sync
+    from: generate-trips
+    to: trip-ops-db
+    method: SELECT
+    path: "Active SubscriptionTrips + CalendarExclusions"
+    duration: 200
+    status: ok
+
+  - id: write-vrs-pts
+    type: sync
+    from: generate-trips
+    to: trip-ops-db
+    method: "BATCH INSERT"
+    path: "VehicleRuns + PassengerTrips"
+    duration: 45000
+    status: ok
+
+  - id: dispatch-complete
+    type: sync
+    from: conductor
+    to: complete-sgr
+    method: TASK
+    path: complete-sgr
+    duration: 30
+    status: ok
+
+  - id: update-sgr-status
+    type: sync
+    from: complete-sgr
+    to: trip-ops-db
+    method: UPDATE
+    path: "SGR (Running → Completed)"
+    duration: 10
+    status: ok
+
+  - id: dispatch-publish
+    type: sync
+    from: conductor
+    to: publish-event
+    method: TASK
+    path: publish-completion-event
+    duration: 20
+    status: ok
+
+  - id: publish-to-asb
+    type: publish
+    from: publish-event
+    to: asb
+    messageType: SgrCompletedEvent
+
+  - id: assignment-consumes
+    type: subscribe
+    from: asb
+    to: assignment-bc
+    messageType: SgrCompletedEvent
+    action: TriggerBatchMatching
+
+steps:
+  - id: step-1
+    title: "Nightly Trigger (Day -5 @ 9 PM)"
+    narrative: >
+      The Conductor scheduler triggers the sgr-nightly-generation workflow.
+      Input: tenantId, targetDate (5 days ahead), correlationId.
+      The workflow has a 30-minute overall timeout and exponential backoff retries.
+    activeCalls:
+      - dispatch-create
+    duration: 4000
+
+  - id: step-2
+    title: "Create SGR Instance"
+    narrative: >
+      CreateSgrInstanceTask creates a ScheduledGenerationRun aggregate in Queued state,
+      then transitions it to Running via SgrStateMachine.CanTransition(). Raises SgrStartedEvent.
+      Retry policy: 3x with exponential backoff.
+    activeCalls:
+      - create-sgr-record
+    duration: 3500
+
+  - id: step-3
+    title: "Fetch Templates & Check Exclusions"
+    narrative: >
+      GenerateSubscriptionTripsTask loads all active SubscriptionTrips for the tenant,
+      checks the target date against CalendarExclusions (holidays, snow days, closures).
+      If the date is excluded, the entire generation is skipped gracefully.
+    activeCalls:
+      - dispatch-generate
+      - fetch-templates
+    duration: 4500
+
+  - id: step-4
+    title: "Batch Generate VRs + PTs"
+    narrative: >
+      For each SubscriptionRun, create a VehicleRun (one per driver route) and
+      PassengerTrips (one per student per VR). Conflict detection runs in parallel —
+      overlapping student schedules produce TripConflict VOs with Warning (<30 min)
+      or Critical (≥30 min) severity. This is the longest step — up to 10 minutes
+      for 500K trips.
+    activeCalls:
+      - write-vrs-pts
+    duration: 5000
+
+  - id: step-5
+    title: "Complete SGR with Metrics"
+    narrative: >
+      CompleteSgrTask transitions SGR to Completed, recording VehicleRunsCreated,
+      PassengerTripsCreated, ConflictsDetected, and ExecutionDuration.
+      On partial failure, the compensation workflow deletes partially-created VRs
+      and transitions SGR to Failed with a FailureReason.
+    activeCalls:
+      - dispatch-complete
+      - update-sgr-status
+    duration: 4000
+
+  - id: step-6
+    title: "Publish SgrCompletedEvent"
+    narrative: >
+      PublishSgrCompletionTask publishes SgrCompletedEvent to the trip-operations
+      ASB topic. The Assignment BC subscribes and triggers its batch matching run —
+      matching drivers to the newly-created VRs based on dispatch area, vehicle type,
+      and provider availability.
+    activeCalls:
+      - dispatch-publish
+      - publish-to-asb
+      - assignment-consumes
+    duration: 5000
+
+camera:
+  center: [0, 0]
+  zoom: 1

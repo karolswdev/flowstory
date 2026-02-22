@@ -1,4 +1,4 @@
-import { toPng, toSvg } from 'html-to-image';
+import { toPng, toSvg, toCanvas } from 'html-to-image';
 import { jsPDF } from 'jspdf';
 import GIF from 'gif.js';
 
@@ -209,6 +209,132 @@ export async function exportToGif(
     
     captureFrames();
   });
+}
+
+/* ─── Animated GIF Recording (real-time playback capture) ─── */
+
+/** Options for real-time animated GIF recording */
+export interface RecordOptions {
+  filename?: string;
+  /** Viewport scale (1 = native, 0.5 = half size). Lower = faster capture. Default: 1 */
+  scale?: number;
+  /** Target fps cap. Actual fps depends on toCanvas speed. Default: 12 */
+  targetFps?: number;
+  /** Background color */
+  backgroundColor?: string;
+  /** GIF quality (1-20, lower = better). Default: 10 */
+  gifQuality?: number;
+  /** Progress callback: phase + percentage (0-1) */
+  onProgress?: (phase: 'recording' | 'encoding', pct: number) => void;
+  /** Called when the rAF capture loop actually starts */
+  onRecordingStart?: () => void;
+}
+
+/** Handle returned by recordAnimatedGif – call stop() when playback ends */
+export interface RecordingSession {
+  /** Stop capturing and encode the GIF. Resolves with the finished blob. */
+  stop: () => Promise<Blob>;
+}
+
+/**
+ * Record real-time DOM rendering into an animated GIF.
+ *
+ * The caller is responsible for driving playback (call play(), wait for
+ * isPlaying→false, then call session.stop()). This function only captures
+ * whatever is on screen while the rAF loop is running.
+ */
+export function recordAnimatedGif(
+  element: HTMLElement,
+  options: RecordOptions = {},
+): RecordingSession {
+  const {
+    scale = 1,
+    targetFps = 12,
+    backgroundColor = '#ffffff',
+    gifQuality = 10,
+    onProgress,
+    onRecordingStart,
+  } = options;
+
+  const rect = element.getBoundingClientRect();
+  const width = Math.round(rect.width * scale);
+  const height = Math.round(rect.height * scale);
+
+  const gif = new GIF({
+    workers: 2,
+    quality: gifQuality,
+    width,
+    height,
+    workerScript: '/gif.worker.js',
+  });
+
+  const minFrameInterval = 1000 / targetFps;
+  let lastFrameTime = 0;
+  let frameCount = 0;
+  let rafId: number | null = null;
+  let capturing = true;
+
+  // Start capture loop
+  const captureLoop = async (timestamp: number) => {
+    if (!capturing) return;
+
+    const delta = timestamp - lastFrameTime;
+    if (delta >= minFrameInterval) {
+      try {
+        const canvas = await toCanvas(element, {
+          pixelRatio: scale,
+          backgroundColor,
+          filter: exportFilter,
+        });
+        gif.addFrame(canvas, { delay: Math.round(delta) || Math.round(minFrameInterval), copy: true });
+        frameCount++;
+        lastFrameTime = timestamp;
+      } catch {
+        // Frame capture failed – skip this frame, keep going
+      }
+    }
+
+    if (capturing) {
+      rafId = requestAnimationFrame(captureLoop);
+    }
+  };
+
+  // Kick off
+  onRecordingStart?.();
+  rafId = requestAnimationFrame((ts) => {
+    lastFrameTime = ts;
+    captureLoop(ts);
+  });
+
+  return {
+    stop(): Promise<Blob> {
+      capturing = false;
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+
+      if (frameCount === 0) {
+        return Promise.reject(new Error('No frames were captured'));
+      }
+
+      return new Promise<Blob>((resolve, reject) => {
+        gif.on('progress', (pct: number) => {
+          onProgress?.('encoding', pct);
+        });
+
+        gif.on('finished', (blob: Blob) => {
+          resolve(blob);
+        });
+
+        gif.on('error', (err: Error) => {
+          reject(err);
+        });
+
+        gif.render();
+      });
+    },
+  };
 }
 
 /**

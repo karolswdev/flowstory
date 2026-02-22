@@ -8,7 +8,9 @@
    Base Sticky Note
    ============================================ */
 .es-note {
-  width: 140px;
+  min-width: 160px;
+  max-width: 200px;
+  width: auto;
   min-height: 80px;
   padding: var(--space-3);
   border-radius: var(--radius-sm);
@@ -57,8 +59,8 @@
    Domain Event (Orange)
    ============================================ */
 .es-event-note {
-  background: var(--node-event-border);
-  color: #000;
+  background: var(--es-event);
+  color: var(--color-text);
 }
 
 .es-event-note::before {
@@ -100,8 +102,8 @@
    Command (Blue)
    ============================================ */
 .es-command-note {
-  background: var(--node-system-border);
-  color: #fff;
+  background: var(--es-command);
+  color: var(--color-text-inverse);
 }
 
 .es-command-note::before {
@@ -112,14 +114,14 @@
    Actor (Yellow - Small)
    ============================================ */
 .es-actor-note {
-  background: #FFEB3B;
-  color: #000;
+  background: var(--es-aggregate);
+  color: var(--color-text);
   width: 100px;
   min-height: 60px;
 }
 
 .es-actor-note::before {
-  border-color: transparent #FBC02D transparent transparent;
+  border-color: transparent var(--color-warning) transparent transparent;
 }
 
 .es-actor-icon {
@@ -139,8 +141,8 @@
    Policy (Lilac)
    ============================================ */
 .es-policy-note {
-  background: var(--node-actor-border);
-  color: #000;
+  background: var(--es-policy);
+  color: var(--color-text);
 }
 
 .es-policy-note::before {
@@ -151,8 +153,8 @@
    Read Model (Green)
    ============================================ */
 .es-readmodel-note {
-  background: var(--edge-success);
-  color: #000;
+  background: var(--color-success);
+  color: var(--color-text);
 }
 
 .es-readmodel-note::before {
@@ -163,20 +165,20 @@
    External System (Pink)
    ============================================ */
 .es-external-note {
-  background: #F48FB1;
-  color: #000;
+  background: var(--cost-ai-ml);
+  color: var(--color-text);
 }
 
 .es-external-note::before {
-  border-color: transparent #E91E63 transparent transparent;
+  border-color: transparent var(--color-error) transparent transparent;
 }
 
 /* ============================================
    Hotspot (Red)
    ============================================ */
 .es-hotspot-note {
-  background: var(--edge-error);
-  color: #fff;
+  background: var(--es-hotspot);
+  color: var(--color-text-inverse);
   transform: rotate(-3deg);
 }
 
@@ -301,7 +303,7 @@
 }
 
 [data-theme="dark"] .es-aggregate-name {
-  color: #FFD54F;
+  color: var(--es-aggregate);
 }
 
 /* ============================================
@@ -322,17 +324,64 @@
   min-width: 100%;
   height: auto;
   max-height: calc(100vh - 200px);
+  cursor: grab;
+  user-select: none;
+}
+
+/* Controls hint overlay */
+.es-controls-hint {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 20px;
+  background: rgba(30, 30, 46, 0.88);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 13px;
+  font-family: var(--font-family);
+  font-weight: 500;
+  pointer-events: auto;
+  cursor: pointer;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  white-space: nowrap;
+}
+
+.es-hint-key {
+  display: inline-block;
+  padding: 2px 8px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 5px;
+  font-weight: 700;
+  font-size: 12px;
+  color: #fff;
+  letter-spacing: 0.02em;
+}
+
+.es-hint-sep {
+  color: rgba(255, 255, 255, 0.25);
+  margin: 0 4px;
+}
+
+.es-svg--panning {
+  cursor: grabbing;
 }
 
 .es-note-title {
   font-size: 11px;
   font-weight: var(--fw-semibold);
-  fill: #333;
+  fill: var(--color-text);
 }
 
 .es-note-subtitle {
   font-size: 9px;
-  fill: #666;
+  fill: var(--color-text-secondary);
 }
 
 .es-timeline-label {

@@ -1,0 +1,284 @@
+id: trip-ops-vr-state-machine
+title: "VehicleRun — 16-State Machine Lifecycle"
+description: >
+  The complete VehicleRun lifecycle from SGR creation through driver offer,
+  active route, post-trip validation, settlement, and archival.
+  Four distinct phases — each enforced by VrStateMachine.cs in the Domain layer.
+version: "1.0"
+
+camera:
+  center: [0, 1200]
+  zoom: 0.3
+
+actors:
+  - id: trip-ops
+    name: Trip Operations
+    type: system
+    color: "#059669"
+
+nodes:
+  # ── Phase 1: Pre-Dispatch (x=0, vertical chain, 180px gaps) ──
+  - id: new
+    type: event
+    label: NEW
+    size: m
+    position: { x: 0, y: 0 }
+    data: { variant: info }
+
+  - id: reserved
+    type: action
+    label: RESERVED
+    size: m
+    position: { x: 0, y: 180 }
+
+  - id: offer-queued
+    type: action
+    label: OFFERQUEUED
+    size: m
+    position: { x: 0, y: 360 }
+
+  - id: offer-sent
+    type: action
+    label: OFFERSENT
+    size: m
+    position: { x: 0, y: 540 }
+
+  - id: offer-confirmed
+    type: action
+    label: OFFERCONFIRMED
+    size: m
+    position: { x: 0, y: 720 }
+
+  - id: offer-accepted
+    type: action
+    label: OFFERACCEPTED
+    size: l
+    position: { x: 0, y: 920 }
+    data: { variant: success }
+
+  # ── Phase 2: Active Route (horizontal row, 500px apart, y=1200) ──
+  - id: break
+    type: system
+    label: BREAK
+    size: m
+    position: { x: -700, y: 1200 }
+
+  - id: tostop
+    type: system
+    label: TOSTOP
+    size: l
+    position: { x: -250, y: 1200 }
+
+  - id: atstop
+    type: system
+    label: ATSTOP
+    size: l
+    position: { x: 400, y: 1200 }
+
+  # ── Phase 3: Post-Trip Validation (x=0, 180px gaps, starting y=1500) ──
+  - id: postservice
+    type: state
+    label: POSTSERVICE
+    size: m
+    position: { x: 0, y: 1500 }
+    data: { variant: warning }
+
+  - id: postcompleteness
+    type: state
+    label: POSTCOMPLETENESS
+    size: m
+    position: { x: 0, y: 1680 }
+    data: { variant: warning }
+
+  - id: postreadiness
+    type: state
+    label: POSTREADINESS
+    size: m
+    position: { x: 0, y: 1860 }
+    data: { variant: warning }
+
+  # ── Phase 4: Settlement (x=0, 180px gaps, starting y=2100) ──
+  - id: booked
+    type: state
+    label: BOOKED
+    size: l
+    position: { x: 0, y: 2100 }
+    data: { variant: success }
+
+  - id: settled
+    type: state
+    label: SETTLED
+    size: l
+    position: { x: 0, y: 2280 }
+    data: { variant: success }
+
+  - id: archived
+    type: event
+    label: ARCHIVED
+    size: m
+    position: { x: 0, y: 2460 }
+    data: { variant: info }
+
+  # ── Terminal: Cancellation (far right, vertically centered with offer chain) ──
+  - id: cancelled
+    type: event
+    label: CANCELLED
+    size: l
+    position: { x: 700, y: 550 }
+    data: { variant: danger }
+
+edges:
+  # Pre-Dispatch chain
+  - { id: e1,  source: new,              target: reserved,         type: flow }
+  - { id: e2,  source: reserved,         target: offer-queued,     type: flow }
+  - { id: e3,  source: offer-queued,     target: offer-sent,       type: flow }
+  - { id: e4,  source: offer-sent,       target: offer-confirmed,  type: flow }
+  - { id: e5,  source: offer-confirmed,  target: offer-accepted,   type: flow }
+
+  # Active Route
+  - { id: e6,  source: offer-accepted,   target: tostop,           type: flow,  label: StartVr }
+  - { id: e7,  source: tostop,           target: atstop,           type: flow,  label: ArriveAtStop }
+  - { id: e8,  source: atstop,           target: tostop,           type: flow,  label: DepartStop }
+  - { id: e9,  source: tostop,           target: break,            type: flow }
+  - { id: e10, source: break,            target: tostop,           type: flow,  label: Resume }
+
+  # Post-Trip
+  - { id: e11, source: tostop,           target: postservice,      type: flow,  label: PostService }
+  - { id: e12, source: postservice,      target: postcompleteness, type: flow }
+  - { id: e13, source: postcompleteness, target: postreadiness,    type: flow }
+  - { id: e14, source: postreadiness,    target: booked,           type: flow,  label: CompleteVr }
+
+  # Settlement
+  - { id: e15, source: booked,           target: settled,          type: flow }
+  - { id: e16, source: settled,          target: archived,         type: flow }
+
+  # Cancellation paths
+  - { id: ec1, source: new,              target: cancelled,        type: error }
+  - { id: ec2, source: reserved,         target: cancelled,        type: error }
+  - { id: ec3, source: offer-accepted,   target: cancelled,        type: error }
+  - { id: ec4, source: tostop,           target: cancelled,        type: error }
+
+steps:
+  - id: step-1
+    title: "A Vehicle Run is Born"
+    narrative: >
+      Every VehicleRun starts in NEW — created either by the nightly SGR generation
+      (SubscriptionRun templates → VRs) or manually via CreateAdHocTripCommand.
+      The 16-state machine in VrStateMachine.cs governs every transition from here.
+    nodeIds: [new]
+    edgeIds: []
+    camera:
+      center: [0, 0]
+      zoom: 1.2
+      transition: 400
+    duration: 5000
+    narration:
+      speaker: Architect
+      message: "Every VR begins here. NEW is the genesis state — created by SGR or ad-hoc dispatch."
+
+  - id: step-2
+    title: "Pre-Dispatch: The Offer Negotiation"
+    narrative: >
+      The Assignment BC matches a driver to this VR. Then the 4-step offer
+      workflow unfolds: ReserveVr → QueueOffer → SendOffer (push notification
+      to driver) → ConfirmOffer → AcceptOffer. Each transition is guarded
+      by VrStateMachine.CanTransition().
+    nodeIds: [new, reserved, offer-queued, offer-sent, offer-confirmed, offer-accepted]
+    edgeIds: [e1, e2, e3, e4, e5]
+    camera:
+      center: [0, 460]
+      zoom: 0.45
+      transition: 500
+    duration: 6000
+    narration:
+      speaker: Domain Expert
+      message: "Six states just for pre-dispatch. The offer workflow ensures drivers explicitly accept before they're committed."
+
+  - id: step-3
+    title: "Active Route: Stop-to-Stop Cycling"
+    narrative: >
+      Once accepted, StartVrCommand transitions to TOSTOP. The driver cycles
+      between TOSTOP ↔ ATSTOP as they navigate from pickup to dropoff.
+      This is the real-time phase — GPS telemetry flows in every 30 seconds,
+      SignalR broadcasts to the dispatch board, parents see live ETAs.
+    nodeIds: [offer-accepted, tostop, atstop, break]
+    edgeIds: [e6, e7, e8, e9, e10]
+    camera:
+      center: [0, 1150]
+      zoom: 0.5
+      transition: 500
+    duration: 6000
+    narration:
+      speaker: Domain Expert
+      message: "This is the operational heartbeat. TOSTOP and ATSTOP cycle for every stop on the route. BREAK allows driver rest periods."
+
+  - id: step-4
+    title: "Post-Trip: 3-Step Validation Chain"
+    narrative: >
+      After the last stop, AdvanceToPostService kicks off the Conductor-orchestrated
+      post-trip pipeline: POSTSERVICE → POSTCOMPLETENESS → POSTREADINESS.
+      Each step validates data quality — were all students accounted for?
+      Are GPS trails complete? Is billing data ready?
+    nodeIds: [postservice, postcompleteness, postreadiness]
+    edgeIds: [e11, e12, e13]
+    camera:
+      center: [0, 1680]
+      zoom: 0.55
+      transition: 500
+    duration: 5000
+    narration:
+      speaker: Architecture Lead
+      message: "The 3-step post-trip chain is orchestrated by Conductor. Each step must pass before the VR can be booked for settlement."
+
+  - id: step-5
+    title: "Settlement & Archive"
+    narrative: >
+      CompleteVr transitions to BOOKED — settlement-ready. The Settlement BC
+      processes BC/PD/PM calculations. Once settled, the VR moves to ARCHIVED —
+      a terminal state with an empty allowed-transitions list. The journey is complete.
+    nodeIds: [booked, settled, archived]
+    edgeIds: [e14, e15, e16]
+    camera:
+      center: [0, 2280]
+      zoom: 0.55
+      transition: 500
+    duration: 5000
+    narration:
+      speaker: Architect
+      message: "BOOKED to SETTLED to ARCHIVED. Three states, one direction, no going back. Terminal states have empty transition lists."
+
+  - id: step-6
+    title: "The Escape Hatch: Cancellation"
+    narrative: >
+      CANCELLED is reachable from NEW, RESERVED, OFFERACCEPTED, and TOSTOP.
+      Once cancelled, the transition list is empty — no resurrection.
+      Cancellation triggers VrCancelledEvent, which the Assignment BC
+      consumes to re-match affected students.
+    nodeIds: [cancelled]
+    edgeIds: [ec1, ec2, ec3, ec4]
+    camera:
+      center: [350, 550]
+      zoom: 0.35
+      transition: 500
+    duration: 5000
+    narration:
+      speaker: Domain Expert
+      message: "Cancellation is irreversible. It fires VrCancelledEvent — the Assignment BC re-matches all affected passenger trips."
+
+  - id: step-7
+    title: "The Complete VR Lifecycle"
+    narrative: >
+      16 states. 4 phases. One static Dictionary<VrStatus, List<VrStatus>>.
+      Every transition validated in the domain layer before any persistence occurs.
+      Invalid transitions raise DomainException — not a database error, not a 500.
+      This is ADR-008's transition matrix pattern in its canonical form.
+    nodeIds: [new, reserved, offer-queued, offer-sent, offer-confirmed, offer-accepted, tostop, atstop, break, postservice, postcompleteness, postreadiness, booked, settled, archived, cancelled]
+    edgeIds: [e1, e2, e3, e4, e5, e6, e7, e8, e9, e10, e11, e12, e13, e14, e15, e16, ec1, ec2, ec3, ec4]
+    camera:
+      center: [0, 1100]
+      zoom: 0.18
+      transition: 600
+    duration: 6000
+    narration:
+      speaker: Architecture Lead
+      message: "The full 16-state VehicleRun lifecycle — the most complex state machine in the platform."

@@ -1,5 +1,5 @@
 import { memo, useState } from 'react';
-import { Handle, Position } from '@xyflow/react';
+import { NodeHandles } from '../nodes/NodeHandles';
 import { motion, AnimatePresence } from 'motion/react';
 import type { ArtifactType, ChildArtifact } from '../../schemas/bc-deployment';
 import { ARTIFACT_ICONS, ARTIFACT_COLORS } from '../../schemas/bc-deployment';
@@ -159,11 +159,7 @@ export const ArtifactNode = memo(function ArtifactNode({ data, selected }: Artif
         {artifactType.replace('-', ' ')}
       </div>
 
-      {/* Handles */}
-      <Handle type="target" position={Position.Left} className="artifact-handle" />
-      <Handle type="source" position={Position.Right} className="artifact-handle" />
-      <Handle type="target" position={Position.Top} className="artifact-handle" />
-      <Handle type="source" position={Position.Bottom} className="artifact-handle" />
+      <NodeHandles />
     </motion.div>
   );
 });

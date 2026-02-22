@@ -72,11 +72,11 @@ export function getBestHandles(
 ): [string, string] {
   const dx = targetPos.x - sourcePos.x;
   const dy = targetPos.y - sourcePos.y;
-  
+
   // Determine primary direction
   const absDx = Math.abs(dx);
   const absDy = Math.abs(dy);
-  
+
   if (absDy > absDx) {
     // Vertical connection preferred
     if (dy > 0) {
@@ -96,4 +96,55 @@ export function getBestHandles(
       return ['source-left', 'target-right'];
     }
   }
+}
+
+/**
+ * Node rectangle for dimension-aware handle selection.
+ */
+export interface NodeRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Dimension-aware smart handle selection.
+ * Computes actual handle anchor points (midpoints of each side) and picks
+ * the source–target pair with the shortest Euclidean distance.
+ * Returns [sourceHandle, targetHandle] ids.
+ */
+export function getSmartHandles(
+  source: NodeRect,
+  target: NodeRect
+): [string, string] {
+  const sourceAnchors = {
+    right:  { x: source.x + source.width,    y: source.y + source.height / 2 },
+    left:   { x: source.x,                    y: source.y + source.height / 2 },
+    bottom: { x: source.x + source.width / 2, y: source.y + source.height },
+    top:    { x: source.x + source.width / 2, y: source.y },
+  };
+  const targetAnchors = {
+    left:   { x: target.x,                    y: target.y + target.height / 2 },
+    right:  { x: target.x + target.width,     y: target.y + target.height / 2 },
+    top:    { x: target.x + target.width / 2, y: target.y },
+    bottom: { x: target.x + target.width / 2, y: target.y + target.height },
+  };
+
+  let bestDist = Infinity;
+  let bestSource = 'right';
+  let bestTarget = 'left';
+
+  for (const [sKey, sPos] of Object.entries(sourceAnchors)) {
+    for (const [tKey, tPos] of Object.entries(targetAnchors)) {
+      const dist = Math.hypot(tPos.x - sPos.x, tPos.y - sPos.y);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestSource = sKey;
+        bestTarget = tKey;
+      }
+    }
+  }
+
+  return [`source-${bestSource}`, `target-${bestTarget}`];
 }

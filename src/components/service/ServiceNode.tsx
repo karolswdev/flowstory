@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { Handle, Position } from '@xyflow/react';
+import { NodeHandles } from '../nodes/NodeHandles';
 import { motion } from 'framer-motion';
 import type { ServiceDef, HealthStatus, ServiceType } from '../../schemas/service-flow';
 import {
@@ -61,8 +61,8 @@ export const ServiceNode = memo(function ServiceNode({ data, selected }: Service
       }}
       transition={{ duration: 0.2 }}
     >
-      <Handle type="target" position={Position.Top} className="service-handle" />
-      
+      <NodeHandles />
+
       <div className="service-node__header">
         <span className="service-node__icon">{icon}</span>
         <span className="service-node__name">{name}</span>
@@ -92,7 +92,6 @@ export const ServiceNode = memo(function ServiceNode({ data, selected }: Service
         </div>
       )}
       
-      <Handle type="source" position={Position.Bottom} className="service-handle" />
     </motion.div>
   );
 });
