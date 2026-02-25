@@ -23,6 +23,11 @@ const THEME_STORAGE_KEY = 'user-story-viz-theme';
 function applyThemeToDocument(theme: ThemeTokens) {
   const root = document.documentElement;
 
+  // Typography
+  root.style.setProperty('--font-family', theme.fontFamily);
+  root.style.setProperty('--font-family-display', theme.fontFamilyDisplay);
+  root.style.setProperty('--font-family-mono', theme.fontFamilyMono);
+
   // Brand
   root.style.setProperty('--color-primary', theme.primary);
   root.style.setProperty('--color-primary-hover', theme.primaryHover);
@@ -90,11 +95,17 @@ export interface ThemeProviderProps {
   children: ReactNode;
   /** Default theme */
   defaultTheme?: 'light' | 'dark';
+  /** Force theme — overrides localStorage and system preference (for embeds) */
+  forceTheme?: 'light' | 'dark';
 }
 
-export function ThemeProvider({ children, defaultTheme = 'light' }: ThemeProviderProps) {
+export function ThemeProvider({ children, defaultTheme = 'light', forceTheme }: ThemeProviderProps) {
   const [themeName, setThemeName] = useState<'light' | 'dark'>(() => {
-    // Check localStorage first
+    // URL-forced theme overrides everything (for iframe embeds)
+    if (forceTheme) {
+      return forceTheme;
+    }
+    // Check localStorage
     if (typeof window !== 'undefined') {
       const stored = localStorage.getItem(THEME_STORAGE_KEY);
       if (stored === 'light' || stored === 'dark') {

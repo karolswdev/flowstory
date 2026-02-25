@@ -1,0 +1,213 @@
+id: cinematic-camera
+title: "Cinematic Camera — Override Showcase"
+renderer: service-flow
+schemaVersion: "2.0"
+description: "Demonstrates per-step camera overrides: slow zoom, fitAll, easing, manual pan"
+
+services:
+  - id: client
+    name: Mobile App
+    type: client
+    technology: React Native
+
+  - id: lb
+    name: Load Balancer
+    type: load-balancer
+    technology: Nginx
+
+  - id: auth
+    name: Auth Service
+    type: api
+    technology: Go
+    substates: [idle, authenticating, verified]
+    initialSubstate: idle
+
+  - id: api
+    name: API Gateway
+    type: gateway
+    technology: Kong
+
+  - id: user-svc
+    name: User Service
+    type: api
+    technology: Node.js
+
+  - id: order-svc
+    name: Order Service
+    type: api
+    technology: Java
+
+  - id: payment-svc
+    name: Payment Service
+    type: api
+    technology: Python
+
+  - id: user-db
+    name: User DB
+    type: database
+    technology: PostgreSQL
+
+  - id: order-db
+    name: Order DB
+    type: database
+    technology: MongoDB
+
+  - id: events
+    name: Event Stream
+    type: event-bus
+    technology: Kafka
+
+  - id: analytics
+    name: Analytics
+    type: monitor
+    technology: Datadog
+
+calls:
+  - id: client-to-lb
+    type: sync
+    from: client
+    to: lb
+    method: POST
+    path: /api/*
+
+  - id: lb-to-auth
+    type: sync
+    from: lb
+    to: auth
+    method: POST
+    path: /auth/verify
+
+  - id: lb-to-api
+    type: sync
+    from: lb
+    to: api
+    method: POST
+    path: /api/*
+
+  - id: api-to-users
+    type: sync
+    from: api
+    to: user-svc
+    method: GET
+    path: /users/{id}
+
+  - id: api-to-orders
+    type: sync
+    from: api
+    to: order-svc
+    method: POST
+    path: /orders
+
+  - id: order-to-payment
+    type: sync
+    from: order-svc
+    to: payment-svc
+    method: POST
+    path: /payments/charge
+
+  - id: users-to-db
+    type: sync
+    from: user-svc
+    to: user-db
+    method: SELECT
+    path: users
+
+  - id: orders-to-db
+    type: sync
+    from: order-svc
+    to: order-db
+    method: INSERT
+    path: orders
+
+  - id: order-events
+    type: publish
+    from: order-svc
+    to: events
+    messageType: OrderCreated
+
+  - id: events-to-analytics
+    type: subscribe
+    from: events
+    to: analytics
+    messageType: OrderCreated
+    action: trackMetrics
+
+steps:
+  - id: step-1
+    title: "Overview — Fit All"
+    narrative: >-
+      Starting with a **bird's-eye view** of the entire architecture.
+      Camera uses `fitAll: true` with a slow ease-in-out transition.
+    activeCalls: [client-to-lb, lb-to-auth, lb-to-api, api-to-users, api-to-orders, order-to-payment, users-to-db, orders-to-db, order-events, events-to-analytics]
+    focusNodes: []
+    camera:
+      fitAll: true
+      duration: 2000
+      easing: ease-in-out
+
+  - id: step-2
+    title: "Slow Zoom — Entry Point"
+    narrative: >-
+      A **slow dramatic zoom** into the client entry point.
+      Camera uses `zoom: 1.8` with `ease-in` over 2.5 seconds.
+    activeCalls: [client-to-lb]
+    focusNodes: [client, lb]
+    substates:
+      auth: idle
+    camera:
+      zoom: 1.8
+      duration: 2500
+      easing: ease-in
+
+  - id: step-3
+    title: "Authentication — Spring Overshoot"
+    narrative: >-
+      The load balancer verifies the token. Camera uses the default
+      **spring-overshoot** easing for a cinematic snap to the auth service.
+    activeCalls: [lb-to-auth]
+    focusNodes: [lb, auth]
+    substates:
+      auth: authenticating
+    camera:
+      zoom: 1.5
+      duration: 800
+      easing: spring-overshoot
+
+  - id: step-4
+    title: "API Routing — Linear Pan"
+    narrative: >-
+      After auth, the gateway routes requests. Camera uses `linear` easing
+      for a smooth, consistent tracking shot across the API layer.
+    activeCalls: [lb-to-api, api-to-users, api-to-orders]
+    focusNodes: [api, user-svc, order-svc]
+    substates:
+      auth: verified
+    camera:
+      zoom: 1.2
+      duration: 1500
+      easing: linear
+
+  - id: step-5
+    title: "Deep Dive — Order Processing"
+    narrative: >-
+      Zooming deep into order processing with `ease-out` — starts fast,
+      settles gently. Shows payment and persistence in detail.
+    activeCalls: [order-to-payment, orders-to-db]
+    focusNodes: [order-svc, payment-svc, order-db]
+    camera:
+      zoom: 1.6
+      duration: 1200
+      easing: ease-out
+
+  - id: step-6
+    title: "Pull Back — Event Architecture"
+    narrative: >-
+      Pulling back to reveal the **event-driven** side of the architecture.
+      Camera uses `fitAll` with generous padding for context.
+    activeCalls: [order-events, events-to-analytics]
+    focusNodes: [events, analytics]
+    camera:
+      fitAll: true
+      duration: 2000
+      easing: ease-in-out
+      padding: 150

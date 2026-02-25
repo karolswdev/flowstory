@@ -9,7 +9,9 @@
   /* ============================================
      Typography
      ============================================ */
-  --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-family-display: 'DM Sans', 'Plus Jakarta Sans', sans-serif;
+  --font-family-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
 
   /* Scale (1.25 ratio) */
   --fs-xs: 10px;
@@ -202,6 +204,87 @@
   --svc-cdn: #78716c;
   --svc-storage: #14b8a6;
 
+  /* Service-Flow — Per-type border colors */
+  --svc-border-api: #3b82f6;
+  --svc-border-database: #78716c;
+  --svc-border-event-bus: #f97316;
+  --svc-border-gateway: #f59e0b;
+  --svc-border-external: #64748b;
+  --svc-border-worker: #a855f7;
+  --svc-border-workflow: #ec4899;
+  --svc-border-cache: #06b6d4;
+  --svc-border-event-processor: #8b5cf6;
+  --svc-border-client: #6366f1;
+  --svc-border-firewall: #f43f5e;
+  --svc-border-load-balancer: #14b8a6;
+  --svc-border-scheduler: #d97706;
+  --svc-border-storage: #a8a29e;
+  --svc-border-function: #ea580c;
+  --svc-border-monitor: #10b981;
+  --svc-border-human-task: #ec4899;
+  --svc-border-event-stream: #0891b2;
+  /* Domain-level types */
+  --svc-border-entity: #0ea5e9;
+  --svc-border-aggregate: #4f46e5;
+  --svc-border-value-object: #84cc16;
+  --svc-border-domain-event: #f59e0b;
+  --svc-border-policy: #e11d48;
+  --svc-border-read-model: #06b6d4;
+  --svc-border-saga: #7c3aed;
+  --svc-border-repository: #57534e;
+  --svc-border-bounded-context: #059669;
+  --svc-border-actor: #db2777;
+
+  /* Event Stream glow palette — the "fusing colors" */
+  --es-glow-1: #06b6d4;
+  --es-glow-2: #8b5cf6;
+  --es-glow-3: #ec4899;
+  --es-glow-4: #f59e0b;
+  --es-glow-5: #22c55e;
+
+  /* Service-Flow — Per-type glow colors (light theme) */
+  --svc-glow-blue: rgba(59, 130, 246, 0.5);
+  --svc-glow-blue-strong: rgba(59, 130, 246, 0.6);
+  --svc-glow-blue-subtle: rgba(59, 130, 246, 0.15);
+  --svc-glow-purple: rgba(168, 85, 247, 0.5);
+  --svc-glow-purple-strong: rgba(168, 85, 247, 0.6);
+  --svc-glow-purple-subtle: rgba(168, 85, 247, 0.15);
+  --svc-glow-stone: rgba(120, 113, 108, 0.4);
+  --svc-glow-stone-strong: rgba(120, 113, 108, 0.7);
+  --svc-glow-orange: rgba(249, 115, 22, 0.4);
+  --svc-glow-orange-strong: rgba(249, 115, 22, 0.7);
+  --svc-glow-amber: rgba(245, 158, 11, 0.4);
+  --svc-glow-amber-strong: rgba(245, 158, 11, 0.6);
+  --svc-glow-slate: rgba(100, 116, 139, 0.3);
+  --svc-glow-slate-strong: rgba(100, 116, 139, 0.5);
+  --svc-glow-pink: rgba(236, 72, 153, 0.4);
+  --svc-glow-pink-strong: rgba(236, 72, 153, 0.6);
+  --svc-glow-cyan: rgba(6, 182, 212, 0.4);
+  --svc-glow-cyan-strong: rgba(6, 182, 212, 0.6);
+
+  /* Service-Flow — Component tokens */
+  --svc-queue-header-bg: rgba(168, 85, 247, 0.08);
+  --svc-header-external-bg: rgba(148, 163, 184, 0.1);
+  --svc-node-dark-header-bg: rgba(255, 255, 255, 0.05);
+  --svc-node-dark-border: rgba(255, 255, 255, 0.1);
+  --svc-node-dark-divider: rgba(255, 255, 255, 0.1);
+  --svc-label-dark-bg: rgba(30, 30, 40, 0.85);
+  --svc-label-dark-border: rgba(255, 255, 255, 0.08);
+
+  /* Service-Flow — Zone tokens */
+  --zone-border: rgba(0, 0, 0, 0.12);
+  --zone-label-color: rgba(0, 0, 0, 0.35);
+
+  /* Service-Flow — Edge label shadows */
+  --svc-label-shadow: 0 2px 6px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --svc-label-shadow-dark: 0 2px 8px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
+
+  /* Canvas grid */
+  --grid-line-color: rgba(0, 0, 0, 0.05);
+
+  /* Accent */
+  --color-accent-teal: #2DD4BF;
+
   /* Cost Categories */
   --cost-compute: #3b82f6;
   --cost-storage: #10b981;
@@ -232,6 +315,14 @@
   --adr-deprecated: #f59e0b;
   --adr-superseded: #ef4444;
   --adr-rejected: #ef4444;
+
+  /* ============================================
+     Tag Categories
+     ============================================ */
+  --color-tag-infra: #3B82F6;
+  --color-tag-metric: #22C55E;
+  --color-tag-identity: #A855F7;
+  --color-tag-status: #F59E0B;
 
   /* ============================================
      Shadows — Visible, with depth
@@ -283,21 +374,21 @@
    ============================================ */
 [data-theme="dark"],
 .dark {
-  /* Backgrounds */
-  --color-bg: #0f172a;
-  --color-bg-secondary: #1e293b;
-  --color-bg-tertiary: #334155;
-  --color-bg-elevated: #1e293b;
-  --color-bg-overlay: rgba(0, 0, 0, 0.7);
+  /* Backgrounds — deep navy with blue undertone */
+  --color-bg: #0B0B1F;
+  --color-bg-secondary: #12122B;
+  --color-bg-tertiary: #1C1C3A;
+  --color-bg-elevated: #161635;
+  --color-bg-overlay: rgba(8, 8, 24, 0.8);
 
-  /* Text */
-  --color-text: #f1f5f9;
-  --color-text-secondary: #94a3b8;
-  --color-text-muted: #64748b;
+  /* Text — tuned for navy contrast */
+  --color-text: #E8EAF0;
+  --color-text-secondary: #8B8FAA;
+  --color-text-muted: #5C5F7A;
 
-  /* Borders */
-  --color-border: #334155;
-  --color-border-strong: #475569;
+  /* Borders — subtle white alpha */
+  --color-border: rgba(255, 255, 255, 0.08);
+  --color-border-strong: rgba(255, 255, 255, 0.15);
 
   /* Brand */
   --color-primary: #60a5fa;
@@ -367,12 +458,103 @@
   --edge-success: #4ade80;
   --edge-async: #a78bfa;
 
-  /* Shadows — dark */
-  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.2);
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 10px 20px rgba(0, 0, 0, 0.5);
-  --shadow-xl: 0 20px 30px rgba(0, 0, 0, 0.6);
+  /* Tag Categories — dark */
+  --color-tag-infra: #93C5FD;
+  --color-tag-metric: #86EFAC;
+  --color-tag-identity: #C4B5FD;
+  --color-tag-status: #FCD34D;
+
+  /* Service-Flow — Per-type border colors (dark — brighter variants) */
+  --svc-border-api: #60a5fa;
+  --svc-border-database: #a8a29e;
+  --svc-border-event-bus: #fb923c;
+  --svc-border-gateway: #fbbf24;
+  --svc-border-external: #94a3b8;
+  --svc-border-worker: #c084fc;
+  --svc-border-workflow: #f472b6;
+  --svc-border-cache: #22d3ee;
+  --svc-border-event-processor: #a78bfa;
+  --svc-border-client: #818cf8;
+  --svc-border-firewall: #fb7185;
+  --svc-border-load-balancer: #2dd4bf;
+  --svc-border-scheduler: #fbbf24;
+  --svc-border-storage: #d6d3d1;
+  --svc-border-function: #fb923c;
+  --svc-border-monitor: #34d399;
+  --svc-border-human-task: #f472b6;
+  --svc-border-event-stream: #22d3ee;
+  /* Domain-level types (dark — brighter variants) */
+  --svc-border-entity: #38bdf8;
+  --svc-border-aggregate: #818cf8;
+  --svc-border-value-object: #a3e635;
+  --svc-border-domain-event: #fbbf24;
+  --svc-border-policy: #fb7185;
+  --svc-border-read-model: #22d3ee;
+  --svc-border-saga: #a78bfa;
+  --svc-border-repository: #a8a29e;
+  --svc-border-bounded-context: #34d399;
+  --svc-border-actor: #f472b6;
+
+  /* Event Stream glow palette (dark — brighter) */
+  --es-glow-1: #22d3ee;
+  --es-glow-2: #a78bfa;
+  --es-glow-3: #f472b6;
+  --es-glow-4: #fbbf24;
+  --es-glow-5: #4ade80;
+
+  /* Service-Flow — Per-type glow colors (dark — boosted for deep navy canvas) */
+  --svc-glow-blue: rgba(96, 165, 250, 0.6);
+  --svc-glow-blue-strong: rgba(96, 165, 250, 0.8);
+  --svc-glow-blue-subtle: rgba(96, 165, 250, 0.25);
+  --svc-glow-purple: rgba(192, 132, 252, 0.6);
+  --svc-glow-purple-strong: rgba(192, 132, 252, 0.8);
+  --svc-glow-purple-subtle: rgba(192, 132, 252, 0.25);
+  --svc-glow-stone: rgba(168, 162, 158, 0.5);
+  --svc-glow-stone-strong: rgba(168, 162, 158, 0.8);
+  --svc-glow-orange: rgba(251, 146, 60, 0.5);
+  --svc-glow-orange-strong: rgba(251, 146, 60, 0.8);
+  --svc-glow-amber: rgba(251, 191, 36, 0.5);
+  --svc-glow-amber-strong: rgba(251, 191, 36, 0.7);
+  --svc-glow-slate: rgba(148, 163, 184, 0.4);
+  --svc-glow-slate-strong: rgba(148, 163, 184, 0.6);
+  --svc-glow-pink: rgba(244, 114, 182, 0.5);
+  --svc-glow-pink-strong: rgba(244, 114, 182, 0.7);
+  --svc-glow-cyan: rgba(34, 211, 238, 0.5);
+  --svc-glow-cyan-strong: rgba(34, 211, 238, 0.7);
+
+  /* Service-Flow — Component tokens (dark) */
+  --svc-queue-header-bg: rgba(192, 132, 252, 0.15);
+  --svc-header-external-bg: rgba(148, 163, 184, 0.12);
+  --svc-node-dark-header-bg: rgba(255, 255, 255, 0.05);
+  --svc-node-dark-border: rgba(255, 255, 255, 0.1);
+  --svc-node-dark-divider: rgba(255, 255, 255, 0.1);
+  --svc-label-dark-bg: rgba(30, 30, 40, 0.85);
+  --svc-label-dark-border: rgba(255, 255, 255, 0.08);
+
+  /* Service-Flow — Zone tokens (dark) — adjusted for darker canvas */
+  --zone-border: rgba(255, 255, 255, 0.06);
+  --zone-label-color: rgba(255, 255, 255, 0.25);
+
+  /* Service-Flow — Edge label shadows (dark) */
+  --svc-label-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
+  --svc-label-shadow-dark: 0 2px 8px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
+
+  /* Shadows — dark, layered depth */
+  --shadow-xs: 0 1px 3px rgba(0,0,0,0.5), 0 0 1px rgba(0,0,0,0.4);
+  --shadow-sm: 0 2px 6px rgba(0,0,0,0.5), 0 0 2px rgba(0,0,0,0.3), 0 0 20px rgba(10,10,40,0.3);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.6), 0 0 4px rgba(0,0,0,0.3), 0 0 30px rgba(10,10,40,0.25);
+  --shadow-lg: 0 8px 24px rgba(0,0,0,0.6), 0 0 6px rgba(0,0,0,0.3), 0 0 40px rgba(15,15,50,0.2);
+  --shadow-xl: 0 16px 40px rgba(0,0,0,0.7), 0 0 8px rgba(0,0,0,0.4);
+
+  /* Canvas grid — dark */
+  --grid-line-color: rgba(255, 255, 255, 0.025);
+
+  /* Accent — dark */
+  --color-accent-teal: #5EEAD4;
+
+  /* Service-Flow — Edge label shadows (dark — deeper) */
+  --svc-label-shadow: 0 2px 8px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(0, 0, 0, 0.3);
+  --svc-label-shadow-dark: 0 2px 8px rgba(0, 0, 0, 0.5), 0 0 1px rgba(255, 255, 255, 0.04);
 }
 
 /* ============================================

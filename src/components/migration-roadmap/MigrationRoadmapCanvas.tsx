@@ -10,6 +10,7 @@ interface MigrationRoadmapCanvasProps {
   story: MigrationRoadmapStory;
   currentStepIndex: number;
   onStepChange?: (step: number) => void;
+  hideOverlay?: boolean;
 }
 
 function PhaseCard({ phase, tasks, isHighlighted, delay = 0 }: {
@@ -51,7 +52,7 @@ function PhaseCard({ phase, tasks, isHighlighted, delay = 0 }: {
   );
 }
 
-export function MigrationRoadmapCanvas({ story, currentStepIndex, onStepChange }: MigrationRoadmapCanvasProps) {
+export function MigrationRoadmapCanvas({ story, currentStepIndex, onStepChange, hideOverlay = false }: MigrationRoadmapCanvasProps) {
   const currentStep = story.steps[currentStepIndex] as MigrationRoadmapStep | undefined;
   
   const highlightedPhases = useMemo(() => 
@@ -74,6 +75,8 @@ export function MigrationRoadmapCanvas({ story, currentStepIndex, onStepChange }
       stepTitle={currentStep?.title}
       stepDescription={currentStep?.description}
       onStepChange={onStepChange}
+      showInfo={!hideOverlay}
+      showNav={!hideOverlay}
       infoClassName="migration-info"
       navClassName="migration-nav"
     >

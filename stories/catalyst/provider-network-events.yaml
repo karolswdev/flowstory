@@ -1,0 +1,346 @@
+id: provider-network-events
+title: "Provider Network — Event Architecture & Compliance Pipeline"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  The Provider Network BC publishes 25 outbound domain events through a transactional outbox
+  and dual-write decorators (ADR-003 Strangler Fig). Events fan out to Assignment, Compliance,
+  Trip Operations, and Communications. The credential and compliance pipeline enforces insurance
+  expiration tracking, the 8-state EmploymentStatus state machine with auto-suspension triggers,
+  and PII protection via encrypted SSN storage and masked event payloads.
+
+sections:
+  # -- Section 1: Event Fanout & Strangler Fig --------------------------------------
+  - renderer: service-flow
+    title: "Event Fanout & Strangler Fig"
+    accentColor: "#A855F7"
+    layout: sequence
+
+    services:
+      - id: provider-api
+        name: "Provider Network API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: provider-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: rhapsody
+        name: "Rhapsody (Legacy)"
+        type: external
+        technology: "Legacy MTCP"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+      - id: assignment-ep
+        name: "Assignment Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: compliance-ep
+        name: "Compliance Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: trip-ops-ep
+        name: "Trip Operations Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: comms-ep
+        name: "Communications Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+
+    zones:
+      - id: dual-write-zone
+        label: "Dual-Write (Strangler Fig)"
+        members: [provider-api, provider-db, rhapsody]
+        color: "rgba(168, 85, 247, 0.06)"
+      - id: event-consumers
+        label: "Event Consumers"
+        members: [asb, assignment-ep, compliance-ep, trip-ops-ep, comms-ep]
+        color: "rgba(59, 130, 246, 0.06)"
+
+    calls:
+      - id: command-handler
+        type: sync
+        from: provider-api
+        to: provider-db
+        method: POST
+        path: "providers + vehicles + outbox_messages (atomic)"
+        duration: 80
+        description: "Command handler persists aggregate state + outbox_messages in single PostgreSQL transaction. ProviderDbContext implements IOutboxDbContext."
+      - id: dual-write-rhapsody
+        type: sync
+        from: provider-api
+        to: rhapsody
+        method: POST
+        path: "RhapsodyProviderAdapter / RhapsodyVehicleAdapter"
+        protocol: http
+        duration: 200
+        status: 200
+        description: "ADR-003 dual-write decorators: OnboardProviderDualWriteDecorator, RegisterVehicleDualWriteDecorator, DualWriteProviderCommandDecorator, DualWriteVehicleCommandDecorator. Writes to legacy Rhapsody in parallel."
+      - id: outbox-relay
+        type: publish
+        from: provider-db
+        to: asb
+        messageType: "25 outbound event types"
+        payload:
+          description: "Transactional outbox relay publishes events from outbox_messages table to provider-network-and-assignment ASB topic."
+      - id: assignment-subscribe
+        type: subscribe
+        from: asb
+        to: assignment-ep
+        messageType: "ProviderSuspendedEvent, ProviderTerminatedEvent, VehicleCapacityUpdatedEvent, ServiceProviderCapacityChangedEvent"
+        action: "Update provider availability pool. Remove suspended/terminated providers from matching. Recalculate capacity."
+      - id: compliance-subscribe
+        type: subscribe
+        from: asb
+        to: compliance-ep
+        messageType: "CredentialExpiredEvent, CredentialExpiringEvent, ServiceProviderComplianceExpiredEvent"
+        action: "Track credential status. Trigger compliance alerts. Update eligibility rules."
+      - id: trip-ops-subscribe
+        type: subscribe
+        from: asb
+        to: trip-ops-ep
+        messageType: "ProviderSuspendedEvent, ProviderTerminatedEvent, AvailabilityChangedEvent"
+        action: "Reassign affected VRs. Update driver availability for scheduling."
+      - id: comms-subscribe
+        type: subscribe
+        from: asb
+        to: comms-ep
+        messageType: "CredentialExpiringEvent, InspectionReminderEvent, ServiceProviderContractRenewedEvent"
+        action: "Send expiration warnings via Twilio/SendGrid. Notify providers of contract renewals."
+
+    steps:
+      - id: event-step-1
+        title: "Transactional Outbox & Dual-Write"
+        narrative: >
+          Every write operation in Provider Network follows the same pattern: the command handler
+          persists aggregate state and **outbox_messages** in a single PostgreSQL transaction via
+          `ProviderDbContext` (implements `IOutboxDbContext`). The outbox relay publishes events
+          to the `provider-network-and-assignment` ASB topic. In parallel, **ADR-003 Strangler Fig**
+          dual-write decorators forward mutations to legacy Rhapsody — `OnboardProviderDualWriteDecorator`,
+          `RegisterVehicleDualWriteDecorator`, and generic `DualWriteProviderCommandDecorator` /
+          `DualWriteVehicleCommandDecorator`. The adapters (`RhapsodyProviderAdapter`,
+          `RhapsodyVehicleAdapter`) translate Catalyst domain objects to Rhapsody's data format.
+          Dual-write is fire-and-forget — Rhapsody failures do not block Catalyst commits.
+        activeCalls: [command-handler, dual-write-rhapsody]
+        revealNodes: [provider-api, provider-db, rhapsody]
+        duration: 5000
+      - id: event-step-2
+        title: "Outbox Relay & Topic Fanout"
+        narrative: >
+          The outbox relay publishes **25 outbound event types** to ASB. Key event categories:
+          **Provider lifecycle** (Onboarded, Approved, Suspended, Reinstated, Terminated),
+          **ServiceProvider lifecycle** (Onboarded, Activated, Suspended, Terminated, ContractRenewed,
+          ComplianceExpired, CapacityChanged), **Vehicle fleet** (Registered, InspectionUpdated,
+          Decommissioned, CapacityUpdated), **Driver-specific** (LicenseUpdated, PerformanceUpdated,
+          DesignatedAsMonitor, MonitorDesignationRemoved), **Credential** (Expired, Expiring,
+          DocumentUploaded), **Dispatch area** (Created, ProviderAssignedToDa), **Availability**
+          (Changed), **Inspection** (Reminder). All events carry `TenantId` for downstream
+          multi-tenant isolation.
+        activeCalls: [outbox-relay]
+        revealNodes: [asb]
+        revealCalls: [command-handler, dual-write-rhapsody]
+        duration: 5000
+      - id: event-step-3
+        title: "Four-Consumer Fanout"
+        narrative: >
+          Assignment BC consumes provider suspension/termination events to remove providers from the
+          matching pool, and capacity events to recalculate supply. Compliance BC tracks credential
+          expiration and compliance lapses. Trip Operations consumes availability changes and provider
+          status events to reassign affected VehicleRuns. Communications BC sends expiration warnings
+          and contract renewal notifications. Each consumer uses Redis-based idempotency (1-hour TTL)
+          to prevent duplicate processing. The event payloads are self-contained — no cross-service
+          queries needed downstream.
+        activeCalls: [assignment-subscribe, compliance-subscribe, trip-ops-subscribe, comms-subscribe]
+        revealNodes: [assignment-ep, compliance-ep, trip-ops-ep, comms-ep]
+        revealCalls: [outbox-relay]
+        duration: 6000
+      - id: event-step-4
+        title: "Next: Credential & Compliance Pipeline"
+        narrative: >
+          Beyond event fanout, the Provider Network enforces a continuous compliance pipeline.
+          Insurance policies expire, credentials lapse, and the **EmploymentStatus** state machine
+          has automated suspension triggers. The next section traces the credential lifecycle,
+          the insurance expiration tracking (InsurancePolicy VO with 5 coverage types), and the
+          PII protection layer that ensures encrypted SSN storage and masked event payloads
+          never leak sensitive data outside the bounded context.
+        activeCalls: []
+        focusNodes: [provider-api]
+        revealCalls: [assignment-subscribe, compliance-subscribe, trip-ops-subscribe, comms-subscribe]
+        duration: 4000
+
+  # -- Section 2: Credential & Compliance Pipeline ----------------------------------
+  - renderer: service-flow
+    title: "Credential & Compliance Pipeline"
+    accentColor: "#EF4444"
+    layout: sequence
+
+    services:
+      - id: provider-api
+        name: "Provider Network API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: provider-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: pii-service
+        name: "PII Encryption Service"
+        type: service
+        technology: "Data Protection API"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+      - id: compliance-ep
+        name: "Compliance Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: provider-ep
+        name: "Provider Network Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+
+    zones:
+      - id: compliance-core
+        label: "Compliance Engine"
+        members: [provider-api, provider-db, pii-service]
+        color: "rgba(239, 68, 68, 0.06)"
+      - id: compliance-consumers
+        label: "Compliance Consumers"
+        members: [asb, compliance-ep, provider-ep]
+        color: "rgba(234, 179, 8, 0.06)"
+
+    calls:
+      - id: credential-expiration-scan
+        type: sync
+        from: provider-api
+        to: provider-db
+        method: GET
+        path: "CredentialExpirationJob — credentials WHERE expiration approaching"
+        duration: 50
+        description: "Background job scans all credentials. CheckExpiration() applies ExpirationDate VO thresholds: Warning at 30 days, Critical at 7 days."
+      - id: inspection-reminder-scan
+        type: sync
+        from: provider-api
+        to: provider-db
+        method: GET
+        path: "InspectionReminderJob — vehicles WHERE inspection expiring"
+        duration: 40
+        description: "Background job scans vehicles with expiring VehicleInspection VO. Raises InspectionReminderEvent."
+      - id: insurance-check
+        type: sync
+        from: provider-api
+        to: provider-db
+        method: PUT
+        path: /v1/providers/{providerId}/insurance/liability
+        protocol: http
+        duration: 100
+        status: 200
+        description: "UpdateProviderInsuranceCommand — InsurancePolicy VO (5 coverage types: CommercialAuto, GeneralLiability, WorkersCompensation, OccupationalAccident, UmbrellaExcess). WithVerification() and WithRenewal() immutable mutations."
+      - id: auto-suspend
+        type: sync
+        from: provider-api
+        to: provider-db
+        method: POST
+        path: "ServiceProvider.Suspend() — auto-trigger on compliance lapse"
+        duration: 60
+        description: "Auto-suspension when: insurance expired, state license expired, contract expired, or failed compliance audit. Transitions Active -> Suspended."
+      - id: encrypt-ssn
+        type: sync
+        from: provider-api
+        to: pii-service
+        method: POST
+        path: "PiiEncryptionService.Encrypt(ssn)"
+        duration: 10
+        description: "SetPiiForBackgroundCheck(dob, ssn) encrypts SSN via Data Protection API. ClearPii() removes after background check completion."
+      - id: mask-events
+        type: publish
+        from: provider-api
+        to: asb
+        messageType: "CredentialExpiredEvent (masked), VehicleRegisteredEvent (masked), DriverLicenseUpdatedEvent (masked)"
+        payload:
+          description: "PII masking helpers: MaskVin(), MaskLicensePlate(), MaskLicenseNumber(), MaskCredentialIdentifier(). SSN never appears in events."
+      - id: provider-ep-consume
+        type: subscribe
+        from: asb
+        to: provider-ep
+        messageType: "CredentialExpiredEvent"
+        action: "Process expired credential notifications. 24-hour dedup via LastExpirationNotificationAt."
+      - id: compliance-ep-consume
+        type: subscribe
+        from: asb
+        to: compliance-ep
+        messageType: "ServiceProviderComplianceExpiredEvent"
+        action: "Update compliance tracking. Flag provider for review."
+
+    steps:
+      - id: compliance-step-1
+        title: "Insurance & Credential Expiration Tracking"
+        narrative: >
+          Two background jobs run continuously. **CredentialExpirationJob** scans all credentials
+          and calls `Credential.CheckExpiration(date)` — the **ExpirationDate** VO provides three
+          severity thresholds: `Valid` (> 30 days), `Warning` (30 days), `Critical` (7 days),
+          `Expired` (past date). **CredentialExpiringEvent** fires at Warning, **CredentialExpiredEvent**
+          at Expired. Notification deduplication uses a 24-hour window via `LastExpirationNotificationAt`
+          to prevent alert storms. **InspectionReminderJob** scans vehicles for expiring
+          **VehicleInspection** VOs and raises **InspectionReminderEvent**. The **InsurancePolicy** VO
+          tracks 5 coverage types (CommercialAuto, GeneralLiability, WorkersCompensation,
+          OccupationalAccident, UmbrellaExcess) with `WithVerification()` and `WithRenewal()`
+          immutable mutation methods. Compliance reports are exposed via 6 dedicated endpoints on
+          `ComplianceReportController`.
+        activeCalls: [credential-expiration-scan, inspection-reminder-scan, insurance-check]
+        revealNodes: [provider-api, provider-db]
+        duration: 6000
+      - id: compliance-step-2
+        title: "Employment Status Machine & Auto-Suspension"
+        narrative: >
+          The **EmploymentStatus** state machine enforces 8 states: `Applicant` -> `ProfileCreated`
+          -> `RequirementsPending` -> `PendingReview` -> `Eligible` -> `Active` -> `Suspended` ->
+          `Terminated`. The `AllowedTransitions` dictionary governs every transition — `Active` can
+          reach `Eligible` (deactivate), `Suspended`, or `Terminated`. `Suspended` can reach `Active`,
+          `Eligible`, or `Terminated`. `Terminated` is terminal with no outbound transitions.
+          **ServiceProvider** has its own 4-state machine (Pending, Active, Suspended, Terminated)
+          with **auto-suspension triggers**: insurance expired, state license expired, contract
+          expired, or failed compliance audit. `ServiceProvider.UpdateInsurance(isCurrent=false)`
+          and `ServiceProvider.UpdateStateLicense(isCurrent=false)` automatically call `Suspend()`
+          with a compliance-related reason. `ProviderSuspendedEvent` and `ServiceProviderSuspendedEvent`
+          fan out to Assignment (remove from matching) and Trip Operations (reassign affected VRs).
+        activeCalls: [auto-suspend]
+        revealCalls: [credential-expiration-scan, inspection-reminder-scan, insurance-check]
+        duration: 5000
+      - id: compliance-step-3
+        title: "PII Protection & Masked Events"
+        narrative: >
+          PII protection operates at two layers. **Storage layer**: `PiiEncryptionService` uses the
+          .NET Data Protection API to encrypt SSN at rest. `SetPiiForBackgroundCheck(dob, ssn)`
+          stores encrypted SSN on the Provider aggregate; `ClearPii()` removes it after background
+          check completion. **Event layer**: four masking helpers ensure PII never leaves the BC
+          in cleartext — `MaskVin()`, `MaskLicensePlate()`, `MaskLicenseNumber()`, and
+          `MaskCredentialIdentifier()` are applied to outbound event payloads. SSN is never included
+          in any domain event. The Provider Network EP has 2 inbound handlers, both decorated with
+          `DecorateEventHandlerWithMetrics` for Prometheus observability: **CredentialExpiredEventHandler**
+          processes expired credential notifications with 24-hour dedup, and **ProviderVerifiedEventHandler**
+          processes verification completion from self or compliance BC.
+        activeCalls: [encrypt-ssn, mask-events, provider-ep-consume, compliance-ep-consume]
+        revealNodes: [pii-service, asb, provider-ep, compliance-ep]
+        revealCalls: [auto-suspend]
+        duration: 5000

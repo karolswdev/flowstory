@@ -45,6 +45,7 @@ Visualize REST API sequences with request/response details, status codes, and he
 - **Dark/light themes** — Full token-based theming with `data-theme` switching
 - **Embed mode** — `?embed=true` for clean iframe embedding with subtle attribution
 - **Shareable URLs** — `?story=id&step=N` for direct linking
+- **Rich text narration** — `**bold**`, `*italic*`, `` `code` ``, `{color:name|text}` in narrative text
 
 ## Quick Start
 

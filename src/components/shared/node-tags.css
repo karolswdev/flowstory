@@ -1,0 +1,68 @@
+.node-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin: 6px 10px 8px;
+}
+
+.node-tag {
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: var(--radius-full);
+  border: 1px solid transparent;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.node-tag--infra {
+  color: var(--color-tag-infra);
+  background: color-mix(in srgb, var(--color-tag-infra) 10%, transparent);
+  border-color: color-mix(in srgb, var(--color-tag-infra) 25%, transparent);
+}
+
+.node-tag--metric {
+  color: var(--color-tag-metric);
+  background: color-mix(in srgb, var(--color-tag-metric) 10%, transparent);
+  border-color: color-mix(in srgb, var(--color-tag-metric) 25%, transparent);
+}
+
+.node-tag--identity {
+  color: var(--color-tag-identity);
+  background: color-mix(in srgb, var(--color-tag-identity) 10%, transparent);
+  border-color: color-mix(in srgb, var(--color-tag-identity) 25%, transparent);
+}
+
+.node-tag--status {
+  color: var(--color-tag-status);
+  background: color-mix(in srgb, var(--color-tag-status) 10%, transparent);
+  border-color: color-mix(in srgb, var(--color-tag-status) 25%, transparent);
+}
+
+.node-tag--overflow {
+  color: var(--color-text-muted);
+  background: color-mix(in srgb, var(--color-text-muted) 10%, transparent);
+  border-color: color-mix(in srgb, var(--color-text-muted) 25%, transparent);
+  font-size: 9px;
+}
+
+/* Compact variant for narrow nodes */
+.node-tags--compact {
+  margin: 4px 8px 6px;
+}
+
+.node-tags--compact .node-tag {
+  font-size: 9px;
+  padding: 1px 4px;
+  max-width: 100px;
+}
+
+.node-tags--compact .node-tag--overflow {
+  font-size: 8px;
+}

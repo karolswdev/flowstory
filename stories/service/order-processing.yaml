@@ -1,6 +1,6 @@
 id: order-processing
 title: Order Processing Service Flow
-description: Microservice choreography for order creation
+description: Microservice choreography for order creation — showcasing zones, tags, multi-axis steps, and status effects.
 renderer: service-flow
 schemaVersion: "2.0"
 layout: sequence
@@ -10,26 +10,50 @@ services:
     type: gateway
     technology: Kong
     status: healthy
+    version: "3.4"
+    tags:
+      protocol: REST
+      region: us-east-1
+      tier: critical
   - id: orders
     name: Order Service
     type: api
     technology: Node.js
     status: healthy
     instances: 3
+    version: "2.1"
+    tags:
+      protocol: gRPC
+      team: platform
+      SLA: "99.9%"
   - id: inventory
     name: Inventory Service
     type: api
     technology: Go
-    status: healthy
+    status: degraded
+    version: "1.4"
+    tags:
+      team: supply-chain
+      latency: "85ms p99"
   - id: notification
     name: Notification Worker
     type: worker
     technology: Python
     status: healthy
+    tags:
+      team: comms
   - id: orders-db
     name: Orders DB
     type: database
     technology: PostgreSQL
+    tags:
+      region: us-east-1
+  - id: cache
+    name: Stock Cache
+    type: cache
+    technology: Redis
+    tags:
+      ttl: "60s"
 queues:
   - id: order-events
     name: order-events
@@ -37,11 +61,24 @@ queues:
     broker: kafka
     depth: 1234
     consumers: 5
+    tags:
+      throughput: "50k/s"
+      tier: premium
+      region: us-east-1
   - id: notification-queue
     name: notification-queue
     type: queue
     broker: rabbitmq
     consumers: 2
+zones:
+  - id: core-domain
+    label: "Order Domain"
+    members: [orders, orders-db, cache]
+    color: "rgba(59, 130, 246, 0.06)"
+  - id: event-infra
+    label: "Event Infrastructure"
+    members: [order-events, notification-queue]
+    color: "rgba(168, 85, 247, 0.06)"
 calls:
   - id: create-order
     type: sync
@@ -52,6 +89,17 @@ calls:
     protocol: http
     duration: 150
     status: 201
+    response:
+      status: 201
+      label: "Order Created"
+  - id: check-cache
+    type: sync
+    from: orders
+    to: cache
+    method: GET
+    path: /stock/ABC-123
+    duration: 2
+    status: ok
   - id: check-inventory
     type: sync
     from: orders
@@ -82,36 +130,64 @@ calls:
 steps:
   - id: step-1
     title: API Request Received
-    narrative: Customer submits order through API Gateway. Gateway routes to Order Service.
+    narrative: Customer submits an order through the API Gateway. Kong routes the request to one of three Order Service instances.
     activeCalls:
       - create-order
+    focusNodes:
+      - gateway
+      - orders
     duration: 4000
   - id: step-2
-    title: Inventory Check
-    narrative: Order Service checks inventory availability via gRPC call.
+    title: Cache Lookup
+    narrative: Order Service first checks the Redis stock cache — a 2ms read that avoids hitting the inventory service for hot SKUs.
     activeCalls:
-      - check-inventory
+      - check-cache
+    revealCalls:
+      - create-order
     duration: 3000
   - id: step-3
+    title: Inventory Verification
+    narration:
+      speaker: Architect
+      message: "The Inventory Service is experiencing elevated latency (85ms p99) — its degraded status triggers a visual pulse. We're monitoring this closely."
+    activeCalls:
+      - check-inventory
+    revealCalls:
+      - create-order
+      - check-cache
+    focusNodes:
+      - inventory
+    duration: 4000
+  - id: step-4
     title: Persist Order
-    narrative: Order is saved to database.
+    narrative: With stock confirmed, the order is written to PostgreSQL. The database lives in the same availability zone for low-latency writes.
     activeCalls:
       - save-order
-    duration: 2500
-  - id: step-4
-    title: Publish Event
-    narrative: OrderCreatedEvent published to Kafka topic for downstream consumers.
-    activeCalls:
-      - publish-created
+    revealCalls:
+      - create-order
+      - check-cache
+      - check-inventory
     duration: 3000
   - id: step-5
-    title: Notification Triggered
-    narrative: Notification worker consumes event and sends confirmation email.
+    title: Event Publication
+    narrative: OrderCreatedEvent is published to the Kafka topic, decoupling downstream consumers from the write path.
+    activeCalls:
+      - publish-created
+    revealCalls:
+      - create-order
+      - check-cache
+      - check-inventory
+      - save-order
+    duration: 3500
+  - id: step-6
+    title: Async Notification
+    narrative: The notification worker subscribes to order events and sends confirmation emails — completely async, no impact on order latency.
     activeCalls:
       - consume-for-notification
+    revealCalls:
+      - create-order
+      - check-cache
+      - check-inventory
+      - save-order
+      - publish-created
     duration: 3500
-camera:
-  center:
-    - 0
-    - 0
-  zoom: 1

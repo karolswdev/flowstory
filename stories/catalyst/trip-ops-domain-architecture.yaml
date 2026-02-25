@@ -1,0 +1,439 @@
+id: trip-ops-domain-architecture
+title: "Trip Operations — Domain Architecture"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  What Trip Operations IS — from its internal composition (5 aggregates, 3 state
+  machines, 30+ events) through the domain event storm that drives the platform,
+  to the canonical 16-state VehicleRun lifecycle. Three perspectives: structure,
+  behavior, and lifecycle.
+
+sections:
+  # ── Section 1: BC Composition — Progressive Reveal ─────────────────
+  - renderer: bc-composition
+    title: "BC Composition"
+    accentColor: "#059669"
+    layout:
+      mode: radial
+      centerSize: 180
+      spacing: 220
+
+    core:
+      id: trip-operations
+      name: Trip Operations
+      icon: "\U0001F690"
+      description: "Largest BC in Catalyst — 12 controllers, 60+ commands, 941 tests"
+      color: "#059669"
+
+    elements:
+      - id: domain-aggregates
+        name: Aggregates (5)
+        type: domain
+        icon: "\U0001F3DB\uFE0F"
+        description: "**VehicleRun**, **PassengerTrip**, **ScheduledGenerationRun**, **SubscriptionRun**, TripIncident"
+        layer: 1
+        effect: { type: grow, duration: 500 }
+        children:
+          - { id: vr-aggregate, name: VehicleRun (980 LOC), type: aggregate, icon: "\U0001F690" }
+          - { id: pt-aggregate, name: PassengerTrip (1032 LOC), type: aggregate, icon: "\U0001F392" }
+          - { id: sgr-aggregate, name: ScheduledGenerationRun, type: aggregate, icon: "\u23F0" }
+          - { id: sr-aggregate, name: SubscriptionRun (522 LOC), type: aggregate, icon: "\U0001F501" }
+
+      - id: domain-state-machines
+        name: State Machines (3)
+        type: domain
+        icon: "\u2699\uFE0F"
+        description: "**VrStateMachine** (16), **PtStateMachine** (16), **SgrStateMachine** (5)"
+        layer: 1
+        effect: { type: pulse }
+        children:
+          - { id: vr-sm, name: "VrStateMachine (16 states)", type: state-machine, icon: "\U0001F504" }
+          - { id: pt-sm, name: "PtStateMachine (16 states)", type: state-machine, icon: "\U0001F504" }
+          - { id: sgr-sm, name: "SgrStateMachine (5 states)", type: state-machine, icon: "\U0001F504" }
+
+      - id: domain-events
+        name: Domain Events (30+)
+        type: event-bus
+        icon: "\U0001F4E8"
+        description: "Highest fanout in platform — 6 downstream consumers, 4 via **transactional outbox**"
+        layer: 1
+        effect: { type: pulse }
+        children:
+          - { id: pt-dropped-off, name: "PtDroppedOffEvent \u26A1", type: event }
+          - { id: vr-completed-ev, name: VrCompletedEvent, type: event }
+          - { id: gps-updated-ev, name: GpsLocationUpdatedEvent, type: event }
+
+      - id: domain-value-objects
+        name: Value Objects (5)
+        type: domain
+        icon: "\U0001F48E"
+        description: "`Stop` (record), `GpsReading` (sealed), `EstimatedTimeOfArrival`, `TripConflict`, `EtaAdjustments`"
+        layer: 1
+        effect: { type: fade }
+
+      - id: app-commands
+        name: Commands (60+)
+        type: api
+        icon: "\u270F\uFE0F"
+        description: "Largest write surface in Catalyst — VR lifecycle, PT transitions, offers, GPS, SGR, SR CRUD"
+        layer: 1
+        effect: { type: slide, direction: up }
+        children:
+          - { id: cmd-start-vr, name: StartVrCommand, type: command }
+          - { id: cmd-dropoff, name: DropOffPtCommand, type: command }
+          - { id: cmd-offer, name: "Offer Pipeline (4)", type: command }
+
+      - id: app-queries
+        name: Queries (24+)
+        type: api
+        icon: "\U0001F50D"
+        description: "Three consumer personas: dispatchers, drivers, parents"
+        layer: 1
+        effect: { type: slide, direction: up }
+
+      - id: app-conductor
+        name: Conductor Tasks (22)
+        type: worker
+        icon: "\U0001F3AD"
+        description: "SGR generation (4), booking (7), lifecycle (3), validation (3), escalation (3), events (2)"
+        layer: 1
+        effect: { type: grow, duration: 500 }
+
+      - id: infra-db
+        name: trip_operations DB
+        type: database
+        icon: "\U0001F5C4\uFE0F"
+        description: "PostgreSQL 16 + PostGIS — 13 DbSets, 4 migrations, **transactional outbox**"
+        layer: 2
+        effect: { type: radiate }
+        children:
+          - { id: db-vr, name: VehicleRuns, type: table, icon: "\U0001F4CB" }
+          - { id: db-pt, name: PassengerTrips, type: table, icon: "\U0001F4CB" }
+          - { id: db-gps, name: "GpsLocations (PostGIS)", type: table, icon: "\U0001F4CB" }
+          - { id: db-outbox, name: outbox_messages, type: table, icon: "\U0001F4CB" }
+
+      - id: infra-asb
+        name: Azure Service Bus
+        type: external
+        icon: "\U0001F4E1"
+        description: "`trip-operations` topic — 29 outbound event types"
+        layer: 2
+        effect: { type: radiate }
+
+      - id: infra-signalr
+        name: SignalR Hub
+        type: external
+        icon: "\U0001F50C"
+        description: "`TripOperationsHub` — real-time fleet visibility"
+        layer: 2
+        effect: { type: radiate }
+
+      - id: infra-redis
+        name: Redis
+        type: external
+        icon: "\u26A1"
+        description: "Idempotency (1h), PT cache (5min), GPS dedup (30s)"
+        layer: 2
+        effect: { type: radiate }
+
+      - id: infra-conductor
+        name: Orkes Conductor
+        type: external
+        icon: "\U0001F3BC"
+        description: "`sgr-generation-workflow`, post-trip validation, assignment"
+        layer: 2
+        effect: { type: radiate }
+
+    edges:
+      - { id: agg-to-sm, source: domain-aggregates, target: domain-state-machines, type: depends, label: "validates via" }
+      - { id: agg-to-events, source: domain-aggregates, target: domain-events, type: publishes, label: "raises" }
+      - { id: cmd-to-agg, source: app-commands, target: domain-aggregates, type: depends, label: "loads & mutates" }
+      - { id: qry-to-db, source: app-queries, target: infra-db, type: depends, label: "reads (AsNoTracking)" }
+      - { id: tasks-to-agg, source: app-conductor, target: domain-aggregates, type: depends, label: "orchestrates" }
+      - { id: cmd-to-db, source: app-commands, target: infra-db, type: depends, label: "persists" }
+      - { id: events-to-asb, source: domain-events, target: infra-asb, type: publishes, label: "publishes via outbox" }
+      - { id: asb-to-signalr, source: infra-asb, target: infra-signalr, type: publishes, label: "self-consumption" }
+      - { id: tasks-to-cond, source: app-conductor, target: infra-conductor, type: depends, label: "registered with" }
+
+    steps:
+      - id: comp-core
+        title: "Trip Operations — The Core"
+        description: "The operational heartbeat of Catalyst. The largest, most complex, and highest-fanout bounded context in the platform."
+        reveal: []
+        focus: [trip-operations]
+
+      - id: comp-domain
+        title: "Domain Layer — Zero Dependencies"
+        description: "5 aggregates with 3 explicit state machines. **VehicleRun** (980 LOC) and **PassengerTrip** (1032 LOC) are the two largest aggregates in the platform. 30+ domain events raised directly from aggregate methods."
+        reveal: [domain-aggregates, domain-state-machines, domain-events, domain-value-objects]
+        focus: [domain-aggregates, domain-state-machines]
+        expand: [domain-aggregates, domain-state-machines]
+
+      - id: comp-application
+        title: "Application Layer — CQRS + Conductor"
+        description: "60+ commands via MediatR for sub-100ms HTTP responses. 24+ queries with `AsNoTracking` for three personas — dispatchers, drivers, parents. 22 Conductor task workers for batch orchestration."
+        reveal: [app-commands, app-queries, app-conductor]
+        focus: [app-commands, app-conductor]
+        expand: [app-commands]
+
+      - id: comp-infra
+        title: "Infrastructure — 5 External Systems"
+        description: "PostgreSQL + PostGIS for spatial GPS, Azure Service Bus for 29 event types, SignalR for real-time fleet visibility, Redis for caching and idempotency, Conductor for saga orchestration."
+        reveal: [infra-db, infra-asb, infra-signalr, infra-redis, infra-conductor]
+        focus: [infra-db]
+        expand: [infra-db]
+
+      # BRIDGE → Event Storm
+      - id: comp-bridge
+        title: "The Domain in Motion"
+        description: "Structure is one thing — behavior is another. Let's see how these aggregates, events, and commands interact during a typical operational day."
+        focus: [domain-aggregates, domain-events, app-commands]
+        zoomLevel: 0.7
+
+  # ── Section 2: Event Storm — Domain Behavior ───────────────────────
+  - renderer: event-storming
+    title: "Domain Event Storm"
+    accentColor: "#F59E0B"
+
+    actors:
+      - id: scheduler
+        name: Nightly Scheduler
+        icon: "\u23F0"
+      - id: dispatch
+        name: Dispatcher
+        icon: "\U0001F3A7"
+      - id: driver-actor
+        name: Driver
+        icon: "\U0001F468\u200D\U0001F33E"
+      - id: vehicle
+        name: Vehicle (GPS)
+        icon: "\U0001F690"
+      - id: parent
+        name: Parent
+        icon: "\U0001F469\u200D\U0001F467"
+
+    aggregates:
+      - id: sgr-agg
+        name: ScheduledGenerationRun
+      - id: sr-agg
+        name: SubscriptionRun
+      - id: vr-agg
+        name: VehicleRun
+      - id: pt-agg
+        name: PassengerTrip
+
+    events:
+      - id: sgr-completed
+        name: SgrCompletedEvent
+        aggregate: sgr-agg
+        description: "Nightly batch created VRs + PTs from subscription templates"
+      - id: vr-created
+        name: VehicleRunCreatedEvent
+        aggregate: vr-agg
+        description: "New VR in `NEW` state — stops from subscription trips"
+      - id: offer-accepted
+        name: OfferAcceptedEvent
+        aggregate: vr-agg
+        description: "Driver accepted — VR ready for dispatch"
+      - id: vr-started
+        name: VehicleRunStartedEvent
+        aggregate: vr-agg
+        description: "Driver begins route — `OFFERACCEPTED` \u2192 `TOSTOP`"
+      - id: gps-updated
+        name: GpsLocationUpdatedEvent
+        aggregate: vr-agg
+        description: "30-second GPS cadence — PostGIS + ETA recalculation"
+      - id: pt-boarded
+        name: PtBoardedEvent
+        aggregate: pt-agg
+        description: "Student scanned and boarded — `ATPU` \u2192 `ONBOARD`"
+      - id: pt-dropoff
+        name: PtDroppedOffEvent
+        aggregate: pt-agg
+        description: "*REVENUE-CRITICAL* — carries `DriverId` + `ServiceProviderId` + `MonitorId` for **BC/PD/PM**"
+      - id: vr-completed
+        name: VehicleRunCompletedEvent
+        aggregate: vr-agg
+        description: "All stops complete — enters 3-gate post-service validation"
+      - id: at-risk
+        name: AtRiskDetectedEvent
+        aggregate: vr-agg
+        description: "VR within 90 min of start without `OFFERACCEPTED` — proactive rescue"
+      - id: pt-noshow
+        name: PtNoShowEvent
+        aggregate: pt-agg
+        description: "Student not present at pickup — driver records no-show"
+
+    commands:
+      - id: trigger-sgr
+        name: TriggerSgrCommand
+        actor: scheduler
+        aggregate: sgr-agg
+        description: "2 AM — Conductor workflow generates VRs + PTs from active **SubscriptionRuns**"
+      - id: send-offer
+        name: "Offer Pipeline (4 commands)"
+        actor: dispatch
+        aggregate: vr-agg
+        description: "`QueueOffer` \u2192 `SendOffer` \u2192 `ConfirmOffer` \u2192 `AcceptOffer`"
+      - id: start-vr
+        name: StartVrCommand
+        actor: driver-actor
+        aggregate: vr-agg
+        description: "Driver taps Start — VR transitions `OFFERACCEPTED` \u2192 `TOSTOP`"
+      - id: ingest-gps
+        name: IngestGpsLocationCommand
+        actor: vehicle
+        aggregate: vr-agg
+        description: "GPS telemetry every 30s — PostGIS persist + ETA"
+      - id: board-pt
+        name: BoardPtCommand
+        actor: driver-actor
+        aggregate: pt-agg
+        description: "Student pickup with ID scan verification"
+      - id: dropoff-pt
+        name: DropOffPtCommand
+        actor: driver-actor
+        aggregate: pt-agg
+        description: "Student dropoff — fires **PtDroppedOffEvent**"
+
+    policies:
+      - id: assignment-policy
+        name: "Assignment Batch Matching"
+        trigger: sgr-completed
+        description: "Assignment BC matches drivers to newly-created VRs"
+      - id: settlement-policy
+        name: "BC/PD/PM Settlement"
+        trigger: pt-dropoff
+        description: "Settlement calculates billing from denormalized event data"
+      - id: rescue-policy
+        name: "Proactive Rescue"
+        trigger: at-risk
+        description: "Rescue BC initiates replacement driver search"
+      - id: parent-sms
+        name: "Parent Notification"
+        trigger: pt-boarded
+        description: "Communications sends 'Student picked up' SMS"
+
+    steps:
+      - title: "Nightly Generation — VRs & PTs Born"
+        description: "At 2 AM, the scheduler triggers the **SGR Conductor workflow**. The 6-step `TripGenerationApplicationService` pipeline checks calendar exclusions, filters active **SubscriptionRuns** by `DaysOfWeekBitmask`, creates VRs (1:1 from SR), creates PTs per eligible student, back-patches stop-to-PT linkage, and detects conflicts. Hundreds of VRs materialize in under 5 minutes."
+        highlightCommands: [trigger-sgr]
+        highlightEvents: [sgr-completed, vr-created]
+        focusAggregate: sgr-agg
+        showPolicies: true
+        duration: 5000
+
+      - title: "Morning Dispatch — Driver Offer Pipeline"
+        description: "Dispatchers send offers through a 4-step workflow: `QueueOffer` \u2192 `SendOffer` \u2192 `ConfirmOffer` \u2192 `AcceptOffer`. Each step is a separate command with its own state transition. At-risk detection flags any VR within 90 minutes of start that hasn't been accepted."
+        highlightCommands: [send-offer]
+        highlightEvents: [offer-accepted, at-risk]
+        focusAggregate: vr-agg
+        showPolicies: true
+        duration: 5000
+
+      - title: "Routes Go Live — GPS & Boarding"
+        description: "Drivers start routes. GPS flows every 30 seconds — PostGIS persistence, ETA recalculation, SignalR broadcast. Students are boarded with ID scan verification. The VR cycles `TOSTOP` \u2194 `ATSTOP` at each stop."
+        highlightCommands: [start-vr, ingest-gps, board-pt]
+        highlightEvents: [vr-started, gps-updated, pt-boarded]
+        focusAggregate: vr-agg
+        showPolicies: true
+        duration: 5000
+
+      - title: "The Revenue Moment — PtDroppedOffEvent"
+        description: "Each student dropoff fires **PtDroppedOffEvent** — *the single most important event in the platform*. It carries denormalized `DriverId`, `ServiceProviderId`, and `MonitorId` so Settlement can calculate **BC/PD/PM** without cross-service queries. {color:red|A lost event means unpaid drivers and unbilled districts.}"
+        highlightCommands: [dropoff-pt]
+        highlightEvents: [pt-dropoff, vr-completed]
+        showPolicies: true
+        duration: 5000
+
+      - title: "Exception Paths — NoShow & AtRisk"
+        description: "Not every trip completes cleanly. **PtNoShowEvent** fires when a student isn't at the pickup. **AtRiskDetectedEvent** fires proactively when a VR is running late. Both trigger downstream rescue and communication workflows."
+        highlightEvents: [pt-noshow, at-risk]
+        showPolicies: true
+        duration: 4000
+
+      # BRIDGE → VR State Machine
+      - title: "Inside the State Machine"
+        description: "Behind every command and event is a 16-state machine enforced in the domain layer. Let's trace the canonical **VehicleRun** lifecycle from birth to settlement."
+        focusAggregate: vr-agg
+        duration: 3000
+
+  # ── Section 3: VR State Diagram — The Canonical Lifecycle ──────────
+  - renderer: state-diagram
+    title: "VR State Machine"
+    accentColor: "#3B82F6"
+    direction: LR
+
+    phases:
+      - { id: pre-dispatch, label: "Pre-Dispatch", color: "rgba(245, 158, 11, 0.06)", order: 1 }
+      - { id: offer-phase, label: "Driver Offer", color: "rgba(59, 130, 246, 0.06)", order: 2 }
+      - { id: active, label: "Active Route", color: "rgba(34, 197, 94, 0.06)", order: 3 }
+      - { id: post-service, label: "Post-Service", color: "rgba(168, 85, 247, 0.06)", order: 4 }
+      - { id: terminal, label: "Terminal", color: "rgba(239, 68, 68, 0.06)", order: 5 }
+
+    states:
+      - { id: new, label: NEW, type: initial, phase: pre-dispatch, description: "Created by SGR or ad-hoc" }
+      - { id: reserved, label: RESERVED, type: normal, variant: info, phase: pre-dispatch, description: "Assignment linked a driver" }
+      - { id: offerqueued, label: OFFERQUEUED, type: normal, variant: info, phase: offer-phase, description: "Offer prepared" }
+      - { id: offersent, label: OFFERSENT, type: normal, variant: info, phase: offer-phase, description: "Delivered to driver device" }
+      - { id: offerconfirmed, label: OFFERCONFIRMED, type: normal, variant: info, phase: offer-phase, description: "Driver acknowledged" }
+      - { id: offeraccepted, label: OFFERACCEPTED, type: normal, variant: success, phase: offer-phase, description: "Driver accepted — ready" }
+      - { id: tostop, label: TOSTOP, type: normal, variant: success, phase: active, description: "En route to next stop" }
+      - { id: atstop, label: ATSTOP, type: normal, variant: success, phase: active, description: "At stop — boarding/alighting" }
+      - { id: break, label: BREAK, type: normal, variant: info, phase: active, description: "Driver on scheduled break" }
+      - { id: postservice, label: POSTSERVICE, type: normal, variant: info, phase: post-service, description: "Route done — validation begins" }
+      - { id: postcompleteness, label: POSTCOMPLETENESS, type: normal, variant: info, phase: post-service, description: "All PTs resolved?" }
+      - { id: postreadiness, label: POSTREADINESS, type: normal, variant: info, phase: post-service, description: "Billing data complete?" }
+      - { id: booked, label: BOOKED, type: normal, variant: success, phase: post-service, description: "Ready for settlement" }
+      - { id: settled, label: SETTLED, type: terminal, variant: success, phase: terminal, description: "BC/PD/PM calculated" }
+      - { id: archived, label: ARCHIVED, type: terminal, variant: info, phase: terminal, description: "Cold storage (90 days)" }
+      - { id: cancelled, label: CANCELLED, type: terminal, variant: error, phase: terminal, description: "Cancelled" }
+
+    transitions:
+      - { id: new-reserved, source: new, target: reserved, trigger: "assign" }
+      - { id: reserved-offerqueued, source: reserved, target: offerqueued, trigger: "queue_offer" }
+      - { id: offerqueued-offersent, source: offerqueued, target: offersent, trigger: "send_offer" }
+      - { id: offersent-offerconfirmed, source: offersent, target: offerconfirmed, trigger: "confirm" }
+      - { id: offerconfirmed-offeraccepted, source: offerconfirmed, target: offeraccepted, trigger: "accept" }
+      - { id: offeraccepted-tostop, source: offeraccepted, target: tostop, trigger: "start_vr" }
+      - { id: tostop-atstop, source: tostop, target: atstop, trigger: "arrive" }
+      - { id: atstop-tostop, source: atstop, target: tostop, trigger: "depart" }
+      - { id: tostop-break, source: tostop, target: break, trigger: "break" }
+      - { id: break-tostop, source: break, target: tostop, trigger: "resume" }
+      - { id: atstop-postservice, source: atstop, target: postservice, trigger: "last_stop" }
+      - { id: postservice-postcompleteness, source: postservice, target: postcompleteness, trigger: "validate" }
+      - { id: postcompleteness-postreadiness, source: postcompleteness, target: postreadiness, trigger: "billing_check" }
+      - { id: postreadiness-booked, source: postreadiness, target: booked, trigger: "approve" }
+      - { id: booked-settled, source: booked, target: settled, trigger: "settlement" }
+      - { id: settled-archived, source: settled, target: archived, trigger: "archive" }
+      - { id: any-cancelled, source: new, target: cancelled, trigger: "cancel" }
+
+    steps:
+      - title: "Birth — SGR Creates the VR"
+        narrative: "Every **VehicleRun** starts in `NEW` state, created by the nightly SGR pipeline or ad-hoc. It carries a list of `Stops` (JSONB) and links to a **SubscriptionRun** template."
+        activeStates: [new]
+        duration: 4000
+
+      - title: "Pre-Dispatch — 4-Step Offer Pipeline"
+        narrative: "The Assignment BC links a driver (`RESERVED`), then the 4-step offer workflow begins: `QueueOffer` \u2192 `SendOffer` \u2192 `ConfirmOffer` \u2192 `AcceptOffer`. If no driver accepts within 90 minutes of start, **AtRiskDetectedEvent** fires."
+        activeStates: [reserved, offerqueued, offersent, offerconfirmed, offeraccepted]
+        activeTransitions: [new-reserved, reserved-offerqueued, offerqueued-offersent, offersent-offerconfirmed, offerconfirmed-offeraccepted]
+        duration: 5000
+
+      - title: "Active Route — TOSTOP/ATSTOP Loop"
+        narrative: "The heart of the operational day. The VR alternates between `TOSTOP` (en route) and `ATSTOP` (at a stop for boarding/alighting). Each stop has its own 8-state `StopDisposition` micro-machine. GPS flows every 30 seconds."
+        activeStates: [tostop, atstop, break]
+        activeTransitions: [offeraccepted-tostop, tostop-atstop, atstop-tostop, tostop-break, break-tostop]
+        duration: 5000
+
+      - title: "Post-Service — 3-Gate Validation"
+        narrative: "After the last stop, the VR passes through three Conductor-validated gates: post-service review, completeness check (all PTs resolved?), and billing readiness (settlement data present?). Each gate is a separate state transition."
+        activeStates: [postservice, postcompleteness, postreadiness, booked]
+        activeTransitions: [atstop-postservice, postservice-postcompleteness, postcompleteness-postreadiness, postreadiness-booked]
+        duration: 5000
+
+      - title: "Terminal — Settled, Archived, Cancelled"
+        narrative: "`SETTLED` means **BC/PD/PM** calculations are complete — {color:green|drivers paid, districts billed}. After 90 days, `ARCHIVED` moves to cold storage. `CANCELLED` is reachable from any pre-completion state and triggers re-matching for orphaned PTs."
+        activeStates: [settled, archived, cancelled]
+        activeTransitions: [booked-settled, settled-archived, any-cancelled]
+        duration: 4000

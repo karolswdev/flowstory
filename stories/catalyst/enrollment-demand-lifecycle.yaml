@@ -1,0 +1,454 @@
+id: enrollment-demand-lifecycle
+title: "Enrollment & Demand — TRF Processing & CEP Lifecycle"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  The Enrollment & Demand bounded context is the entry point for all student transportation.
+  A Transportation Request Form (TRF) flows through a Conductor-orchestrated pipeline —
+  validation, geocoding, route calculation, pricing — before approval or rejection.
+  Approved TRFs link to Client Eligible Passengers (CEPs), which progress through their
+  own enrollment lifecycle from Draft to Active. These two state machines are the foundation
+  upon which every downstream BC operates.
+
+sections:
+  # -- Section 1: TRF Processing Pipeline ----------------------------------------
+  - renderer: service-flow
+    title: "TRF Processing Pipeline"
+    accentColor: "#3B82F6"
+    layout: sequence
+
+    services:
+      - id: enrollment-api
+        name: "Enrollment & Demand API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: enrollment-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: conductor
+        name: "Conductor"
+        type: workflow
+        technology: "Orkes Conductor"
+        status: healthy
+      - id: routing-api
+        name: "Routing API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: pricing-api
+        name: "Pricing API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+      - id: comms-api
+        name: "Communications API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+
+    zones:
+      - id: enrollment-core
+        label: "Enrollment & Demand"
+        members: [enrollment-api, enrollment-db]
+        color: "rgba(59, 130, 246, 0.06)"
+      - id: trf-pipeline
+        label: "TRF Processing Pipeline"
+        members: [conductor, routing-api, pricing-api]
+        color: "rgba(245, 158, 11, 0.06)"
+      - id: downstream
+        label: "Downstream"
+        members: [asb, comms-api]
+        color: "rgba(34, 197, 94, 0.06)"
+
+    calls:
+      - id: create-trf
+        type: sync
+        from: enrollment-api
+        to: enrollment-db
+        method: POST
+        path: /v1/trfs
+        protocol: http
+        duration: 120
+        status: 201
+        description: "CreateTrfCommand — TRF created in Draft status with CepId, SchoolId, StudentInfo, addresses, schedule"
+        response:
+          status: 201
+          label: "TRF created (Draft)"
+      - id: submit-trf
+        type: sync
+        from: enrollment-api
+        to: enrollment-db
+        method: PATCH
+        path: /v1/trfs/{id}/submit
+        protocol: http
+        duration: 100
+        status: 200
+        description: "SubmitTrfCommand — Draft -> Submitted. DualWriteCommandDecorator checks LaunchDarkly flag and writes to Rhapsody (Strangler Fig ADR-003)"
+        response:
+          status: 200
+          label: "TRF submitted"
+      - id: trf-submitted-event
+        type: publish
+        from: enrollment-api
+        to: asb
+        messageType: "TrfSubmittedEvent"
+        payload:
+          description: "TrfId, TenantId, StudentId, TripType, Addresses, Schedule — triggers trf-processing-workflow in Conductor"
+      - id: validate-trf
+        type: sync
+        from: conductor
+        to: enrollment-api
+        method: POST
+        path: "ValidateTrfSubmissionTask"
+        protocol: http
+        duration: 80
+        description: "Conductor task worker validates TRF data completeness — domain-level validation of addresses, schedule, eligibility"
+      - id: geocode-addresses
+        type: sync
+        from: conductor
+        to: routing-api
+        method: POST
+        path: "GeocodeTrfAddressesTask → /v1/geocode"
+        protocol: http
+        duration: 350
+        status: 200
+        description: "Geocode pickup and dropoff addresses via Google Maps Platform through Routing BC"
+        response:
+          status: 200
+          label: "Coordinates resolved"
+      - id: calculate-route
+        type: sync
+        from: conductor
+        to: routing-api
+        method: POST
+        path: "CalculateRouteTask → /v1/routes/calculate"
+        protocol: http
+        duration: 400
+        status: 200
+        description: "Calculate route distance/duration between geocoded points. RouteCalculatedEvent published by Routing, consumed by Enrollment EP to set TRF route details (idempotent)"
+        response:
+          status: 200
+          label: "Route calculated"
+      - id: calculate-pricing
+        type: sync
+        from: conductor
+        to: pricing-api
+        method: POST
+        path: "CalculatePricingTask → /v1/calculations"
+        protocol: http
+        duration: 200
+        status: 200
+        description: "Calculate pricing based on CTTC contract rate, route distance, and trip type category"
+        response:
+          status: 200
+          label: "Pricing calculated"
+      - id: finalize-approve
+        type: sync
+        from: conductor
+        to: enrollment-api
+        method: POST
+        path: "FinalizeTrfApprovedTask"
+        protocol: http
+        duration: 80
+        description: "Pipeline success: TRF transitions Submitted -> Approved. Raises TrfApprovedEvent with full trip details for Trip Operations SGR and Settlement"
+      - id: finalize-reject
+        type: sync
+        from: conductor
+        to: enrollment-api
+        method: POST
+        path: "RejectTrfValidationFailedTask / RejectTrfGeocodingFailedTask"
+        protocol: http
+        duration: 60
+        description: "Pipeline failure: TRF transitions Submitted -> Rejected with reason. Raises TrfRejectedEvent"
+      - id: notify-parent
+        type: sync
+        from: conductor
+        to: comms-api
+        method: POST
+        path: "NotifyParentApprovedTask / NotifyParentRejectedTask"
+        protocol: http
+        duration: 150
+        description: "5 notification tasks cover all outcomes: approved, pending review, rejected (validation), rejected (geocoding), failure"
+      - id: publish-approved
+        type: publish
+        from: enrollment-api
+        to: asb
+        messageType: "TrfApprovedEvent"
+        payload:
+          description: "TrfId, TenantId, StudentId, SchoolId, Direction, full trip details, ApprovedAt — consumed by Trip Operations (SGR) and Settlement"
+
+    steps:
+      - id: trf-step-1
+        title: "TRF Creation & Submission"
+        narrative: >
+          A Transportation Request Form begins its life via `POST /v1/trfs` — the district
+          or parent portal creates a **TransportationRequestForm** aggregate in `Draft` status
+          with CepId, SchoolId, StudentInfo, pickup/dropoff addresses, schedule, and days-of-week
+          bitmask. The TRF is the enrollment entry point: one TRF per student per trip direction
+          (ToSchool or FromSchool). `PATCH /v1/trfs/{id}/submit` transitions `Draft` -> `Submitted`
+          and raises **TrfSubmittedEvent**. The **DualWriteCommandDecorator** (ADR-003 Strangler Fig)
+          intercepts Submit — if the LaunchDarkly `enable-catalyst-enrollment` flag is on, it also
+          writes to Rhapsody via `RhapsodyTrfAdapter`. Catalyst is source of truth; if Rhapsody
+          write fails, Catalyst is NOT rolled back.
+        activeCalls: [create-trf, submit-trf, trf-submitted-event]
+        revealNodes: [enrollment-api, enrollment-db, asb]
+        duration: 5000
+      - id: trf-step-2
+        title: "Conductor Pipeline: Validate, Geocode, Route, Price"
+        narrative: >
+          **TrfSubmittedEvent** triggers the `trf-processing-workflow` in Conductor — a 4-stage
+          pipeline with 21 registered task workers. Stage 1: **ValidateTrfSubmissionTask** runs
+          domain-level validation (addresses present, schedule valid, eligibility criteria met).
+          Stage 2: **GeocodeTrfAddressesTask** calls Routing BC to resolve pickup/dropoff
+          coordinates via Google Maps Platform. Stage 3: **CalculateRouteTask** computes route
+          distance and duration — the **RouteCalculatedEvent** flows back to Enrollment EP via
+          ASB where `RouteCalculatedEventHandler` calls `SetRouteDetails()` (idempotent: skips
+          if route already set, per ADR-012 Distance Eligibility Precomputation). Stage 4:
+          **CalculatePricingTask** calculates the fare based on the CTTC contract rate, route
+          distance, and trip type category. Each stage has a corresponding compensation task.
+        activeCalls: [validate-trf, geocode-addresses, calculate-route, calculate-pricing]
+        revealNodes: [conductor, routing-api, pricing-api]
+        revealCalls: [create-trf, submit-trf, trf-submitted-event]
+        duration: 6000
+      - id: trf-step-3
+        title: "Approval or Rejection"
+        narrative: >
+          Pipeline success: **FinalizeTrfApprovedTask** transitions TRF to `Approved` and raises
+          **TrfApprovedEvent** with the full denormalized trip details — StudentId, SchoolId,
+          Direction, addresses, schedule, route distance, pricing — everything Trip Operations
+          needs for SGR generation. Pipeline failure: **RejectTrfValidationFailedTask** or
+          **RejectTrfGeocodingFailedTask** transitions to `Rejected` (terminal) with a reason.
+          Five notification tasks cover all outcomes: `NotifyParentApprovedTask`,
+          `NotifyParentPendingTask`, `NotifyParentRejectedValidationTask`,
+          `NotifyParentRejectedGeocodingTask`, `NotifyParentFailureTask`. Manual review path:
+          **FlagForManualReviewTask** transitions to `PendingReview` (can revert to `Submitted`).
+        activeCalls: [finalize-approve, finalize-reject, notify-parent]
+        revealCalls: [validate-trf, geocode-addresses, calculate-route, calculate-pricing]
+        duration: 5000
+      - id: trf-step-4
+        title: "Approved TRF: Gateway to Trip Generation"
+        narrative: >
+          **TrfApprovedEvent** published via transactional outbox to the `enrollment-and-demand`
+          ASB topic. Trip Operations BC consumes it to create **SubscriptionTrips** — the templates
+          from which nightly SGR generates **VehicleRuns** and **PassengerTrips**. Settlement BC
+          consumes it to establish the billing baseline. The TRF's `RouteDistanceMiles` and
+          `RouteDurationMinutes` (set by the pipeline) become the canonical distance for all
+          downstream pricing and eligibility decisions. Meanwhile, the CEP linked to this TRF
+          must also progress through its own enrollment lifecycle before trips can actually run.
+        activeCalls: [publish-approved]
+        revealNodes: [comms-api]
+        revealCalls: [finalize-approve, finalize-reject, notify-parent]
+        duration: 4000
+
+  # -- Section 2: CEP Enrollment Lifecycle -----------------------------------------
+  - renderer: service-flow
+    title: "CEP Enrollment Lifecycle"
+    accentColor: "#22C55E"
+    layout: sequence
+
+    services:
+      - id: enrollment-api
+        name: "Enrollment & Demand API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: enrollment-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+      - id: trip-ops-ep
+        name: "Trip Operations Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: assignment-ep
+        name: "Assignment Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: compliance-ep
+        name: "Compliance Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: comms-ep
+        name: "Communications Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+
+    zones:
+      - id: enrollment-core
+        label: "Enrollment & Demand"
+        members: [enrollment-api, enrollment-db]
+        color: "rgba(34, 197, 94, 0.06)"
+      - id: consumers
+        label: "Downstream Consumers"
+        members: [asb, trip-ops-ep, assignment-ep, compliance-ep, comms-ep]
+        color: "rgba(168, 85, 247, 0.06)"
+
+    calls:
+      - id: create-cep
+        type: sync
+        from: enrollment-api
+        to: enrollment-db
+        method: POST
+        path: /v1/ceps
+        protocol: http
+        duration: 150
+        status: 201
+        description: "EnrollCepCommand — CEP created in Draft with StudentId, Demographics, EligibilityCriteria, IepRequirements, HomeAddress. Max 10 emergency contacts, 20 authorized pickups, 20 medications enforced."
+        response:
+          status: 201
+          label: "CEP created (Draft)"
+      - id: submit-enrollment
+        type: sync
+        from: enrollment-api
+        to: enrollment-db
+        method: POST
+        path: "SubmitForEnrollment()"
+        duration: 80
+        description: "Draft -> EnrollmentPending. IEP eligibility requires IepRequirements. Distance eligibility requires >= 2.0 miles (ADR-012). Raises CepEnrollmentSubmittedEvent."
+      - id: enroll-cep
+        type: sync
+        from: enrollment-api
+        to: enrollment-db
+        method: PUT
+        path: /v1/ceps/{id}/enroll
+        protocol: http
+        duration: 100
+        status: 200
+        description: "EnrollmentPending -> Enrolled with enrollment date. Raises CepEnrolledEvent with full Demographics, EligibilityCriteria, IepRequirements."
+        response:
+          status: 200
+          label: "CEP enrolled"
+      - id: activate-cep
+        type: sync
+        from: enrollment-api
+        to: enrollment-db
+        method: POST
+        path: /v1/ceps/{id}/activate
+        protocol: http
+        duration: 80
+        status: 200
+        description: "Enrolled -> Active. Raises CepActivatedEvent. Student is now eligible for trip generation."
+        response:
+          status: 200
+          label: "CEP activated"
+      - id: publish-enrolled
+        type: publish
+        from: enrollment-api
+        to: asb
+        messageType: "CepEnrolledEvent"
+        payload:
+          description: "CepId, TenantId, StudentId, Demographics, EligibilityCriteria, IepRequirements, EnrollmentDate"
+      - id: publish-activated
+        type: publish
+        from: enrollment-api
+        to: asb
+        messageType: "CepActivatedEvent"
+        payload:
+          description: "CepId, TenantId, StudentId, ActivatedAt — student now eligible for SGR trip generation"
+      - id: trip-ops-consume
+        type: subscribe
+        from: asb
+        to: trip-ops-ep
+        messageType: "CepActivatedEvent"
+        action: "Enable student for SubscriptionTrip generation in nightly SGR runs"
+      - id: assignment-consume
+        type: subscribe
+        from: asb
+        to: assignment-ep
+        messageType: "CepEnrolledEvent"
+        action: "Register student constraints (accommodations, anti-affinity) for vehicle matching"
+      - id: compliance-consume
+        type: subscribe
+        from: asb
+        to: compliance-ep
+        messageType: "CepEnrollmentSubmittedEvent"
+        action: "Verify eligibility criteria against active compliance policies"
+      - id: withdraw-cep
+        type: sync
+        from: enrollment-api
+        to: enrollment-db
+        method: POST
+        path: /v1/ceps/{id}/withdraw
+        protocol: http
+        duration: 80
+        status: 200
+        description: "Enrolled/Active -> Withdrawn (terminal). Raises CepWithdrawnEvent triggering trip cancellation in Trip Operations and constraint cleanup in Assignment."
+        response:
+          status: 200
+          label: "CEP withdrawn"
+      - id: publish-withdrawn
+        type: publish
+        from: enrollment-api
+        to: asb
+        messageType: "CepWithdrawnEvent"
+        payload:
+          description: "CepId, TenantId, StudentId, WithdrawalReason, WithdrawalDate — triggers trip cancellation downstream"
+
+    steps:
+      - id: cep-step-1
+        title: "CEP Creation & Enrollment Submission"
+        narrative: >
+          A **ClientEligiblePassenger** is the canonical student record for transportation.
+          `POST /v1/ceps` creates the aggregate in `Draft` status with StudentId, Demographics,
+          EligibilityCriteria, IepRequirements, and HomeAddress. The CEP enforces capacity limits:
+          max 10 emergency contacts, 20 authorized pickups, 20 medications. The domain validates
+          eligibility prerequisites — IEP eligibility requires `IepRequirements` to be populated,
+          distance eligibility requires >= 2.0 miles from home to school (ADR-012). Submission
+          transitions `Draft` -> `EnrollmentPending` and raises **CepEnrollmentSubmittedEvent**,
+          which Compliance BC consumes to verify eligibility against active policies.
+        activeCalls: [create-cep, submit-enrollment, compliance-consume]
+        revealNodes: [enrollment-api, enrollment-db, compliance-ep]
+        duration: 5000
+      - id: cep-step-2
+        title: "Enrollment & Activation"
+        narrative: >
+          Enrollment approval transitions `EnrollmentPending` -> `Enrolled` with an enrollment
+          date. **CepEnrolledEvent** carries the full student profile — Demographics,
+          EligibilityCriteria, IepRequirements — to downstream consumers. Assignment BC registers
+          student constraints (wheelchair accommodation, anti-affinity rules, required vehicle
+          capabilities) for the matching engine. Activation (`Enrolled` -> `Active`) raises
+          **CepActivatedEvent** — this is the gate that enables the student for nightly SGR trip
+          generation in Trip Operations. Until a CEP reaches `Active`, no **PassengerTrips** will
+          be generated for that student, even if approved TRFs exist.
+        activeCalls: [enroll-cep, activate-cep, publish-enrolled, publish-activated, trip-ops-consume, assignment-consume]
+        revealNodes: [asb, trip-ops-ep, assignment-ep]
+        revealCalls: [create-cep, submit-enrollment, compliance-consume]
+        duration: 6000
+      - id: cep-step-3
+        title: "Withdrawal & Trip Cancellation"
+        narrative: >
+          Withdrawal is available from `Enrolled` or `Active` status — `POST /v1/ceps/{id}/withdraw`
+          transitions to `Withdrawn` (terminal) with a reason. **CepWithdrawnEvent** triggers a
+          cascade: Trip Operations cancels all future **SubscriptionTrips** and pending
+          **PassengerTrips** for the student. Assignment BC removes the student's constraints from
+          the matching engine. This is the safety-critical path — a withdrawn CEP must immediately
+          stop generating trips, because the student's transportation entitlement has been revoked.
+          The CEP also supports `Rejected` (terminal, from `EnrollmentPending`) when eligibility
+          verification fails, raising **CepRejectedEvent** for parent notification via Communications BC.
+        activeCalls: [withdraw-cep, publish-withdrawn]
+        revealNodes: [comms-ep]
+        revealCalls: [enroll-cep, activate-cep, publish-enrolled, publish-activated, trip-ops-consume, assignment-consume]
+        duration: 5000

@@ -1,0 +1,267 @@
+id: pattern-specification-evaluation
+title: "Specification Pattern — Rule Evaluation & Extensibility"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  Two perspectives on the Specification pattern: how pluggable eligibility rules
+  evaluate a verification context through OR-composed logic, and how new rules
+  can be added without modifying existing evaluation code.
+
+sections:
+  # ── Section 1: Rule Evaluation Pipeline ─────────────────────────────────
+  - renderer: service-flow
+    title: "Rule Evaluation Pipeline"
+    accentColor: "#A855F7"
+    layout: sequence
+
+    services:
+      - id: handler
+        name: "Verification Handler"
+        type: worker
+        technology: "ICommandHandler"
+        status: healthy
+      - id: context
+        name: "Verification Context"
+        type: api
+        technology: "Value Object"
+        status: healthy
+      - id: distance-rule
+        name: "Distance Rule"
+        type: worker
+        technology: "IEligibilityRule"
+        status: healthy
+      - id: iep-rule
+        name: "IEP Rule"
+        type: worker
+        technology: "IEligibilityRule"
+        status: healthy
+      - id: mckinney-rule
+        name: "McKinney-Vento Rule"
+        type: worker
+        technology: "IEligibilityRule"
+        status: healthy
+      - id: income-rule
+        name: "Income Rule"
+        type: worker
+        technology: "IEligibilityRule"
+        status: healthy
+      - id: compositor
+        name: "Composite Result"
+        type: api
+        technology: "OR Logic"
+        status: healthy
+
+    zones:
+      - id: orchestration
+        label: "Application Layer"
+        members: [handler, context]
+        color: "rgba(168, 85, 247, 0.06)"
+      - id: rules
+        label: "Pluggable Rules"
+        members: [distance-rule, iep-rule, mckinney-rule, income-rule]
+        color: "rgba(59, 130, 246, 0.06)"
+      - id: result
+        label: "Composition"
+        members: [compositor]
+        color: "rgba(34, 197, 94, 0.06)"
+
+    calls:
+      - id: build-context
+        type: sync
+        from: handler
+        to: context
+        method: INVOKE
+        path: "EligibilityVerificationContext(studentId, districtId, distanceToSchool, iepStatus, ...)"
+        duration: 1
+        description: "Build immutable context from TRF data + district config"
+      - id: eval-distance
+        type: sync
+        from: context
+        to: distance-rule
+        method: INVOKE
+        path: "EvaluateAsync(context)"
+        duration: 5
+        description: "distanceToSchool ≥ minimumDistance? Federal distance threshold"
+      - id: eval-iep
+        type: sync
+        from: context
+        to: iep-rule
+        method: INVOKE
+        path: "EvaluateAsync(context)"
+        duration: 5
+        description: "Active IEP requiring transportation? IDEA mandate"
+      - id: eval-mckinney
+        type: sync
+        from: context
+        to: mckinney-rule
+        method: INVOKE
+        path: "EvaluateAsync(context)"
+        duration: 5
+        description: "McKinney-Vento homeless student? Federal protection"
+      - id: eval-income
+        type: sync
+        from: context
+        to: income-rule
+        method: INVOKE
+        path: "EvaluateAsync(context)"
+        duration: 5
+        description: "Household income ≤ poverty threshold? Free/reduced eligibility"
+      - id: compose-results
+        type: sync
+        from: handler
+        to: compositor
+        method: INVOKE
+        path: "ANY rule passes → eligible. All rules return EligibilityRuleResult with IsEligible, Reason, Metadata."
+        duration: 1
+        description: "OR composition: one passing rule is sufficient for eligibility"
+
+    steps:
+      - id: eval-step-1
+        title: "Build Verification Context"
+        narrative: >
+          The handler constructs an **EligibilityVerificationContext** — an immutable value object
+          containing the student's ID, district ID, distance to school, IEP status, McKinney-Vento
+          designation, and household income data. This context is the single input to all rules.
+          Each rule receives the same context and evaluates independently. The context is built
+          from TRF (Transportation Request Form) data combined with district-level configuration.
+        activeCalls: [build-context]
+        revealNodes: [handler, context]
+        duration: 4000
+      - id: eval-step-2
+        title: "Parallel Rule Evaluation"
+        narrative: >
+          Four rules execute against the context. **DistanceEligibilityRule** checks whether the
+          student's home-to-school distance meets the federal minimum threshold.
+          **IepEligibilityRule** checks for an active Individualized Education Program requiring
+          transportation services (IDEA mandate). **McKinneyVentoRule** checks homeless student
+          designation (federal protection). **IncomeEligibilityRule** checks household income
+          against the poverty threshold. Each rule returns an **EligibilityRuleResult** containing
+          `IsEligible`, `Reason` (human-readable), and `Metadata` (audit data). Each rule is
+          **stateless** — no database queries, no side effects, pure evaluation.
+        activeCalls: [eval-distance, eval-iep, eval-mckinney, eval-income]
+        revealNodes: [distance-rule, iep-rule, mckinney-rule, income-rule]
+        revealCalls: [build-context]
+        duration: 6000
+      - id: eval-step-3
+        title: "OR Composition"
+        narrative: >
+          The handler collects all four **EligibilityRuleResult** objects and applies
+          **OR composition**: if ANY rule returns `IsEligible = true`, the student qualifies
+          for transportation. The composite result aggregates all reasons and metadata for
+          the audit trail. A student with an active IEP is eligible regardless of distance.
+          A McKinney-Vento student is eligible regardless of income. The composition captures
+          *why* a student qualifies — not just whether they do.
+        activeCalls: [compose-results]
+        revealNodes: [compositor]
+        revealCalls: [eval-distance, eval-iep, eval-mckinney, eval-income]
+        duration: 5000
+
+  # ── Section 2: Extensibility Without Modification ───────────────────────
+  - renderer: service-flow
+    title: "Extensibility Without Modification"
+    accentColor: "#22C55E"
+    layout: sequence
+
+    services:
+      - id: di-container
+        name: "DI Container"
+        type: worker
+        technology: "IServiceCollection"
+        status: healthy
+      - id: existing-rules
+        name: "4 Existing Rules"
+        type: api
+        technology: "IEligibilityRule"
+        status: healthy
+      - id: new-rule
+        name: "New Rule"
+        type: api
+        technology: "IEligibilityRule"
+        status: healthy
+      - id: handler
+        name: "Verification Handler"
+        type: worker
+        technology: "IEnumerable<IEligibilityRule>"
+        status: healthy
+      - id: test-runner
+        name: "Test Suite"
+        type: external
+        technology: "xUnit + FluentAssertions"
+        status: healthy
+
+    zones:
+      - id: registration
+        label: "Startup Registration"
+        members: [di-container, existing-rules, new-rule]
+        color: "rgba(34, 197, 94, 0.06)"
+      - id: runtime
+        label: "Runtime"
+        members: [handler]
+        color: "rgba(59, 130, 246, 0.06)"
+      - id: testing
+        label: "Testing"
+        members: [test-runner]
+        color: "rgba(168, 85, 247, 0.06)"
+
+    calls:
+      - id: register-existing
+        type: sync
+        from: di-container
+        to: existing-rules
+        method: INVOKE
+        path: "services.AddScoped<IEligibilityRule, DistanceRule>()"
+        duration: 1
+        description: "4 existing rules registered — unchanged"
+      - id: register-new
+        type: sync
+        from: di-container
+        to: new-rule
+        method: INVOKE
+        path: "services.AddScoped<IEligibilityRule, FosterCareRule>()"
+        duration: 1
+        description: "New rule registered — one line of code"
+      - id: inject-all
+        type: sync
+        from: di-container
+        to: handler
+        method: INVOKE
+        path: "IEnumerable<IEligibilityRule> — all 5 rules injected"
+        duration: 1
+        description: "Handler receives all registered rules automatically"
+      - id: test-isolation
+        type: sync
+        from: test-runner
+        to: new-rule
+        method: INVOKE
+        path: "new FosterCareRule().EvaluateAsync(context)"
+        duration: 5
+        description: "Test the new rule in complete isolation — no other rules, no infrastructure"
+
+    steps:
+      - id: extend-step-1
+        title: "Add a Rule: One Class, One Registration"
+        narrative: >
+          A new federal mandate requires foster care students to receive transportation.
+          Implementation: create **FosterCareEligibilityRule** implementing `IEligibilityRule`.
+          One class, one `EvaluateAsync()` method. Register it in the DI container:
+          `services.AddScoped<IEligibilityRule, FosterCareEligibilityRule>()`. That is the entire
+          change. The handler receives `IEnumerable<IEligibilityRule>` — it iterates all registered
+          rules and composes results. The existing four rules are **untouched**. No modification
+          to the handler. No modification to existing rules. Open/Closed Principle in practice.
+        activeCalls: [register-existing, register-new, inject-all]
+        revealNodes: [di-container, existing-rules, new-rule, handler]
+        duration: 6000
+      - id: extend-step-2
+        title: "Test in Isolation"
+        narrative: >
+          Each rule is independently testable. Construct the rule, build a context, call
+          `EvaluateAsync()`, assert on the result. No database. No message bus. No DI container
+          needed. The test verifies: (1) a foster care student returns `IsEligible = true` with
+          the correct reason, (2) a non-foster-care student returns `IsEligible = false`,
+          (3) metadata contains the audit trail. The existing test suite for the other four rules
+          remains green — zero regression risk. Each rule is a **leaf node** with no dependencies
+          on other rules.
+        activeCalls: [test-isolation]
+        revealNodes: [test-runner]
+        revealCalls: [register-existing, register-new, inject-all]
+        duration: 5000

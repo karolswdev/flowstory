@@ -1,0 +1,378 @@
+id: capacity-planning-forecast
+title: "Capacity Planning — Demand Forecasting & Gap Analysis"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  Capacity Planning maintains three aggregates — DemandForecast, SupplyCapacity, and CapacityGap —
+  that together form a demand-vs-supply comparison engine. DemandForecast records projected trip
+  and student counts per dispatch area per day, generated from historical data or manual entry.
+  SupplyCapacity tracks available drivers, vehicles, monitors, and max trip capacity. The
+  CapacityGapDetectionJob background service runs every 5 minutes, scanning 14 days ahead across
+  all tenants and dispatch areas to identify shortfalls. Gaps progress through a three-state
+  lifecycle (Identified, Escalated, Resolved) with severity thresholds driving alerting. Azure ML
+  integration is on the roadmap but currently absent — forecasts use historical averaging only.
+
+sections:
+  # -- Section 1: Demand Forecast & Supply Capacity Aggregates -------------------------
+  - renderer: service-flow
+    title: "Demand Forecasts & Supply Capacity Registration"
+    accentColor: "#8B5CF6"
+    layout: sequence
+
+    services:
+      - id: capplan-api
+        name: "Capacity Planning API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: capplan-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: trip-ops-api
+        name: "Trip Operations API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: identity-api
+        name: "Identity & Access API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: provider-api
+        name: "Provider Network API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: redis
+        name: "Redis"
+        type: cache
+        technology: "StackExchange.Redis"
+        status: healthy
+
+    zones:
+      - id: capplan-core
+        label: "Capacity Planning"
+        members: [capplan-api, capplan-db, redis]
+        color: "rgba(139, 92, 246, 0.06)"
+      - id: cross-context
+        label: "Cross-Context Dependencies"
+        members: [trip-ops-api, identity-api, provider-api]
+        color: "rgba(245, 158, 11, 0.06)"
+
+    calls:
+      - id: create-forecast
+        type: sync
+        from: capplan-api
+        to: capplan-db
+        method: POST
+        path: /v1/demand-forecasts
+        protocol: http
+        duration: 120
+        status: 201
+        description: "CreateDemandForecastCommand — DemandForecast.Create() with ForecastDate, DispatchAreaId, ProjectedTripCount, ProjectedStudentCount, ConfidenceLevel"
+        response:
+          status: 201
+          label: "Forecast created"
+      - id: generate-historical
+        type: sync
+        from: capplan-api
+        to: trip-ops-api
+        method: POST
+        path: /v1/demand-forecasts/generate
+        protocol: http
+        duration: 500
+        description: "GenerateForecastFromHistoricalDataCommand calls IHistoricalTripDataService.GetHistoricalStatisticsAsync() to fetch AverageDailyTripCount, AverageDailyStudentCount, TripCountStandardDeviation"
+      - id: save-historical-forecast
+        type: sync
+        from: capplan-api
+        to: capplan-db
+        method: POST
+        path: "DemandForecast.Create(method: Historical)"
+        duration: 100
+        description: "Persist forecast with ForecastMethod='Historical', confidence calculated from data quality (DaysWithData, StandardDeviation)"
+      - id: register-supply
+        type: sync
+        from: capplan-api
+        to: capplan-db
+        method: POST
+        path: /v1/supply-capacities
+        protocol: http
+        duration: 100
+        status: 201
+        description: "RegisterSupplyCapacityCommand — SupplyCapacity.Create() with AvailableDrivers, AvailableVehicles, AvailableMonitors, MaxTripCapacity per DispatchAreaId and CapacityDate"
+        response:
+          status: 201
+          label: "Supply registered"
+      - id: update-forecast
+        type: sync
+        from: capplan-api
+        to: capplan-db
+        method: PUT
+        path: /v1/demand-forecasts/{id}
+        protocol: http
+        duration: 80
+        description: "UpdateDemandForecastCommand — DemandForecast.UpdateProjections() raises DemandForecastUpdatedEvent"
+      - id: query-dashboard
+        type: sync
+        from: capplan-api
+        to: capplan-db
+        method: GET
+        path: /v1/capacity/overview
+        protocol: http
+        duration: 150
+        description: "GetCapacityOverviewQuery — aggregates DemandSummaryDto, SupplySummaryDto, GapSummaryDto with GapsByDispatchArea breakdown for a single date"
+
+    steps:
+      - id: forecast-step-1
+        title: "DemandForecast Aggregate: Manual & Historical Creation"
+        narrative: >
+          The **DemandForecast** aggregate (`DemandForecast.cs`) records projected trip and student
+          counts for a specific `ForecastDate` and `DispatchAreaId`. Two creation paths exist.
+          **Manual**: `POST /v1/demand-forecasts` accepts `ProjectedTripCount`, `ProjectedStudentCount`,
+          and `ConfidenceLevel` (0.0-1.0) directly — used by operations planners who know their
+          districts. **Historical**: `POST /v1/demand-forecasts/generate` calls
+          **IHistoricalTripDataService** to fetch `HistoricalTripStatistics` from Trip Operations —
+          `AverageDailyTripCount`, `AverageDailyStudentCount`, `DaysWithData`,
+          `TripCountStandardDeviation`. {color:red|WARNING: The production HTTP client
+          (`TripOperationsHistoricalDataClient`) targets `v1/analytics/historical-statistics` which
+          may not exist in Trip Operations. Default is `StubHistoricalTripDataService` returning
+          deterministic mock data.} The `ForecastMethod` field distinguishes "Historical", "ML",
+          "Manual", or "Enrollment" — {color:red|but "ML" has zero implementation. Azure ML is
+          roadmap only.}
+        activeCalls: [create-forecast, generate-historical, save-historical-forecast]
+        revealNodes: [capplan-api, capplan-db, trip-ops-api]
+        duration: 6000
+      - id: forecast-step-2
+        title: "SupplyCapacity Aggregate: Driver, Vehicle & Monitor Tracking"
+        narrative: >
+          **SupplyCapacity** (`SupplyCapacity.cs`) tracks four resource dimensions per dispatch area
+          per day: `AvailableDrivers`, `AvailableVehicles`, `AvailableMonitors`, and the derived
+          `MaxTripCapacity`. Created via `POST /v1/supply-capacities` with
+          **RegisterSupplyCapacityCommand**, updated via `PUT` with **UpdateSupplyCapacityCommand**,
+          and soft-removed via `DELETE` with **DeactivateSupplyCapacityCommand**. The aggregate is
+          simpler than DemandForecast — {color:red|SupplyCapacity raises NO domain events on
+          UpdateCapacity(), so downstream consumers cannot react to supply changes in real-time.}
+          All fields enforce non-negative invariants. Queries support filtering by date range and
+          dispatch area via `ISupplyCapacityRepository` (10 methods). DB table:
+          `capacity_planning.supply_capacities` with 11 columns. {color:green|Multi-tenancy is
+          enforced via global query filters on TenantId — consistent with platform standard.}
+        activeCalls: [register-supply]
+        revealNodes: [redis]
+        revealCalls: [create-forecast, generate-historical, save-historical-forecast]
+        duration: 5000
+      - id: forecast-step-3
+        title: "Dashboard Queries: Overview & Trends"
+        narrative: >
+          Two dashboard endpoints aggregate the demand-supply picture. **GET /v1/capacity/overview**
+          returns a **CapacityOverviewDto** containing nested **DemandSummaryDto** (5 fields:
+          total forecasts, trips, students, avg confidence, areas covered), **SupplySummaryDto**
+          (6 fields: total capacities, drivers, vehicles, monitors, max trips), and **GapSummaryDto**
+          (11 fields: total/active/resolved/escalated counts, avg shortfall, top severity, plus
+          `GapsByDispatchArea` list). **GET /v1/capacity/trends** returns **CapacityTrendsDto** with
+          `DailyCapacityDataPointDto` entries (10 fields per day) and a `TrendSummaryDto` (11 fields)
+          covering max 90 days. {color:green|CQRS read path uses `ICapacityPlanningReadContext` with
+          `AsNoTracking()` queryables — proper read model separation.} {color:blue|Cross-ref:
+          capacity-planning-events.yaml for how inbound signals update these aggregates.}
+        activeCalls: [update-forecast, query-dashboard]
+        revealCalls: [register-supply]
+        duration: 5000
+
+  # -- Section 2: Gap Detection Engine & Lifecycle ------------------------------------
+  - renderer: service-flow
+    title: "Capacity Gap Detection & Lifecycle Management"
+    accentColor: "#EF4444"
+    layout: sequence
+
+    services:
+      - id: capplan-api
+        name: "Capacity Planning API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: capplan-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: gap-job
+        name: "CapacityGapDetectionJob"
+        type: event-processor
+        technology: "BackgroundService"
+        status: healthy
+      - id: identity-api
+        name: "Identity & Access API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: provider-api
+        name: "Provider Network API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+
+    zones:
+      - id: gap-engine
+        label: "Gap Detection Engine"
+        members: [gap-job, identity-api, provider-api]
+        color: "rgba(239, 68, 68, 0.06)"
+      - id: capplan-core
+        label: "Capacity Planning"
+        members: [capplan-api, capplan-db]
+        color: "rgba(139, 92, 246, 0.06)"
+      - id: events-out
+        label: "Outbound Events"
+        members: [asb]
+        color: "rgba(34, 197, 94, 0.06)"
+
+    calls:
+      - id: fetch-tenants
+        type: sync
+        from: gap-job
+        to: identity-api
+        method: GET
+        path: "ITenantQueryService → v1/tenants?status=Active"
+        duration: 200
+        description: "CapacityGapDetectionJob queries all active tenants via ITenantQueryService. Default: StubTenantQueryService returns hardcoded tenants."
+      - id: fetch-dispatch-areas
+        type: sync
+        from: gap-job
+        to: provider-api
+        method: GET
+        path: "IDispatchAreaQueryService → dispatch areas endpoint"
+        duration: 200
+        description: "For each tenant, fetch dispatch areas. Default: StubDispatchAreaQueryService returns hardcoded areas."
+      - id: read-demand
+        type: sync
+        from: gap-job
+        to: capplan-db
+        method: GET
+        path: "IDemandForecastRepository.GetByDateAndDispatchAreaAsync()"
+        duration: 50
+        description: "Sum demand forecasts for target date + dispatch area"
+      - id: read-supply
+        type: sync
+        from: gap-job
+        to: capplan-db
+        method: GET
+        path: "ISupplyCapacityRepository.GetByDateAndDispatchAreaAsync()"
+        duration: 50
+        description: "Fetch supply capacity for target date + dispatch area"
+      - id: create-gap
+        type: sync
+        from: gap-job
+        to: capplan-db
+        method: POST
+        path: "CapacityGap.Create()"
+        duration: 80
+        description: "Create CapacityGap with TripShortfall, DriverShortfall, calculated GapSeverity. Raises CapacityGapIdentifiedEvent if severity != None."
+      - id: publish-gap-identified
+        type: publish
+        from: capplan-api
+        to: asb
+        messageType: "CapacityGapIdentifiedEvent"
+        payload:
+          description: "GapId, TenantId, DispatchAreaId, GapDate, TripShortfall, DriverShortfall, Severity — consumed by Communications (notify planners), Monitoring (create alert)"
+      - id: resolve-gap
+        type: sync
+        from: capplan-api
+        to: capplan-db
+        method: POST
+        path: /v1/capacity-gaps/{id}/resolve
+        protocol: http
+        duration: 100
+        description: "ResolveCapacityGapCommand — CapacityGap.Resolve() requires resolutionNotes + resolvedByUserId. Raises CapacityGapResolvedEvent."
+      - id: escalate-gap
+        type: sync
+        from: capplan-api
+        to: capplan-db
+        method: POST
+        path: /v1/capacity-gaps/{id}/escalate
+        protocol: http
+        duration: 100
+        description: "EscalateCapacityGapCommand — CapacityGap.Escalate() requires escalationReason + escalatedByUserId. Raises CapacityGapEscalatedEvent."
+      - id: publish-gap-escalated
+        type: publish
+        from: capplan-api
+        to: asb
+        messageType: "CapacityGapEscalatedEvent"
+        payload:
+          description: "GapId, TenantId, EscalationReason — consumed by Communications (notify management), Monitoring (create alert)"
+      - id: publish-gap-resolved
+        type: publish
+        from: capplan-api
+        to: asb
+        messageType: "CapacityGapResolvedEvent"
+        payload:
+          description: "GapId, TenantId, ResolutionNotes — consumed by Communications (notify stakeholders), Reporting"
+
+    steps:
+      - id: gap-step-1
+        title: "CapacityGapDetectionJob: Automated 5-Minute Scan"
+        narrative: >
+          The **CapacityGapDetectionJob** (`BackgroundJobs/CapacityGapDetectionJob.cs`) is a
+          `BackgroundService` hosted in the API process, running every 300 seconds (configurable
+          via `CapacityPlanning:GapDetection:IntervalSeconds`). Each cycle: (1) fetch active tenants
+          via **ITenantQueryService**, (2) for each tenant fetch dispatch areas via
+          **IDispatchAreaQueryService**, (3) for each area scan the next 14 weekdays
+          (`LookAheadDays`). Per date/area: sum `DemandForecast.ProjectedTripCount`, read
+          `SupplyCapacity.MaxTripCapacity`, compute `tripShortfall = projected - capacity` and
+          `driverShortfall = ceil(projected / tripsPerDriver) - availableDrivers`. Severity thresholds:
+          {color:red|Critical >20% or >20 trips}, High >10% or >10 trips, Medium >5% or >5 trips,
+          Low = any positive shortfall. {color:red|BUG: The detection method uses `const int
+          tripsPerDriver = 10` hardcoded, ignoring the configurable `GapDetectionOptions.DefaultTripsPerDriver`
+          and `GetTripsPerDriver()` with per-area overrides.} {color:red|Cross-context clients
+          default to stubs — job operates against hardcoded tenants/dispatch areas in dev.}
+        activeCalls: [fetch-tenants, fetch-dispatch-areas, read-demand, read-supply, create-gap]
+        revealNodes: [gap-job, identity-api, provider-api, capplan-db]
+        duration: 7000
+      - id: gap-step-2
+        title: "CapacityGap Aggregate: Three-State Lifecycle"
+        narrative: >
+          The **CapacityGap** aggregate (`CapacityGap.cs`) tracks shortfalls with a three-state
+          machine: `Identified` -> `Escalated` -> `Resolved`, or `Identified` -> `Resolved`
+          directly. **Create**: `CapacityGap.Create()` sets `TripShortfall`, `DriverShortfall`,
+          computes `GapSeverity` (None/Low/Medium/High/Critical), and raises
+          **CapacityGapIdentifiedEvent** if severity != None. **Escalate**: `POST /v1/capacity-gaps/{id}/escalate`
+          requires `escalationReason` + `escalatedByUserId` (from JWT `sub` claim), raises
+          **CapacityGapEscalatedEvent**. Cannot escalate if already Resolved or Escalated.
+          **Resolve**: `POST /v1/capacity-gaps/{id}/resolve` requires `resolutionNotes` +
+          `resolvedByUserId`, raises **CapacityGapResolvedEvent**. Cannot resolve if already
+          Resolved. {color:green|All state transition guards are enforced in the aggregate — proper
+          DDD encapsulation.} DB table: `capacity_planning.capacity_gaps` (17 columns), severity
+          and status stored as text (enum string conversion).
+        activeCalls: [resolve-gap, escalate-gap]
+        revealNodes: [capplan-api, asb]
+        revealCalls: [fetch-tenants, fetch-dispatch-areas, read-demand, read-supply, create-gap]
+        duration: 5000
+      - id: gap-step-3
+        title: "Outbound Events & Downstream Impact"
+        narrative: >
+          Four outbound events flow via transactional outbox (`AddTransactionalOutbox<CapacityPlanningDbContext>`,
+          R076) to Azure Service Bus. **CapacityGapIdentifiedEvent**: consumed by Communications
+          (notify capacity planners) and Monitoring (create operational alert). **CapacityGapEscalatedEvent**:
+          consumed by Communications (notify management) and Monitoring (create escalated alert).
+          **CapacityGapResolvedEvent**: consumed by Communications (notify stakeholders) and
+          Reporting (update gap resolution metrics). **DemandForecastUpdatedEvent**: consumed by
+          Capacity Planning itself (trigger gap recalculation) and Reporting. All events inherit
+          from `DomainEvent` with `CorrelationId` + `CausationId` for distributed tracing.
+          {color:green|Transactional outbox ensures events are published only after successful DB
+          commit — no lost events.} {color:red|Note: IdentifyCapacityGapsCommand exists with a
+          handler and validator but is NOT exposed via any API endpoint — gap identification is
+          only possible through the background job, not on-demand through the API.}
+        activeCalls: [publish-gap-identified, publish-gap-escalated, publish-gap-resolved]
+        revealCalls: [resolve-gap, escalate-gap]
+        duration: 5000

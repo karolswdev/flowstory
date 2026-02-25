@@ -33,6 +33,8 @@ import { TeamOwnershipCanvas } from '../components/team-ownership';
 import { TeamOwnershipStorySchema } from '../schemas/team-ownership';
 import { StateDiagramCanvas } from '../components/state-diagram';
 import { StateDiagramStorySchema } from '../schemas/state-diagram';
+import { CompositeCanvas } from '../components/composite';
+import { CompositeStorySchema } from '../schemas/composite';
 
 export type SpecializedStoryType =
   | 'service-flow'
@@ -48,13 +50,14 @@ export type SpecializedStoryType =
   | 'dependency-graph'
   | 'migration-roadmap'
   | 'team-ownership'
-  | 'state-diagram';
+  | 'state-diagram'
+  | 'composite';
 
 export type StoryType = 'story-flow' | SpecializedStoryType;
 
 export interface SpecializedRendererConfig {
   type: SpecializedStoryType;
-  Canvas: ComponentType<{ story: any; currentStepIndex: number; onStepChange?: (step: number) => void }>;
+  Canvas: ComponentType<{ story: any; currentStepIndex: number; onStepChange?: (step: number) => void; hideOverlay?: boolean }>;
   schema: ZodType<any>;
   needsReactFlowProvider?: boolean;
 }
@@ -74,6 +77,7 @@ export const RENDERER_MAP: Record<SpecializedStoryType, SpecializedRendererConfi
   'migration-roadmap': { type: 'migration-roadmap', Canvas: MigrationRoadmapCanvas, schema: MigrationRoadmapStorySchema },
   'team-ownership': { type: 'team-ownership', Canvas: TeamOwnershipCanvas, schema: TeamOwnershipStorySchema },
   'state-diagram': { type: 'state-diagram', Canvas: StateDiagramCanvas, schema: StateDiagramStorySchema },
+  'composite': { type: 'composite', Canvas: CompositeCanvas as any, schema: CompositeStorySchema },
 };
 
 /** All specialized story type strings for type-guard checks */

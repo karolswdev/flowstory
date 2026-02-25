@@ -9,6 +9,7 @@ interface CloudCostCanvasProps {
   story: CloudCostStory;
   currentStepIndex: number;
   onStepChange?: (step: number) => void;
+  hideOverlay?: boolean;
 }
 
 const formatCurrency = (n: number) => 
@@ -73,10 +74,11 @@ function ResourceCard({ resource, isHighlighted, delay = 0 }: {
   );
 }
 
-export function CloudCostCanvas({ 
-  story, 
+export function CloudCostCanvas({
+  story,
   currentStepIndex,
-  onStepChange 
+  onStepChange,
+  hideOverlay = false,
 }: CloudCostCanvasProps) {
   const currentStep = story.steps[currentStepIndex] as CloudCostStep | undefined;
   
@@ -141,40 +143,44 @@ export function CloudCostCanvas({
         </div>
       )}
       
-      {/* Info panel */}
-      <AnimatePresence mode="wait">
-        {currentStep && (
-          <motion.div 
-            className="cost-info"
-            variants={fadeUp}
-            initial="initial"
-            animate="animate"
-            exit="exit"
-            transition={TRANSITION.default}
-            key={currentStepIndex}
-          >
-            <h3>{currentStep.title}</h3>
-            <p>{currentStep.description}</p>
-          </motion.div>
-        )}
-      </AnimatePresence>
-      
-      {/* Navigation */}
-      <div className="cost-nav">
-        <button 
-          onClick={() => onStepChange?.(Math.max(0, currentStepIndex - 1))}
-          disabled={currentStepIndex === 0}
-        >
-          ← Previous
-        </button>
-        <span>{currentStepIndex + 1} / {story.steps.length}</span>
-        <button 
-          onClick={() => onStepChange?.(Math.min(story.steps.length - 1, currentStepIndex + 1))}
-          disabled={currentStepIndex >= story.steps.length - 1}
-        >
-          Next →
-        </button>
-      </div>
+      {!hideOverlay && (
+        <>
+          {/* Info panel */}
+          <AnimatePresence mode="wait">
+            {currentStep && (
+              <motion.div
+                className="cost-info"
+                variants={fadeUp}
+                initial="initial"
+                animate="animate"
+                exit="exit"
+                transition={TRANSITION.default}
+                key={currentStepIndex}
+              >
+                <h3>{currentStep.title}</h3>
+                <p>{currentStep.description}</p>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Navigation */}
+          <div className="cost-nav">
+            <button
+              onClick={() => onStepChange?.(Math.max(0, currentStepIndex - 1))}
+              disabled={currentStepIndex === 0}
+            >
+              ← Previous
+            </button>
+            <span>{currentStepIndex + 1} / {story.steps.length}</span>
+            <button
+              onClick={() => onStepChange?.(Math.min(story.steps.length - 1, currentStepIndex + 1))}
+              disabled={currentStepIndex >= story.steps.length - 1}
+            >
+              Next →
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

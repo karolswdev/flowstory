@@ -1,0 +1,366 @@
+id: capacity-planning-events
+title: "Capacity Planning — Inbound Demand/Supply Signals & Outbound Gap Alerts"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  Capacity Planning consumes 12 inbound events from three source bounded contexts — Enrollment
+  & Demand (5 events: student enrollment, TRF lifecycle, school year), Provider Network (6 events:
+  drivers, vehicles, providers), and Trip Operations (1 event: trip completion). These signals
+  update DemandForecast and SupplyCapacity aggregates to keep the capacity picture current.
+  Outbound, 4 domain events flow to Communications and Monitoring for alerting when gaps are
+  identified, escalated, or resolved. The EventProcessor runs 12 handlers with Redis-based
+  idempotency and Prometheus metrics instrumentation (R080).
+
+sections:
+  # -- Section 1: Inbound Demand & Supply Signals ------------------------------------
+  - renderer: service-flow
+    title: "Inbound Event Processing: Demand & Supply Signals"
+    accentColor: "#F59E0B"
+    layout: sequence
+
+    services:
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+      - id: capplan-ep
+        name: "Capacity Planning EP"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: capplan-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: redis
+        name: "Redis"
+        type: cache
+        technology: "StackExchange.Redis"
+        status: healthy
+      - id: enrollment-api
+        name: "Enrollment & Demand"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: provider-api
+        name: "Provider Network"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: trip-ops-api
+        name: "Trip Operations"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+
+    zones:
+      - id: demand-sources
+        label: "Demand Signal Sources"
+        members: [enrollment-api, trip-ops-api]
+        color: "rgba(59, 130, 246, 0.06)"
+      - id: supply-sources
+        label: "Supply Signal Sources"
+        members: [provider-api]
+        color: "rgba(34, 197, 94, 0.06)"
+      - id: capplan-processing
+        label: "Capacity Planning Event Processing"
+        members: [asb, capplan-ep, capplan-db, redis]
+        color: "rgba(245, 158, 11, 0.06)"
+
+    calls:
+      - id: enrollment-demand-topic
+        type: subscribe
+        from: capplan-ep
+        to: asb
+        messageType: "enrollment-and-demand topic"
+        payload:
+          description: "Subscription: capacity-planning-enrollment-processor — 5 events: StudentEnrolledEvent, StudentDischargedEvent, SchoolYearStartEvent, TrfApprovedEvent, TrfCancelledEvent"
+      - id: provider-network-topic
+        type: subscribe
+        from: capplan-ep
+        to: asb
+        messageType: "provider-network-and-assignment topic"
+        payload:
+          description: "Subscription: capacity-planning-provider-processor — 6 events: DriverCertifiedEvent, VehicleRegisteredEvent, ProviderOnboardedEvent, ProviderSuspendedEvent, VehicleDecommissionedEvent, ServiceProviderCapacityChangedEvent"
+      - id: trip-ops-topic
+        type: subscribe
+        from: capplan-ep
+        to: asb
+        messageType: "trip-operations topic"
+        payload:
+          description: "Subscription: capacity-planning-trip-processor — 1 event: TripCompletedEvent"
+      - id: idempotency-check
+        type: sync
+        from: capplan-ep
+        to: redis
+        method: GET
+        path: "CatalystCapacityPlanning:{EventId}"
+        duration: 5
+        description: "Redis idempotency check with 1-hour TTL. Instance prefix: CatalystCapacityPlanning:"
+      - id: update-demand
+        type: sync
+        from: capplan-ep
+        to: capplan-db
+        method: POST
+        path: "DemandForecast — update projections"
+        duration: 80
+        description: "Enrollment handlers increment/decrement DemandForecast.ProjectedTripCount and ProjectedStudentCount for matching DispatchAreaId + ForecastDate"
+      - id: update-supply
+        type: sync
+        from: capplan-ep
+        to: capplan-db
+        method: POST
+        path: "SupplyCapacity — update resources"
+        duration: 80
+        description: "Provider Network handlers increment/decrement SupplyCapacity.AvailableDrivers, AvailableVehicles, or MaxTripCapacity for matching DispatchAreaId"
+      - id: idempotency-mark
+        type: sync
+        from: capplan-ep
+        to: redis
+        method: SET
+        path: "CatalystCapacityPlanning:{EventId} TTL=3600"
+        duration: 5
+        description: "Mark event as processed — 1-hour TTL prevents duplicate processing"
+
+    steps:
+      - id: events-step-1
+        title: "Demand Signals: Enrollment & Demand Events (5 Handlers)"
+        narrative: >
+          Five event handlers consume from the `enrollment-and-demand` topic via subscription
+          `capacity-planning-enrollment-processor`. **StudentEnrolledEventHandler**: increments
+          `DemandForecast.ProjectedStudentCount` — a new student means potential trip demand
+          increase. **StudentDischargedEventHandler**: decrements student count — demand decrease.
+          **TrfApprovedEventHandler**: increments `ProjectedTripCount` — an approved TRF represents
+          a confirmed transportation need. **TrfCancelledEventHandler**: decrements trip count.
+          **SchoolYearStartEventHandler**: triggers generation of new forecasts for the upcoming
+          school year across all dispatch areas. All handlers follow the standard idempotency
+          pattern: check Redis (`CatalystCapacityPlanning:{EventId}`), process, mark processed
+          (1-hour TTL). {color:green|All 5 handlers are decorated with
+          `DecorateEventHandlerWithMetrics<T>()` (R080) for Prometheus instrumentation.}
+          {color:blue|Source events originate from Enrollment & Demand BC — see
+          enrollment-demand-events.yaml for publishing details.}
+        activeCalls: [enrollment-demand-topic, idempotency-check, update-demand, idempotency-mark]
+        revealNodes: [asb, capplan-ep, capplan-db, redis, enrollment-api]
+        duration: 6000
+      - id: events-step-2
+        title: "Supply Signals: Provider Network Events (6 Handlers)"
+        narrative: >
+          Six event handlers consume from the `provider-network-and-assignment` topic via
+          subscription `capacity-planning-provider-processor`. **DriverCertifiedEventHandler**:
+          increments `SupplyCapacity.AvailableDrivers` — a newly certified driver adds to the
+          supply pool. **VehicleRegisteredEventHandler**: increments `AvailableVehicles`.
+          **ProviderOnboardedEventHandler**: broad supply increase across the provider's dispatch
+          areas. **ProviderSuspendedEventHandler**: decrements capacity for the suspended provider's
+          areas — drivers and vehicles become unavailable. **VehicleDecommissionedEventHandler**:
+          decrements `AvailableVehicles`. **ServiceProviderCapacityChangedEventHandler**: R076
+          orphaned event consumer that reacts to explicit capacity change notifications from
+          Provider Network. {color:green|Each handler updates SupplyCapacity for the matching
+          DispatchAreaId, keeping the supply picture current as provider resources change.}
+          {color:red|Note: SupplyCapacity raises no domain events on update, so these changes
+          do NOT trigger immediate gap recalculation — gaps are only reassessed on the next
+          CapacityGapDetectionJob cycle (every 5 minutes).}
+        activeCalls: [provider-network-topic, idempotency-check, update-supply, idempotency-mark]
+        revealNodes: [provider-api]
+        revealCalls: [enrollment-demand-topic, update-demand]
+        duration: 6000
+      - id: events-step-3
+        title: "Trip Completion Signal & the No-Op Gap"
+        narrative: >
+          One handler consumes from the `trip-operations` topic via subscription
+          `capacity-planning-trip-processor`. **TripCompletedEventHandler**: receives
+          `TripCompletedEvent` with trip completion data (VehicleRunId, PassengerTripId, timestamps).
+          {color:red|CRITICAL GAP: This handler is a NO-OP. The code logs the event for
+          observability but does NOT update any aggregate or trip statistics. The inline comment
+          reads: "For now, we log the event for observability. Future enhancement: Increment
+          daily trip counters by dispatch area/time slot." This means the demand forecast accuracy
+          improvement loop from actual trip completion data is completely missing — forecasts
+          cannot self-correct based on real outcomes.} This is the most significant functional
+          gap in Capacity Planning: the feedback loop from actual operations to forecast accuracy
+          is broken. Historical forecast generation (`GenerateForecastFromHistoricalDataCommand`)
+          would benefit from per-day, per-area actual trip counts, but no such data accumulation
+          exists. {color:blue|Cross-ref: trip-ops-event-architecture.yaml for TripCompletedEvent
+          publishing details.}
+        activeCalls: [trip-ops-topic, idempotency-check]
+        revealNodes: [trip-ops-api]
+        revealCalls: [provider-network-topic, update-supply]
+        duration: 5000
+
+  # -- Section 2: Outbound Gap Alerts & Cross-Context Communication ------------------
+  - renderer: service-flow
+    title: "Outbound Gap Events & Downstream Alert Routing"
+    accentColor: "#EF4444"
+    layout: sequence
+
+    services:
+      - id: capplan-api
+        name: "Capacity Planning API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: capplan-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+      - id: comms-ep
+        name: "Communications EP"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: monitoring-ep
+        name: "Monitoring EP"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: reporting-ep
+        name: "Reporting EP"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+
+    zones:
+      - id: capplan-core
+        label: "Capacity Planning"
+        members: [capplan-api, capplan-db]
+        color: "rgba(139, 92, 246, 0.06)"
+      - id: event-bus
+        label: "Event Bus"
+        members: [asb]
+        color: "rgba(245, 158, 11, 0.06)"
+      - id: downstream-consumers
+        label: "Downstream Consumers"
+        members: [comms-ep, monitoring-ep, reporting-ep]
+        color: "rgba(239, 68, 68, 0.06)"
+
+    calls:
+      - id: outbox-publish
+        type: sync
+        from: capplan-api
+        to: capplan-db
+        method: POST
+        path: "outbox_messages table"
+        duration: 10
+        description: "Transactional outbox: domain events written to outbox_messages in same DB transaction as aggregate changes (R076)"
+      - id: outbox-relay
+        type: publish
+        from: capplan-db
+        to: asb
+        messageType: "Outbox relay"
+        payload:
+          description: "Background outbox processor reads outbox_messages, publishes to ASB, marks as processed"
+      - id: gap-identified-to-comms
+        type: subscribe
+        from: comms-ep
+        to: asb
+        messageType: "CapacityGapIdentifiedEvent"
+        payload:
+          description: "Communications sends notifications to capacity planners when a new gap is detected"
+      - id: gap-identified-to-monitoring
+        type: subscribe
+        from: monitoring-ep
+        to: asb
+        messageType: "CapacityGapIdentifiedEvent"
+        payload:
+          description: "Monitoring creates operational alert based on gap severity"
+      - id: gap-escalated-to-comms
+        type: subscribe
+        from: comms-ep
+        to: asb
+        messageType: "CapacityGapEscalatedEvent"
+        payload:
+          description: "Communications sends escalation notifications to management"
+      - id: gap-escalated-to-monitoring
+        type: subscribe
+        from: monitoring-ep
+        to: asb
+        messageType: "CapacityGapEscalatedEvent"
+        payload:
+          description: "Monitoring creates escalated alert — may trigger PagerDuty integration"
+      - id: gap-resolved-to-comms
+        type: subscribe
+        from: comms-ep
+        to: asb
+        messageType: "CapacityGapResolvedEvent"
+        payload:
+          description: "Communications notifies stakeholders of gap resolution"
+      - id: gap-resolved-to-reporting
+        type: subscribe
+        from: reporting-ep
+        to: asb
+        messageType: "CapacityGapResolvedEvent"
+        payload:
+          description: "Reporting updates gap resolution metrics and trend data"
+      - id: forecast-updated-to-reporting
+        type: subscribe
+        from: reporting-ep
+        to: asb
+        messageType: "DemandForecastUpdatedEvent"
+        payload:
+          description: "Reporting tracks forecast changes for accuracy analysis"
+
+    steps:
+      - id: outbound-step-1
+        title: "Transactional Outbox: Guaranteed Event Delivery"
+        narrative: >
+          All four outbound domain events flow through the transactional outbox pattern added in
+          R076. When a **CapacityGap** or **DemandForecast** aggregate raises a domain event, the
+          **DomainEventPublishingDbContext** (`CapacityPlanningDbContext.cs`, inherits from
+          `DomainEventPublishingDbContext`, implements `IOutboxDbContext`) writes the serialized
+          event to the `capacity_planning.outbox_messages` table in the SAME database transaction
+          as the aggregate state change. A background processor then reads unpublished messages
+          and relays them to Azure Service Bus. {color:green|This guarantees at-least-once delivery —
+          if the process crashes after DB commit but before ASB publish, the outbox processor will
+          retry on next cycle.} The outbox was added via migration `20260219070646_AddOutboxMessages`.
+          Four events published: **CapacityGapIdentifiedEvent**, **CapacityGapEscalatedEvent**,
+          **CapacityGapResolvedEvent**, **DemandForecastUpdatedEvent**. All carry `CorrelationId`
+          and `CausationId` for distributed tracing via OpenTelemetry.
+        activeCalls: [outbox-publish, outbox-relay]
+        revealNodes: [capplan-api, capplan-db, asb]
+        duration: 5000
+      - id: outbound-step-2
+        title: "Gap Alert Routing: Communications & Monitoring"
+        narrative: >
+          **CapacityGapIdentifiedEvent** triggers two downstream reactions: Communications EP
+          sends notifications to capacity planners (the operations team responsible for that
+          dispatch area), and Monitoring EP creates an operational alert calibrated to the gap's
+          `GapSeverity` (Critical/High/Medium/Low). **CapacityGapEscalatedEvent** escalates the
+          alert chain — Communications notifies management, Monitoring creates an escalated alert
+          that may trigger PagerDuty integration for Critical severity gaps. The event carries
+          `EscalationReason` and `EscalatedByUserId` for audit context. **CapacityGapResolvedEvent**
+          closes the loop — Communications notifies stakeholders that the gap has been addressed,
+          carrying `ResolutionNotes` and `ResolvedByUserId`. {color:green|This three-event lifecycle
+          (identified -> escalated -> resolved) maps cleanly to the CapacityGap state machine,
+          ensuring every state transition is visible to downstream consumers.}
+        activeCalls: [gap-identified-to-comms, gap-identified-to-monitoring, gap-escalated-to-comms, gap-escalated-to-monitoring, gap-resolved-to-comms]
+        revealCalls: [outbox-publish, outbox-relay]
+        duration: 5000
+      - id: outbound-step-3
+        title: "Reporting Integration & Forecast Feedback"
+        narrative: >
+          **CapacityGapResolvedEvent** flows to Reporting EP for gap resolution analytics — how
+          quickly gaps are resolved, which dispatch areas have chronic shortfalls, resolution
+          patterns over time. **DemandForecastUpdatedEvent** (raised by
+          `DemandForecast.UpdateProjections()`) flows to Reporting for forecast accuracy tracking —
+          how often forecasts are revised and by how much. Capacity Planning also consumes its own
+          `DemandForecastUpdatedEvent` to trigger gap recalculation (the updated demand may create
+          or resolve gaps). {color:red|The feedback loop is incomplete: TripCompletedEvent is
+          consumed but not acted upon (no-op handler), so actual vs. forecast comparison is not
+          possible. Azure ML integration (ForecastMethod="ML") is roadmap only — zero ML code
+          exists. Historical forecast generation depends on `IHistoricalTripDataService` which
+          defaults to a stub returning deterministic mock data.} {color:blue|Cross-ref:
+          capacity-planning-forecast.yaml Section 1 for forecast creation details, Section 2 for
+          gap detection algorithm and severity thresholds.}
+        activeCalls: [gap-resolved-to-reporting, forecast-updated-to-reporting]
+        revealCalls: [gap-identified-to-comms, gap-identified-to-monitoring, gap-escalated-to-comms, gap-escalated-to-monitoring, gap-resolved-to-comms]
+        duration: 5000

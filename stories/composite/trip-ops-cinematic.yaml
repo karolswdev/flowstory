@@ -1,0 +1,934 @@
+id: trip-ops-cinematic
+title: "Trip Operations — Cinematic Architecture Deep Dive"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  A multi-perspective cinematic deep dive into Trip Operations —
+  from the ingestion edge through orchestration, real-time telemetry,
+  and failure resilience. Emojis glide along edges, fading before
+  they reach the target — graceful, slow, bottom-glued to the line.
+
+sections:
+  # ══════════════════════════════════════════════════════════════════════════
+  # SECTION 1: The Edge — Horizontal Ingestion Pipeline
+  # ══════════════════════════════════════════════════════════════════════════
+  - renderer: service-flow
+    title: "The Edge"
+    accentColor: "#6366F1"
+    layout: sequence
+
+    services:
+      - id: rider-app
+        name: Rider App
+        type: client
+        technology: "React Native"
+        tags:
+          platform: iOS / Android
+          sessions: "12k active"
+
+      - id: waf
+        name: Edge Shield
+        type: firewall
+        technology: "Cloudflare WAF"
+        status: healthy
+        tags:
+          rules: "2.4k"
+
+      - id: lb
+        name: Ingress
+        type: load-balancer
+        technology: "Envoy"
+        status: healthy
+        tags:
+          algorithm: least-conn
+
+      - id: trip-api
+        name: Trip Service
+        type: api
+        technology: "Go 1.22"
+        status: healthy
+        instances: 5
+        version: "3.8"
+        substates: [idle, validating, accepted, rejected]
+        initialSubstate: idle
+        tags:
+          SLA: "99.99%"
+          protocol: gRPC
+
+      - id: auth
+        name: Auth Gateway
+        type: gateway
+        technology: "Keycloak"
+        status: healthy
+        tags:
+          method: OAuth 2.0
+
+      - id: rate-limiter
+        name: Rate Limiter
+        type: cache
+        technology: "Redis"
+        status: healthy
+        tags:
+          window: "60s"
+          limit: "100/min"
+
+    scenes:
+      - id: edge-layer
+        direction: LR
+        members: [rider-app, waf, lb, auth, rate-limiter, trip-api]
+
+    zones:
+      - id: security-perimeter
+        label: "Security Perimeter"
+        members: [waf, lb, auth, rate-limiter]
+        color: "rgba(99, 102, 241, 0.05)"
+
+    calls:
+      - id: app-to-waf
+        type: sync
+        from: rider-app
+        to: waf
+        method: POST
+        path: /v2/trips
+        coupling: tight
+        critical: true
+        effect:
+          type: emoji-fan
+          emojis: ["📦"]
+          count: 3
+          stagger: 600
+          direction: along-edge
+          duration: 3500
+
+      - id: waf-to-lb
+        type: sync
+        from: waf
+        to: lb
+        method: POST
+        path: /v2/trips
+        coupling: tight
+        critical: true
+        travelingLabel: true
+        effect:
+          type: emoji-fan
+          emojis: ["🛡️", "✅"]
+          count: 3
+          stagger: 500
+          direction: along-edge
+          duration: 3000
+
+      - id: lb-to-auth
+        type: sync
+        from: lb
+        to: auth
+        method: POST
+        path: /oauth/verify
+        duration: 3
+        effect:
+          type: emoji-fan
+          emojis: ["🔑"]
+          count: 2
+          stagger: 700
+          direction: along-edge
+          duration: 3000
+
+      - id: lb-to-rate
+        type: sync
+        from: lb
+        to: rate-limiter
+        method: GET
+        path: /check
+        duration: 1
+        coupling: loose
+        fallback: "Allow through"
+        effect:
+          type: emoji-fan
+          emojis: ["⚡"]
+          count: 2
+          stagger: 600
+          direction: along-edge
+          duration: 2800
+
+      - id: lb-to-api
+        type: sync
+        from: lb
+        to: trip-api
+        method: POST
+        path: /v2/trips
+        protocol: grpc
+        duration: 180
+        coupling: tight
+        critical: true
+        travelingLabel: true
+        response:
+          status: 202
+          label: "Trip Accepted"
+        effect:
+          type: emoji-fan
+          emojis: ["📦", "🚀"]
+          count: 3
+          stagger: 600
+          direction: along-edge
+          duration: 3500
+
+    steps:
+      - id: edge-1
+        title: "Request Hits the Edge"
+        narration:
+          speaker: Architect
+          message: >-
+            A rider taps **Request Trip**. The request passes through
+            {color:purple|Cloudflare's WAF} — 2,400 rules filtering
+            malicious traffic — into the {color:teal|Envoy} ingress.\n\n
+            Watch the emojis glide along each edge — that's your data
+            flowing through the security perimeter.
+        activeCalls:
+          - app-to-waf
+          - waf-to-lb
+        focusNodes:
+          - rider-app
+          - waf
+          - lb
+        substates:
+          trip-api: idle
+        camera:
+          zoom: 1.4
+          duration: 1500
+          easing: ease-out
+        duration: 5000
+
+      - id: edge-2
+        title: "Authentication & Rate Limiting"
+        narration:
+          speaker: Architect
+          message: >-
+            Two parallel checks fire simultaneously:\n
+            **1.** {color:amber|OAuth 2.0} token validation via Keycloak — `3ms`\n
+            **2.** {color:cyan|Rate limiter} checks the sliding window —
+            if Redis is down, the {color:green|fallback allows through}.\n\n
+            *Defense in depth. No single point of failure in the security path.*
+        activeCalls:
+          - lb-to-auth
+          - lb-to-rate
+        revealCalls:
+          - app-to-waf
+          - waf-to-lb
+        focusNodes:
+          - lb
+          - auth
+          - rate-limiter
+        camera:
+          zoom: 1.3
+          duration: 1200
+        duration: 5000
+
+      - id: edge-3
+        title: "Into the Platform"
+        narration:
+          speaker: Architect
+          message: >-
+            Authenticated and rate-checked, the request reaches the
+            {color:blue|Trip Service} — one of **5 instances** behind
+            least-connection routing. The service validates the payload
+            and returns `202 Accepted`.\n\n
+            *The edge's job is done. Now the platform takes over.*
+        activeCalls:
+          - lb-to-api
+        revealCalls:
+          - app-to-waf
+          - waf-to-lb
+          - lb-to-auth
+          - lb-to-rate
+        focusNodes:
+          - trip-api
+        substates:
+          trip-api: validating
+        camera:
+          zoom: 1.2
+          duration: 1500
+          easing: ease-in-out
+        duration: 5000
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # SECTION 2: The Brain — Vertical Orchestration Stack
+  # ══════════════════════════════════════════════════════════════════════════
+  - renderer: service-flow
+    title: "The Brain"
+    accentColor: "#3B82F6"
+    layout: sequence
+
+    services:
+      - id: trip-api
+        name: Trip Service
+        type: api
+        technology: "Go 1.22"
+        status: healthy
+        version: "3.8"
+        substates: [idle, dispatching, monitoring]
+        initialSubstate: dispatching
+        tags:
+          protocol: gRPC
+
+      - id: orchestrator
+        name: Trip Orchestrator
+        type: workflow
+        technology: "Temporal"
+        substates: [idle, running, waiting, compensating, completed, failed]
+        initialSubstate: idle
+        tags:
+          team: platform
+          retention: "30d"
+
+      - id: compliance
+        name: Compliance
+        type: policy
+        technology: "OPA"
+        substates: [idle, evaluating, approved, denied]
+        initialSubstate: idle
+
+      - id: matching
+        name: Matching Engine
+        type: function
+        technology: "Rust Lambda"
+        substates: [idle, scoring, assigned]
+        initialSubstate: idle
+        tags:
+          p99: "12ms"
+
+      - id: pricing
+        name: Pricing Engine
+        type: worker
+        technology: "Python 3.12"
+        substates: [idle, computing, ready]
+        initialSubstate: idle
+        tags:
+          model: surge-v2
+
+      - id: eta-svc
+        name: ETA Predictor
+        type: external
+        technology: "Google Maps"
+        tags:
+          vendor: Google
+
+      - id: driver-index
+        name: Driver Index
+        type: storage
+        technology: "Elasticsearch"
+        tags:
+          shards: "12"
+
+      - id: geo-cache
+        name: Geo Cache
+        type: cache
+        technology: "Redis Cluster"
+        tags:
+          ttl: "30s"
+
+      - id: trip-db
+        name: Trip Store
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+        tags:
+          replicas: "3"
+
+    scenes:
+      - id: command
+        direction: TB
+        members: [trip-api, orchestrator, compliance]
+        ranksep: 160
+      - id: intelligence
+        direction: LR
+        members: [matching, driver-index, eta-svc, pricing, geo-cache]
+      - id: persistence
+        direction: LR
+        members: [trip-db]
+
+    zones:
+      - id: orchestration-core
+        label: "Orchestration Core"
+        members: [trip-api, orchestrator, compliance]
+        color: "rgba(59, 130, 246, 0.05)"
+      - id: intelligence-layer
+        label: "Intelligence Layer"
+        members: [matching, driver-index, eta-svc, pricing, geo-cache]
+        color: "rgba(249, 115, 22, 0.05)"
+
+    calls:
+      - id: api-to-orch
+        type: sync
+        from: trip-api
+        to: orchestrator
+        method: POST
+        path: /workflows/trip-lifecycle
+        protocol: grpc
+        duration: 5
+        coupling: tight
+        critical: true
+        travelingLabel: true
+        effect:
+          type: emoji-fan
+          emojis: ["⚙️", "🔄"]
+          count: 3
+          stagger: 600
+          direction: along-edge
+          duration: 3500
+
+      - id: orch-to-compliance
+        type: sync
+        from: orchestrator
+        to: compliance
+        method: POST
+        path: /evaluate
+        duration: 8
+        travelingLabel: true
+        effect:
+          type: emoji-fan
+          emojis: ["⚖️"]
+          count: 2
+          stagger: 700
+          direction: along-edge
+          duration: 3000
+
+      - id: orch-to-matching
+        type: sync
+        from: orchestrator
+        to: matching
+        method: POST
+        path: /match
+        protocol: grpc
+        duration: 12
+        coupling: tight
+        critical: true
+        travelingLabel: true
+        effect:
+          type: emoji-fan
+          emojis: ["🎯", "🔍"]
+          count: 3
+          stagger: 500
+          direction: along-edge
+          duration: 3500
+
+      - id: match-to-drivers
+        type: sync
+        from: matching
+        to: driver-index
+        method: GET
+        path: /drivers/nearby
+        duration: 6
+        effect:
+          type: emoji-fan
+          emojis: ["🚗", "🚕"]
+          count: 3
+          stagger: 600
+          direction: along-edge
+          duration: 3500
+
+      - id: match-to-eta
+        type: sync
+        from: matching
+        to: eta-svc
+        method: GET
+        path: /maps/eta
+        duration: 95
+        travelingLabel: true
+        effect:
+          type: emoji-fan
+          emojis: ["📍"]
+          count: 2
+          stagger: 700
+          direction: along-edge
+          duration: 3000
+
+      - id: orch-to-pricing
+        type: sync
+        from: orchestrator
+        to: pricing
+        method: POST
+        path: /price
+        duration: 22
+        effect:
+          type: emoji-fan
+          emojis: ["💰", "💵"]
+          count: 3
+          stagger: 600
+          direction: along-edge
+          duration: 3500
+
+      - id: api-to-geocache
+        type: sync
+        from: trip-api
+        to: geo-cache
+        method: GET
+        path: /geo/pickup
+        duration: 2
+        coupling: loose
+        fallback: "Direct geocode"
+        effect:
+          type: emoji-fan
+          emojis: ["📍"]
+          count: 2
+          stagger: 600
+          direction: along-edge
+          duration: 3000
+
+      - id: api-to-db
+        type: sync
+        from: trip-api
+        to: trip-db
+        method: INSERT
+        path: "trips + outbox"
+        duration: 6
+        coupling: tight
+        critical: true
+        travelingLabel: true
+        effect:
+          type: emoji-fan
+          emojis: ["💾", "📝"]
+          count: 3
+          stagger: 600
+          direction: along-edge
+          duration: 3500
+
+    steps:
+      - id: brain-1
+        title: "Orchestration Ignites"
+        narration:
+          speaker: Architect
+          message: >-
+            The Trip Service hands off to the {color:blue|Trip Orchestrator} —
+            a **Temporal workflow** that owns the entire lifecycle.\n\n
+            First action: {color:red|compliance check} via OPA.
+            Rider eligibility, service area, regulatory constraints —
+            all evaluated in `8ms`.
+        activeCalls:
+          - api-to-orch
+          - orch-to-compliance
+        focusNodes:
+          - trip-api
+          - orchestrator
+          - compliance
+        substates:
+          orchestrator: running
+          compliance: evaluating
+        camera:
+          zoom: 1.3
+          duration: 1500
+        duration: 5000
+
+      - id: brain-2
+        title: "Intelligence Fan-Out"
+        narration:
+          speaker: Architect
+          message: >-
+            Compliance {color:green|approved}. The orchestrator fans out:\n
+            **Matching** — Rust Lambda queries {color:green|Elasticsearch}
+            for nearby drivers, then {color:gray|Google Maps} for ETAs.
+            `12ms p99`.\n
+            **Pricing** — Python computes surge-adjusted fare.\n
+            **Geo Cache** — Redis resolves pickup coordinates in `2ms`.\n\n
+            *Three independent paths. Zero sequential blocking.*
+        activeCalls:
+          - orch-to-matching
+          - match-to-drivers
+          - match-to-eta
+          - orch-to-pricing
+          - api-to-geocache
+        revealCalls:
+          - api-to-orch
+          - orch-to-compliance
+        substates:
+          compliance: approved
+          matching: scoring
+          pricing: computing
+        focusNodes:
+          - matching
+          - driver-index
+          - eta-svc
+          - pricing
+          - geo-cache
+        camera:
+          fitAll: true
+          duration: 2000
+          easing: ease-in-out
+        duration: 6000
+
+      - id: brain-3
+        title: "Assignment & Persistence"
+        narration:
+          speaker: Architect
+          message: >-
+            Driver matched. Price computed. The Trip Service persists
+            the trip to {color:blue|PostgreSQL} using the
+            **transactional outbox pattern** — record + event
+            in one atomic write. `6ms`.\n\n
+            {color:green|Guaranteed consistency.} If the write fails,
+            no event escapes.
+        activeCalls:
+          - api-to-db
+        revealCalls:
+          - api-to-orch
+          - orch-to-compliance
+          - orch-to-matching
+          - match-to-drivers
+          - match-to-eta
+          - orch-to-pricing
+          - api-to-geocache
+        substates:
+          orchestrator: waiting
+          matching: assigned
+          pricing: ready
+        focusNodes:
+          - trip-api
+          - trip-db
+        camera:
+          zoom: 1.2
+          duration: 1500
+        duration: 5000
+
+      - id: brain-4
+        title: "Database Failure — Blast Radius"
+        narration:
+          speaker: Architect
+          message: >-
+            **Scenario: Trip Store goes down.**\n\n
+            The {color:red|tightly coupled critical path}
+            (Trip API → Orchestrator → Matching) cascades upstream.
+            Every `critical: true` link turns red.\n\n
+            The {color:cyan|Geo Cache}? Activates its {color:green|fallback}.
+            Intelligence layer? Already returned results —
+            *unaffected*.\n\n
+            This is your **blast radius**. Design for it.
+        activeCalls:
+          - api-to-orch
+          - orch-to-matching
+          - api-to-db
+          - api-to-geocache
+        simulateFailure: trip-db
+        substates:
+          orchestrator: failed
+          matching: idle
+          pricing: idle
+          compliance: idle
+        focusNodes:
+          - trip-db
+          - trip-api
+          - orchestrator
+        effects:
+          - target: api-to-db
+            type: emoji-fan
+            emojis: ["💥", "🔥"]
+            count: 6
+            spread: 120
+            speed: 80
+            direction: radial
+            gravity: 8
+            duration: 3000
+        camera:
+          zoom: 1.0
+          duration: 2500
+          easing: ease-out
+        duration: 7000
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # SECTION 3: The Nervous System — Event-Driven Fan-Out
+  # ══════════════════════════════════════════════════════════════════════════
+  - renderer: service-flow
+    title: "The Nervous System"
+    accentColor: "#A855F7"
+    layout: sequence
+
+    services:
+      - id: trip-api
+        name: Trip Service
+        type: api
+        technology: "Go 1.22"
+        version: "3.8"
+        substates: [emitting, monitoring]
+        initialSubstate: emitting
+
+      - id: notifier
+        name: Notification Hub
+        type: worker
+        technology: "Node.js"
+        tags:
+          channels: "push, sms, email"
+
+      - id: monitor
+        name: Live Dashboard
+        type: monitor
+        technology: "Grafana"
+        tags:
+          panels: "42"
+
+      - id: analytics
+        name: Analytics Sink
+        type: database
+        technology: "ClickHouse"
+        tags:
+          retention: "90d"
+
+      - id: audit
+        name: Audit Logger
+        type: storage
+        technology: "S3 + Athena"
+        tags:
+          compliance: SOC-2
+
+      - id: dispatch-human
+        name: Manual Review
+        type: human-task
+        technology: "Dispatch Console"
+        substates: [idle, pending, reviewing]
+        initialSubstate: idle
+
+    queues:
+      - id: trip-events
+        name: trip-events
+        type: topic
+        broker: kafka
+        consumers: 6
+        tags:
+          retention: "14d"
+          tier: critical
+
+      - id: notification-queue
+        name: notification-jobs
+        type: queue
+        broker: rabbitmq
+        consumers: 3
+        tags:
+          priority: routing
+
+    scenes:
+      - id: source
+        direction: LR
+        members: [trip-api, trip-events]
+      - id: consumers
+        direction: TB
+        members: [notifier, monitor, analytics, audit, dispatch-human, notification-queue]
+        nodesep: 40
+
+    zones:
+      - id: event-backbone
+        label: "Event Backbone"
+        members: [trip-api, trip-events]
+        color: "rgba(168, 85, 247, 0.05)"
+      - id: consumers-zone
+        label: "Downstream Consumers"
+        members: [notifier, monitor, analytics, audit, dispatch-human]
+        color: "rgba(34, 197, 94, 0.05)"
+
+    calls:
+      - id: emit-created
+        type: publish
+        from: trip-api
+        to: trip-events
+        messageType: TripCreatedEvent
+        coupling: eventual
+        travelingLabel: true
+        stream:
+          particles: ["📦", "✨", "📦"]
+          density: 4
+          speed: 3.5
+          width: 20
+          fade: true
+          bandOpacity: 0.06
+
+      - id: emit-assigned
+        type: publish
+        from: trip-api
+        to: trip-events
+        messageType: DriverAssignedEvent
+        coupling: eventual
+        travelingLabel: true
+        stream:
+          particles: ["🚗", "👤", "🚗"]
+          density: 3
+          speed: 4.0
+          width: 18
+          fade: true
+          bandOpacity: 0.05
+
+      - id: events-to-notifier
+        type: subscribe
+        from: trip-events
+        to: notifier
+        messageType: TripCreatedEvent
+        action: "Push to rider"
+        coupling: eventual
+        stream:
+          particles: ["📱", "🔔"]
+          density: 3
+          speed: 3.0
+          width: 14
+          fade: true
+          bandOpacity: 0.05
+
+      - id: events-to-monitor
+        type: subscribe
+        from: trip-events
+        to: monitor
+        messageType: "*"
+        action: "Live telemetry"
+        coupling: eventual
+        stream:
+          particles: ["📊", "📈"]
+          density: 4
+          speed: 2.5
+          width: 14
+          fade: true
+          bandOpacity: 0.06
+
+      - id: events-to-analytics
+        type: subscribe
+        from: trip-events
+        to: analytics
+        messageType: "*"
+        action: "Materialized views"
+        coupling: eventual
+        stream:
+          particles: ["📈", "📊"]
+          density: 3
+          speed: 3.0
+          width: 14
+          fade: true
+          bandOpacity: 0.05
+
+      - id: events-to-audit
+        type: subscribe
+        from: trip-events
+        to: audit
+        messageType: "*"
+        action: "Compliance log"
+        coupling: eventual
+        stream:
+          particles: ["📋", "🔒"]
+          density: 2
+          speed: 3.5
+          width: 12
+          fade: true
+          bandOpacity: 0.04
+
+      - id: notifier-to-queue
+        type: async
+        from: notifier
+        to: notification-queue
+        messageType: NotificationJob
+        stream:
+          particles: ["📨"]
+          density: 3
+          speed: 2.5
+          width: 12
+          fade: true
+          bandOpacity: 0.05
+
+      - id: events-to-human
+        type: subscribe
+        from: trip-events
+        to: dispatch-human
+        messageType: EscalationEvent
+        action: "Manual review"
+        coupling: eventual
+        stream:
+          particles: ["👤", "⚠️"]
+          density: 2
+          speed: 4.0
+          width: 12
+          fade: true
+          bandOpacity: 0.04
+
+    steps:
+      - id: nervous-1
+        title: "Event Publication"
+        narration:
+          speaker: Architect
+          message: >-
+            Trip persisted. Now the {color:purple|event stream} takes over.\n\n
+            **TripCreatedEvent** and **DriverAssignedEvent** hit Kafka —
+            24 partitions, 100k/s throughput, 14-day retention.\n\n
+            *This is the decoupling point.* The Trip Service's job is done.
+            Everything downstream is eventually consistent.
+        activeCalls:
+          - emit-created
+          - emit-assigned
+        focusNodes:
+          - trip-api
+          - trip-events
+        substates:
+          trip-api: emitting
+        camera:
+          zoom: 1.3
+          duration: 1500
+        duration: 5000
+
+      - id: nervous-2
+        title: "Fan-Out — Six Consumers"
+        narration:
+          speaker: Architect
+          message: >-
+            One event, **six independent consumers**:\n
+            {color:purple|Notification Hub} — pushes real-time alerts to rider and driver\n
+            {color:green|Live Dashboard} — 42 Grafana panels, 5s refresh\n
+            {color:blue|Analytics Sink} — ClickHouse materialized views, 90d retention\n
+            {color:gray|Audit Logger} — SOC-2 compliant immutable trail\n
+            {color:pink|Manual Review} — human escalation for edge cases\n\n
+            *Zero point-to-point integrations. Add a consumer, change nothing upstream.*
+        activeCalls:
+          - events-to-notifier
+          - events-to-monitor
+          - events-to-analytics
+          - events-to-audit
+          - events-to-human
+          - notifier-to-queue
+        revealCalls:
+          - emit-created
+          - emit-assigned
+        substates:
+          trip-api: monitoring
+          dispatch-human: pending
+        focusNodes:
+          - trip-events
+          - notifier
+          - monitor
+          - analytics
+          - audit
+          - dispatch-human
+        camera:
+          fitAll: true
+          duration: 2000
+          easing: ease-in-out
+        duration: 7000
+
+      - id: nervous-3
+        title: "Human in the Loop"
+        narration:
+          speaker: Architect
+          message: >-
+            When the system can't decide — no drivers available,
+            unusual route, flagged rider — the {color:pink|Manual Review}
+            queue catches it.\n\n
+            A human dispatcher reviews, approves or rejects.
+            The decision flows back as a **DispatchDecisionEvent**.\n\n
+            *Automation where possible. Human judgment where necessary.
+            That's production-grade operations.*
+        activeCalls:
+          - events-to-human
+        revealCalls:
+          - emit-created
+          - emit-assigned
+          - events-to-notifier
+          - events-to-monitor
+          - events-to-analytics
+          - events-to-audit
+          - notifier-to-queue
+        substates:
+          dispatch-human: reviewing
+        focusNodes:
+          - dispatch-human
+        camera:
+          zoom: 1.4
+          duration: 1500
+          easing: ease-out
+        duration: 6000

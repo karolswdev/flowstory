@@ -12,6 +12,7 @@ interface TechRadarCanvasProps {
   story: TechRadarStory;
   currentStepIndex: number;
   onStepChange?: (step: number) => void;
+  hideOverlay?: boolean;
 }
 
 /**
@@ -57,10 +58,11 @@ function calculateBlipPosition(
 /**
  * TechRadarCanvas - Main canvas for technology radar visualization
  */
-export function TechRadarCanvas({ 
-  story, 
+export function TechRadarCanvas({
+  story,
   currentStepIndex,
-  onStepChange 
+  onStepChange,
+  hideOverlay = false,
 }: TechRadarCanvasProps) {
   const quadrants = story.quadrants || DEFAULT_QUADRANTS;
   const rings = story.rings || DEFAULT_RINGS;
@@ -195,46 +197,50 @@ export function TechRadarCanvas({
         </AnimatePresence>
       </svg>
       
-      {/* Info panel for current step */}
-      <AnimatePresence mode="wait">
-        {currentStep && (
-          <motion.div 
-            className="tech-radar-info"
-            variants={fadeUp}
-            initial="initial"
-            animate="animate"
-            exit="exit"
-            transition={TRANSITION.default}
-            key={currentStepIndex}
-          >
-            <h3>{currentStep.title}</h3>
-            <p>{currentStep.description}</p>
-            {currentStep.narration && (
-              <blockquote>
-                {currentStep.narration.speaker && <cite>{currentStep.narration.speaker}:</cite>}
-                {currentStep.narration.message}
-              </blockquote>
+      {!hideOverlay && (
+        <>
+          {/* Info panel for current step */}
+          <AnimatePresence mode="wait">
+            {currentStep && (
+              <motion.div
+                className="tech-radar-info"
+                variants={fadeUp}
+                initial="initial"
+                animate="animate"
+                exit="exit"
+                transition={TRANSITION.default}
+                key={currentStepIndex}
+              >
+                <h3>{currentStep.title}</h3>
+                <p>{currentStep.description}</p>
+                {currentStep.narration && (
+                  <blockquote>
+                    {currentStep.narration.speaker && <cite>{currentStep.narration.speaker}:</cite>}
+                    {currentStep.narration.message}
+                  </blockquote>
+                )}
+              </motion.div>
             )}
-          </motion.div>
-        )}
-      </AnimatePresence>
-      
-      {/* Step navigation */}
-      <div className="tech-radar-nav">
-        <button 
-          onClick={() => onStepChange?.(Math.max(0, currentStepIndex - 1))}
-          disabled={currentStepIndex === 0}
-        >
-          ← Previous
-        </button>
-        <span>{currentStepIndex + 1} / {story.steps.length}</span>
-        <button 
-          onClick={() => onStepChange?.(Math.min(story.steps.length - 1, currentStepIndex + 1))}
-          disabled={currentStepIndex >= story.steps.length - 1}
-        >
-          Next →
-        </button>
-      </div>
+          </AnimatePresence>
+
+          {/* Step navigation */}
+          <div className="tech-radar-nav">
+            <button
+              onClick={() => onStepChange?.(Math.max(0, currentStepIndex - 1))}
+              disabled={currentStepIndex === 0}
+            >
+              ← Previous
+            </button>
+            <span>{currentStepIndex + 1} / {story.steps.length}</span>
+            <button
+              onClick={() => onStepChange?.(Math.min(story.steps.length - 1, currentStepIndex + 1))}
+              disabled={currentStepIndex >= story.steps.length - 1}
+            >
+              Next →
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

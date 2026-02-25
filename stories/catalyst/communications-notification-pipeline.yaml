@@ -1,0 +1,485 @@
+id: communications-notification-pipeline
+title: "Communications — Notification Pipeline & Multi-Channel Delivery"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  The Communications bounded context is the platform's notification hub — every domain event
+  that requires human attention flows through its multi-channel delivery pipeline. An inbound
+  event triggers template mapping via IEventToNotificationMapper, recipient resolution via
+  cross-context HTTP clients, Handlebars template rendering with localization fallback, and
+  parallel dispatch across SMS (Twilio), Email (SendGrid), Push (Firebase), and Voice (Twilio).
+  Per-channel delivery tracking, webhook-driven status confirmation, and per-tenant rate limiting
+  ensure reliable, observable delivery at scale.
+
+sections:
+  # -- Section 1: Template Rendering & Notification Creation --------------------------
+  - renderer: service-flow
+    title: "Template Rendering & Notification Creation"
+    accentColor: "#8B5CF6"
+    layout: sequence
+
+    services:
+      - id: comms-ep
+        name: "Communications Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: comms-api
+        name: "Communications API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: comms-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "PostgreSQL 16 (communications)"
+        status: healthy
+      - id: redis
+        name: "Redis"
+        type: cache
+        technology: "Redis (CatalystComms:)"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+      - id: enrollment-api
+        name: "Enrollment API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: identity-api
+        name: "Identity & Access API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: provider-api
+        name: "Provider Network API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: trip-ops-api
+        name: "Trip Operations API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+
+    zones:
+      - id: comms-core
+        label: "Communications BC"
+        members: [comms-ep, comms-api, comms-db, redis]
+        color: "rgba(139, 92, 246, 0.06)"
+      - id: cross-context
+        label: "Cross-Context Data Sources"
+        members: [enrollment-api, identity-api, provider-api, trip-ops-api]
+        color: "rgba(59, 130, 246, 0.06)"
+      - id: messaging
+        label: "Event Bus"
+        members: [asb]
+        color: "rgba(245, 158, 11, 0.06)"
+
+    calls:
+      - id: receive-event
+        type: subscribe
+        from: asb
+        to: comms-ep
+        messageType: "DomainEvent (e.g. TripAssignedEvent)"
+        payload:
+          description: "27 event handlers across 9 ASB topic subscriptions — each handler invokes IEventToNotificationMapper"
+      - id: map-template
+        type: sync
+        from: comms-ep
+        to: comms-ep
+        method: POST
+        path: "IEventToNotificationMapper.MapAsync()"
+        duration: 5
+        description: "EventToNotificationMapper (Singleton) — config-driven mapping from EventTemplateMappingConfiguration in appsettings.json. Returns template name, category, priority, and variable bindings. Unmapped events logged as warning and silently dropped."
+      - id: resolve-recipient-enrollment
+        type: sync
+        from: comms-ep
+        to: enrollment-api
+        method: GET
+        path: "/v1/ceps/{studentId}"
+        duration: 50
+        description: "IEnrollmentQueryClient (EnrollmentQueryHttpClient) — resolve student/parent contact info. TenantIdDelegatingHandler propagates X-Tenant-Id header."
+      - id: resolve-recipient-identity
+        type: sync
+        from: comms-ep
+        to: identity-api
+        method: GET
+        path: "/v1/users/{userId}"
+        duration: 40
+        description: "IUserQueryClient (UserQueryHttpClient) — resolve user profile for recipient resolution. CorrelationIdDelegatingHandler propagates X-Correlation-Id."
+      - id: resolve-recipient-provider
+        type: sync
+        from: comms-ep
+        to: provider-api
+        method: GET
+        path: "/v1/providers/{providerId}"
+        duration: 45
+        description: "IProviderNetworkQueryClient (ProviderNetworkQueryHttpClient) — resolve driver/provider contact details for driver notifications."
+      - id: resolve-recipient-fleet
+        type: sync
+        from: comms-ep
+        to: trip-ops-api
+        method: GET
+        path: "/v1/vr/{vrId}"
+        duration: 50
+        description: "IFleetQueryClient (FleetQueryHttpClient) — resolve VR/PT trip context data for notification variable substitution."
+      - id: render-template
+        type: sync
+        from: comms-ep
+        to: comms-api
+        method: POST
+        path: "ITemplateRenderingService.RenderAsync()"
+        duration: 15
+        description: "Template rendering pipeline: lookup by name+tenant -> version selection (active or A/B test weighted) -> localization resolution (exact -> base -> default -> active content) -> Handlebars rendering with variable substitution."
+      - id: create-notification
+        type: sync
+        from: comms-ep
+        to: comms-db
+        method: POST
+        path: "CreateNotificationCommand -> Notification.Create()"
+        duration: 80
+        description: "Notification aggregate factory: sets Queued status, initializes ChannelDeliveryStatus per requested channel, validates TenantId + RecipientId + at least one NotificationChannel. Persisted via INotificationRepository."
+
+    steps:
+      - id: pipeline-step-1
+        title: "Event Reception & Template Mapping"
+        narrative: >
+          An inbound domain event arrives at the **Communications EventProcessor** via one of
+          9 ASB topic subscriptions — e.g. `TripAssignedEvent` on the `trip-operations` topic
+          consumed by `communications-trip-subscriber`. The handler invokes
+          **IEventToNotificationMapper** (`EventToNotificationMapper`, registered as Singleton),
+          which performs config-driven lookup from the `EventTemplateMappings` section of
+          `appsettings.json`. The mapper returns the template name, **TemplateCategory**
+          (TripOperations, RescueExceptions, Compliance, SettlementPayment, or System), priority
+          level (**NotificationPriority**: Low=15min SLA, Medium=5min, High=1min, Critical=immediate),
+          and variable bindings extracted from the event payload.
+
+          {color:red|If no mapping exists for an event type, the handler logs a warning and silently
+          drops the notification — no dead letter or fallback mechanism for unmapped events.}
+
+          {color:green|All 27 event handlers are decorated with `DecorateEventHandlerWithMetrics<T>()`
+          for Prometheus observability (R080).}
+        activeCalls: [receive-event, map-template]
+        revealNodes: [comms-ep, asb]
+        duration: 5000
+      - id: pipeline-step-2
+        title: "Recipient Resolution via Cross-Context HTTP"
+        narrative: >
+          **IRecipientResolver** (`RecipientResolverService`, registered as Scoped) resolves
+          notification recipients from event data using 4 cross-context HTTP clients:
+          **IEnrollmentQueryClient** for student/parent contacts,
+          **IUserQueryClient** for user profiles,
+          **IProviderNetworkQueryClient** for driver/provider details, and
+          **IFleetQueryClient** for VR/PT trip context. Each HTTP client uses two delegating
+          handlers: **TenantIdDelegatingHandler** (propagates `X-Tenant-Id` header for
+          multi-tenancy isolation) and **CorrelationIdDelegatingHandler** (propagates
+          `X-Correlation-Id` for distributed tracing).
+
+          The resolver produces one or more **NotificationChannel** value objects — `Sms(phone)`
+          with E.164 validation, `Email(address)` with format validation, `Push(fcmToken)`,
+          or `Ivr(phone)`. **RecipientPreferences** VO governs channel selection: preferred
+          channel, fallback channel, quiet hours (`IsWithinQuietHours()`), and marketing opt-out.
+
+          {color:blue|Cross-context clients defined in
+          `Catalyst.Communications.Application/Interfaces/CrossContext/*.cs`, implemented in
+          `Catalyst.Communications.Infrastructure/CrossContext/*.cs`.}
+        activeCalls: [resolve-recipient-enrollment, resolve-recipient-identity, resolve-recipient-provider, resolve-recipient-fleet]
+        revealNodes: [enrollment-api, identity-api, provider-api, trip-ops-api]
+        revealCalls: [receive-event, map-template]
+        duration: 6000
+      - id: pipeline-step-3
+        title: "Handlebars Template Rendering & Localization"
+        narrative: >
+          **ITemplateRenderingService** (`TemplateRenderingService`) executes a 5-stage
+          rendering pipeline. Stage 1: lookup **NotificationTemplate** aggregate by name + tenant
+          via `INotificationTemplateRepository`. Stage 2: version selection — either the
+          `ActiveVersionId` pointer or A/B test weighted selection when `StartAbTest()` is active
+          (max 2 versions, percentage-based). Stage 3: localization resolution with
+          **LocalizedContent** VO — exact language match -> base language (e.g., "es" from "es-MX")
+          -> `DefaultLanguage` (BCP 47, default "en-US") -> active version content as final
+          fallback. Stage 4: **IHandlebarsRenderer** substitutes variables into the
+          `TemplateVersion.Content` (Handlebars syntax). Stage 5: **ITemplateVariableService**
+          validates used/unused/missing variables, tracked in preview responses.
+
+          Template versioning enforces `MaxVersionHistory = 50` and `MaxAbTestVersions = 2`.
+          The **TemplateVariable** VO supports 6 types (String, Number, Boolean, DateTime,
+          Object, Array) with nested dot notation and max 100-char names.
+
+          {color:green|Template lifecycle events (TemplateCreatedEvent, TemplateVersionAddedEvent,
+          TemplateActivatedEvent, etc.) provide full audit trail — 16 outbound domain events total.}
+        activeCalls: [render-template]
+        revealCalls: [resolve-recipient-enrollment, resolve-recipient-identity, resolve-recipient-provider, resolve-recipient-fleet]
+        duration: 5000
+      - id: pipeline-step-4
+        title: "Notification Aggregate Creation"
+        narrative: >
+          **CreateNotificationCommand** (validated by **CreateNotificationCommandValidator**)
+          invokes `Notification.Create()` factory method. The aggregate initializes in `Queued`
+          status with: `RecipientId`, `RecipientName`, `RecipientContact`, rendered
+          `MessageContent`, `NotificationType` (TripUpdate, Rescue, Alert, Delay, General),
+          optional `Subject`, context links (`TripId`, `StudentId`, `StudentName`), and a
+          `ChannelDeliveryStatus` entry per requested channel — each starting at `Queued` with
+          `AttemptCount = 0`.
+
+          **Aggregate invariants**: TenantId non-empty (multi-tenancy), RecipientId non-empty,
+          at least one **NotificationChannel** required, `MaxRetryAttempts = 3` per channel.
+          The aggregate is persisted via **INotificationRepository** to the `communications`
+          PostgreSQL database through **CommunicationsDbContext** (3 DbSets: NotificationTemplates,
+          Notifications, DeliveryAttempts). The transactional outbox (`outbox_messages` table)
+          ensures domain events are published after database commit.
+
+          {color:blue|Notification aggregate: `Catalyst.Communications.Domain/Aggregates/Notification.cs`.
+          Per-channel state tracked via nested `ChannelDeliveryStatus` class.}
+        activeCalls: [create-notification]
+        revealNodes: [comms-db]
+        revealCalls: [render-template]
+        duration: 4000
+
+  # -- Section 2: Multi-Channel Delivery & Status Tracking ----------------------------
+  - renderer: service-flow
+    title: "Multi-Channel Delivery & Status Tracking"
+    accentColor: "#EF4444"
+    layout: sequence
+
+    services:
+      - id: comms-api
+        name: "Communications API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: comms-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "PostgreSQL 16 (communications)"
+        status: healthy
+      - id: conductor
+        name: "Conductor"
+        type: workflow
+        technology: "Orkes Conductor"
+        status: healthy
+      - id: twilio
+        name: "Twilio"
+        type: external
+        technology: "Twilio SMS + Voice"
+        status: healthy
+      - id: sendgrid
+        name: "SendGrid"
+        type: external
+        technology: "SendGrid Email"
+        status: healthy
+      - id: firebase
+        name: "Firebase"
+        type: external
+        technology: "Firebase Cloud Messaging"
+        status: healthy
+      - id: redis
+        name: "Redis"
+        type: cache
+        technology: "Redis (CatalystComms:)"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+
+    zones:
+      - id: delivery-core
+        label: "Communications Delivery"
+        members: [comms-api, comms-db, conductor, redis]
+        color: "rgba(239, 68, 68, 0.06)"
+      - id: external-providers
+        label: "External Delivery Providers"
+        members: [twilio, sendgrid, firebase]
+        color: "rgba(245, 158, 11, 0.06)"
+      - id: event-bus
+        label: "Event Bus"
+        members: [asb]
+        color: "rgba(34, 197, 94, 0.06)"
+
+    calls:
+      - id: conductor-sms-task
+        type: sync
+        from: conductor
+        to: twilio
+        method: POST
+        path: "SendSmsNotificationTask -> TwilioSmsService.SendAsync()"
+        duration: 200
+        description: "Conductor task worker dispatches SMS via ISmsService (TwilioSmsService). SmsRateLimiter enforces 100 SMS/second per tenant via token bucket algorithm."
+      - id: conductor-email-task
+        type: sync
+        from: conductor
+        to: sendgrid
+        method: POST
+        path: "SendEmailNotificationTask -> SendGridEmailService.SendAsync()"
+        duration: 150
+        description: "Conductor task worker dispatches email via IEmailService (SendGridEmailService). IEmailSuppressionService checks bounce suppression list before send."
+      - id: conductor-templated-email
+        type: sync
+        from: conductor
+        to: sendgrid
+        method: POST
+        path: "SendTemplatedEmailNotificationTask -> SendGridTemplateService"
+        duration: 180
+        description: "Alternative email path using SendGrid dynamic templates. ISendGridTemplateService with SendGridTemplateConfiguration for template ID mappings."
+      - id: conductor-push-task
+        type: sync
+        from: conductor
+        to: firebase
+        method: POST
+        path: "SendPushNotificationTask -> FirebasePushService.SendAsync()"
+        duration: 100
+        description: "Conductor task worker dispatches push via IPushNotificationService (FirebasePushService). PushPayloadBuilder (static utility) constructs FCM payload. IDeviceTokenService manages token lifecycle."
+      - id: conductor-voice-task
+        type: sync
+        from: conductor
+        to: twilio
+        method: POST
+        path: "SendVoiceNotificationTask -> TwilioVoiceService.CallAsync()"
+        duration: 300
+        description: "Voice call via IVoiceCallService (TwilioVoiceService). Triggered as fallback for Critical/High priority SMS failures or as standalone IVR."
+      - id: twilio-webhook
+        type: async
+        from: twilio
+        to: comms-api
+        messageType: "Twilio Status Callback"
+        payload:
+          description: "TwilioStatusWebhookController + TwilioVoiceWebhookController receive delivery confirmations. TwilioSignatureValidationFilter validates request signatures."
+      - id: sendgrid-webhook
+        type: async
+        from: sendgrid
+        to: comms-api
+        messageType: "SendGrid Event Webhook"
+        payload:
+          description: "SendGridEventWebhookController processes delivery, open, click, bounce events. SendGridSignatureValidator verifies webhook authenticity."
+      - id: update-delivery-status
+        type: sync
+        from: comms-api
+        to: comms-db
+        method: PUT
+        path: "Notification.MarkAsSent() / MarkAsDelivered() / MarkAsFailed()"
+        duration: 30
+        description: "Channel state transitions validated via _allowedChannelTransitions dictionary. DeliveryAttempt entity records each attempt with ProviderMessageId, ErrorCode. Aggregate status computed: ANY Delivered -> Delivered, ANY Retrying -> Retrying, ALL Failed -> Failed."
+      - id: publish-delivery-events
+        type: publish
+        from: comms-api
+        to: asb
+        messageType: "NotificationSentEvent / NotificationDeliveredEvent / NotificationFailedEvent"
+        payload:
+          description: "Domain events raised by Notification aggregate state transitions. Published to communications ASB topic via transactional outbox."
+      - id: voice-fallback-trigger
+        type: sync
+        from: comms-api
+        to: twilio
+        method: POST
+        path: "SendSmsCommandHandler -> TwilioVoiceService (fallback)"
+        duration: 350
+        description: "For Critical/High priority SMS failures with EnableVoiceFallback=true: voice call initiated via TwilioVoiceService with TTS of message content. Raises SmsVoiceFallbackTriggeredEvent."
+
+    steps:
+      - id: delivery-step-1
+        title: "Conductor Task Workers: Parallel Channel Dispatch"
+        narrative: >
+          Six **Conductor task workers** execute channel delivery in parallel:
+          **SendSmsNotificationTask** dispatches via `ISmsService` (`TwilioSmsService`),
+          **SendEmailNotificationTask** via `IEmailService` (`SendGridEmailService`),
+          **SendTemplatedEmailNotificationTask** via `ISendGridTemplateService` (for
+          SendGrid dynamic templates with `SendGridTemplateConfiguration` ID mappings),
+          **SendPushNotificationTask** via `IPushNotificationService` (`FirebasePushService`
+          with **PushPayloadBuilder** static utility), and **SendVoiceNotificationTask** via
+          `IVoiceCallService` (`TwilioVoiceService`). **ResolveRecipientAndRenderTask**
+          handles the pre-delivery recipient + template resolution stage.
+
+          Per-tenant rate limiting via token bucket algorithm: **SmsRateLimiter** (100 SMS/sec
+          default), **EmailRateLimiter**, **PushRateLimiter**, **VoiceRateLimiter** — each
+          creates a `TokenBucketRateLimiter` per tenant in a `ConcurrentDictionary`.
+
+          {color:red|Rate limiter memory: no eviction policy for inactive tenants in the
+          ConcurrentDictionary. Potential memory growth with many tenants.}
+
+          {color:green|All Conductor workers use custom AsyncWorkerHost to prevent thread pool
+          starvation, with Redis-based WorkerIdempotencyService for exactly-once processing.}
+        activeCalls: [conductor-sms-task, conductor-email-task, conductor-templated-email, conductor-push-task, conductor-voice-task]
+        revealNodes: [conductor, twilio, sendgrid, firebase]
+        duration: 6000
+      - id: delivery-step-2
+        title: "Voice Fallback for Critical SMS Failures"
+        narrative: >
+          When an SMS delivery fails for **Critical** or **High** priority notifications,
+          the **SendSmsCommandHandler** automatically triggers voice fallback if
+          `EnableVoiceFallback` is true (auto-enabled for Critical/High priority). The
+          handler calls `IVoiceCallService` (`TwilioVoiceService`) to initiate a Twilio
+          Programmable Voice call with text-to-speech of the message content. The IVR
+          pipeline is served by **IvrController** (`v1/ivr`) with 4 endpoints: `welcome`
+          (entry point/main menu), `menu` (selection routing to trip/driver/vehicle/dispatcher),
+          `post-status` (return or end), and `status-callback` (Twilio call status webhook).
+          All IVR endpoints use **TwilioRequestValidationFilter** for signature verification
+          and are `[AllowAnonymous]` (Twilio-to-Catalyst callbacks).
+
+          Raises **SmsVoiceFallbackTriggeredEvent** with both SMS failure details and voice
+          call status. The response includes dual status tracking.
+
+          {color:red|Voice fallback only triggers for Critical/High priority — lower priority
+          SMS failures are not escalated. This is by design but requires monitoring.}
+        activeCalls: [voice-fallback-trigger]
+        revealCalls: [conductor-sms-task]
+        duration: 5000
+      - id: delivery-step-3
+        title: "Webhook-Driven Delivery Confirmation"
+        narrative: >
+          External providers confirm delivery asynchronously via webhooks.
+          **TwilioStatusWebhookController** and **TwilioVoiceWebhookController**
+          (in `Infrastructure/Webhooks/`) process SMS and voice status callbacks with
+          **TwilioSignatureValidationFilter** signature verification.
+          **SendGridEventWebhookController** processes delivery, open, click, and bounce
+          events with **SendGridSignatureValidator** authentication.
+
+          Each webhook invokes the appropriate **Notification** aggregate method:
+          `MarkAsSent(channel, externalMessageId)` (Queued -> Sent),
+          `MarkAsDelivered(channel, deliveredAt)` (Sent/Queued -> Delivered),
+          `MarkAsFailed(channel, errorCode, errorMessage)` (Queued/Sent/Retrying -> Failed),
+          `Retry(channel)` (Sent -> Retrying, auto-fail if `MaxRetryAttempts = 3` exceeded).
+          Email engagement: `RecordEmailOpened()`, `RecordEmailLinkClicked()`,
+          `RecordEmailBounced()`. Each transition creates a **DeliveryAttempt** entity
+          (Pending -> Delivered | Failed | Bounced).
+
+          {color:green|Channel state transitions strictly validated via `_allowedChannelTransitions`
+          dictionary — invalid transitions raise CommunicationsDomainException.}
+        activeCalls: [twilio-webhook, sendgrid-webhook, update-delivery-status]
+        revealNodes: [comms-api, comms-db]
+        revealCalls: [conductor-sms-task, conductor-email-task, conductor-push-task, voice-fallback-trigger]
+        duration: 5000
+      - id: delivery-step-4
+        title: "Aggregate Status Computation & Outbound Events"
+        narrative: >
+          The **Notification** aggregate computes its overall status from per-channel
+          `ChannelDeliveryStatus` entries: ANY channel `Delivered` -> aggregate `Delivered`,
+          ANY channel `Retrying` -> aggregate `Retrying`, ANY channel `Sent` -> aggregate
+          `Sent`, ALL channels `Failed` -> aggregate `Failed`, otherwise `Queued`. This
+          aggregate-level status is the externally visible notification state.
+
+          Domain events published via transactional outbox to the `communications` ASB topic:
+          **NotificationSentEvent**, **NotificationDeliveredEvent**, **NotificationFailedEvent**,
+          **NotificationReadEvent** (on `MarkAsRead()`, idempotent — no-op if already read),
+          **EmailOpenedEvent**, **EmailLinkClickedEvent**, **EmailBouncedEvent**. Read tracking:
+          `PUT /v1/notifications/{id}/read` (single) and `PUT /v1/notifications/read-all` (batch).
+          Notification inbox: `GET /v1/notifications` (by authenticated user) and
+          `GET /v1/notifications/unread-count`.
+
+          {color:blue|Development/E2E: FakeSmsDeliveryService, FakeEmailDeliveryService,
+          FakePushDeliveryService replace real providers. FakeDeliveryStore exposed via
+          DiagnosticsController.GetFakeDeliveries() (non-Production only).}
+        activeCalls: [publish-delivery-events]
+        revealNodes: [asb]
+        revealCalls: [twilio-webhook, sendgrid-webhook, update-delivery-status]
+        duration: 4000

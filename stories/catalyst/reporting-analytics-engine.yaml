@@ -1,0 +1,425 @@
+id: reporting-analytics-engine
+title: "Reporting & Analytics — Report Execution Engine"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  The Reporting & Analytics bounded context provides a full report lifecycle — from definition
+  authoring through scheduled execution to output delivery. A **ReportDefinition** aggregate
+  (763 lines) governs the Draft -> Published -> Archived state machine while its child entities
+  **ReportExecution**, **ReportOutput**, and **ReportPermission** handle execution pipelines,
+  blob storage delivery, and role-based access control. Reports execute via background workers
+  (not Conductor), with a 4-format export pipeline (PDF, CSV, Excel, JSON) uploading to Azure
+  Blob Storage. A separate **QueryBuilderService** enables ad-hoc SQL with whitelist validation
+  and automatic `@TenantId` injection. The **Schedule** value object uses Cronos for cron-based
+  scheduled generation, while **MaterializedViewRefreshJob** reconciles read models nightly at
+  3:00 AM UTC.
+
+sections:
+  # -- Section 1: Report Definition Lifecycle & Execution Pipeline ---------------------
+  - renderer: service-flow
+    title: "Report Definition Lifecycle & Execution Pipeline"
+    accentColor: "#7C3AED"
+    layout: sequence
+
+    services:
+      - id: reporting-api
+        name: "Reporting & Analytics API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: reporting-write-db
+        name: "ReportingWriteDbContext"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: reporting-read-db
+        name: "ReportingDbContext"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: blob-storage
+        name: "Azure Blob Storage"
+        type: external
+        technology: "Azure Blob"
+        status: healthy
+      - id: redis-cache
+        name: "Redis Cache"
+        type: cache
+        technology: "Redis"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+
+    zones:
+      - id: reporting-core
+        label: "Reporting & Analytics"
+        members: [reporting-api, reporting-write-db, reporting-read-db]
+        color: "rgba(124, 58, 237, 0.06)"
+      - id: storage-layer
+        label: "Output & Delivery"
+        members: [blob-storage, redis-cache, asb]
+        color: "rgba(245, 158, 11, 0.06)"
+
+    calls:
+      - id: create-report-def
+        type: sync
+        from: reporting-api
+        to: reporting-write-db
+        method: POST
+        path: /v1/report-definitions
+        protocol: http
+        duration: 120
+        status: 201
+        description: "CreateReportDefinitionCommand — ReportDefinition created in Draft status. Factory validates SQL contains @TenantId, auto-adds TenantId parameter. Parameter names validated via regex ^[a-zA-Z_][a-zA-Z0-9_]*$"
+        response:
+          status: 201
+          label: "Report definition created (Draft)"
+      - id: publish-report-def
+        type: sync
+        from: reporting-api
+        to: reporting-write-db
+        method: POST
+        path: /v1/report-definitions/{id}/publish
+        protocol: http
+        duration: 80
+        status: 200
+        description: "PublishReportDefinitionCommand — Draft -> Published. Raises both ReportDefinitionActivatedEvent (backward compat) and ReportPublishedEvent (dual event pattern)"
+        response:
+          status: 200
+          label: "Report published"
+      - id: set-schedule
+        type: sync
+        from: reporting-api
+        to: reporting-write-db
+        method: POST
+        path: /v1/report-definitions/{id}/schedule
+        protocol: http
+        duration: 80
+        status: 200
+        description: "ScheduleReportCommand — Sets cron schedule via Schedule VO (Daily/Weekly/Monthly/Custom). Cronos validates expression. Only Published reports can be scheduled. Raises ReportScheduledEvent"
+        response:
+          status: 200
+          label: "Schedule set"
+      - id: execute-report
+        type: sync
+        from: reporting-api
+        to: reporting-write-db
+        method: POST
+        path: /v1/reports/{id}/execute
+        protocol: http
+        duration: 150
+        status: 202
+        description: "ExecuteReportCommand — Creates ReportExecution in Queued status (returns 202 Accepted). Background worker picks up execution asynchronously"
+        response:
+          status: 202
+          label: "Execution queued"
+      - id: run-sql-query
+        type: sync
+        from: reporting-api
+        to: reporting-read-db
+        method: POST
+        path: "IReportingDbConnection"
+        duration: 5000
+        description: "Background worker transitions Queued -> Running, executes SQL query via raw ADO.NET connection. @TenantId injected automatically"
+      - id: export-output
+        type: sync
+        from: reporting-api
+        to: blob-storage
+        method: POST
+        path: "{container}/{tenantId}/{year}/{month}/{reportDefinitionId}/{filename}"
+        duration: 3000
+        description: "IReportExporterFactory selects format-specific exporter (PdfExporter, CsvExporter, ExcelExporter, JsonExporter). AzureBlobReportStorageService uploads to Azure Blob Storage"
+      - id: download-output
+        type: sync
+        from: reporting-api
+        to: blob-storage
+        method: GET
+        path: /v1/report-executions/{executionId}/output
+        protocol: http
+        duration: 50
+        description: "IReportStorageService generates SAS download URL. ReportOutput tracks retention (1-365 days, default 30), content hash (MD5), expiration"
+      - id: publish-execution-event
+        type: publish
+        from: reporting-api
+        to: asb
+        messageType: "ReportExecutionCompletedEvent"
+        payload:
+          description: "ExecutionId, ReportDefinitionId, TenantId, OutputBlobUrl, RowCount, DurationMs, OutputFormat"
+      - id: cache-metadata
+        type: sync
+        from: reporting-api
+        to: redis-cache
+        method: GET
+        path: "CatalystReporting:*"
+        duration: 5
+        description: "StackExchangeRedisCache with CatalystReporting: prefix. Caches table/column metadata for QueryBuilderService whitelist"
+
+    steps:
+      - id: engine-step-1
+        title: "Report Definition Authoring & Publication"
+        narrative: >
+          A **ReportDefinition** aggregate (763 lines, `Domain/Aggregates/ReportDefinition.cs`)
+          begins via `POST /v1/report-definitions` handled by **CreateReportDefinitionCommandHandler**.
+          The `Create()` factory method enforces a {color:green|critical SQL safety invariant}: the
+          `SqlQueryTemplate` must contain `@TenantId` — if missing, creation fails. Parameter names
+          are validated via regex `^[a-zA-Z_][a-zA-Z0-9_]*$` to prevent injection. The definition
+          starts in `Draft` status with properties: Name, Description, **ReportType** (Operational,
+          Financial, Compliance, Custom), **ReportCategory** (14 values spanning TripVolume through
+          AuditTrail), **OutputFormat** (PDF, CSV, Excel, JSON), and a **ReportParameter** collection
+          (value object, 243 lines). Publication via `POST /v1/report-definitions/{id}/publish` transitions
+          `Draft -> Published` and {color:red|raises BOTH ReportDefinitionActivatedEvent and
+          ReportPublishedEvent} — the dual event is a backward compatibility artifact where `Activate()`
+          is marked `[Obsolete]` and delegates to `Publish()`. The `ReportStatus.Active` enum value
+          is an alias for `Published`. **CloneReportDefinitionCommand** creates a copy in Draft status
+          for iterative report development.
+        activeCalls: [create-report-def, publish-report-def]
+        revealNodes: [reporting-api, reporting-write-db]
+        duration: 5000
+      - id: engine-step-2
+        title: "Scheduled Report Generation"
+        narrative: >
+          Published reports can be scheduled via `POST /v1/report-definitions/{id}/schedule` handled
+          by **ScheduleReportCommandHandler**. The **Schedule** value object (287 lines,
+          `Domain/ValueObjects/Schedule.cs`) provides factory methods — `Daily(timeOfDay, timezone)`,
+          `Weekly(dayOfWeek, timeOfDay, timezone)`, `Monthly(dayOfMonth, timeOfDay, timezone)`,
+          `FromCron(cronExpression, timezone)` — and uses the {color:green|Cronos library} for cron
+          expression validation and `GetNextOccurrence()` calculation. The `NextScheduledRun` property
+          on **ReportDefinition** tracks the next execution time. **ScheduledReportExecutionJob**
+          (background service) polls for reports where `NextScheduledRun <= UtcNow`, creates
+          **ReportExecution** entities via `CreateScheduled()` factory method (setting
+          `IsScheduledExecution = true`), and calls `RecordGeneration()` on the aggregate which
+          advances `NextScheduledRun` and raises **ReportGeneratedEvent**. The
+          **ScheduledReportsController** exposes `GET /v1/scheduled-reports` for listing all scheduled
+          reports filtered by type and `runBefore` date. {color:red|Only Published reports can be
+          scheduled} — attempting to schedule a Draft or Archived report fails validation.
+          **CancelScheduleCommand** clears the cron expression and raises **ReportScheduleCancelledEvent**.
+        activeCalls: [set-schedule]
+        revealNodes: [reporting-api, reporting-write-db]
+        revealCalls: [create-report-def, publish-report-def]
+        duration: 5000
+      - id: engine-step-3
+        title: "Execution Pipeline: Queue, Run, Export, Store"
+        narrative: >
+          On-demand execution via `POST /v1/reports/{id}/execute` handled by
+          **ExecuteReportCommandHandler** creates a **ReportExecution** entity (385 lines,
+          `Domain/Entities/ReportExecution.cs`) in `Queued` status and returns `202 Accepted`.
+          The background worker transitions `Queued -> Running` via `Start()`, then executes the
+          SQL query through **IReportingDbConnection** (raw ADO.NET, not EF Core) with automatic
+          `@TenantId` injection. The **ReportParameter** value object's `ConvertValue()` method
+          handles type coercion for 7 parameter types (String, Integer, Decimal, Date, DateTime,
+          Boolean, Guid). On success, **IReportExporterFactory** dispatches to the format-specific
+          exporter — **PdfExporter**, **CsvExporter**, **ExcelExporter**, or **JsonExporter**
+          (`Infrastructure/Exporters/*.cs`). The exported file uploads to Azure Blob Storage via
+          **AzureBlobReportStorageService** at path
+          `{container}/{tenantId}/{year}/{month}/{reportDefinitionId}/{filename}`.
+          `Complete(blobUrl, container, name, fileSize, rowCount)` transitions `Running -> Completed`,
+          calculates `DurationMs`, and raises **ReportExecutionCompletedEvent**. On failure,
+          `Fail(errorCode, errorMessage)` transitions to `Failed` and raises
+          **ReportExecutionFailedEvent**. {color:red|Note: report execution uses background workers,
+          NOT Conductor workflows} — unlike Trip Operations or Rescue Orchestration.
+        activeCalls: [execute-report, run-sql-query, export-output, publish-execution-event]
+        revealNodes: [blob-storage, asb]
+        revealCalls: [set-schedule]
+        duration: 6000
+      - id: engine-step-4
+        title: "Output Delivery, Retention & Permissions"
+        narrative: >
+          **ReportOutput** entity (483 lines, `Domain/Entities/ReportOutput.cs`) tracks every
+          generated file with content hash (MD5), MIME type, file size, row count, and a retention
+          window of {color:green|1-365 days (default 30)}. Users download via
+          `GET /v1/report-executions/{executionId}/output` which generates a SAS URL through
+          **IReportStorageService**. `HEAD /v1/reports/{**blobPath}` checks file existence (catch-all
+          route). `ExtendRetention(additionalDays)` extends up to MaxRetentionDays total.
+          `MarkForDeletion(userId)` is idempotent and raises **ReportOutputMarkedForDeletionEvent** —
+          a {color:blue|background cleanup job handles actual blob deletion}. Access control is
+          governed by **ReportPermission** entity (527 lines, `Domain/Entities/ReportPermission.cs`)
+          with a 4-level hierarchy: `Admin(4) > Edit(3) > Execute(2) > View(1)` where higher
+          includes lower. Permissions can be user-level, role-level, or tenant-wide (nullable
+          `ReportDefinitionId`). **ReportSharingController** exposes share/revoke/update endpoints.
+          **MyReportsController** provides `GET /v1/my-reports`, `GET /v1/shared-with-me` (combines
+          direct + role-based grants), and `GET /v1/recent-reports` for personalized report discovery.
+          The **QueryBuilderController** (6 endpoints at `v1/reporting/query-builder`) enables ad-hoc
+          SQL via **QueryBuilderService** with {color:green|table/column whitelist validation},
+          automatic `WHERE tenant_id = @TenantId` injection, and a 30-second query timeout.
+        activeCalls: [download-output, cache-metadata]
+        revealNodes: [redis-cache]
+        revealCalls: [execute-report, run-sql-query, export-output, publish-execution-event]
+        duration: 5000
+
+  # -- Section 2: Nightly Refresh & Dashboard Aggregation ------------------------------
+  - renderer: service-flow
+    title: "Materialized View Refresh & Dashboard Queries"
+    accentColor: "#F59E0B"
+    layout: sequence
+
+    services:
+      - id: reporting-api
+        name: "Reporting & Analytics API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: reporting-read-db
+        name: "ReportingDbContext"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: reporting-write-db
+        name: "ReportingWriteDbContext"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: enrollment-api
+        name: "Enrollment & Demand API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: retention-worker
+        name: "Retention Cleanup Job"
+        type: event-processor
+        technology: ".NET 10 BackgroundService"
+        status: healthy
+      - id: blob-storage
+        name: "Azure Blob Storage"
+        type: external
+        technology: "Azure Blob"
+        status: healthy
+
+    zones:
+      - id: reporting-engine
+        label: "Reporting & Analytics"
+        members: [reporting-api, reporting-read-db, reporting-write-db]
+        color: "rgba(124, 58, 237, 0.06)"
+      - id: cross-bc
+        label: "Cross-BC & Background"
+        members: [enrollment-api, retention-worker, blob-storage]
+        color: "rgba(245, 158, 11, 0.06)"
+
+    calls:
+      - id: refresh-trip-volume
+        type: sync
+        from: reporting-api
+        to: reporting-read-db
+        method: POST
+        path: "REFRESH MATERIALIZED VIEW CONCURRENTLY trip_volume_by_district"
+        duration: 60000
+        description: "MaterializedViewRefreshJob runs daily at 3:00 AM UTC. CONCURRENTLY avoids exclusive locks. SLA <10 minutes for 1M+ records"
+      - id: refresh-settlement
+        type: sync
+        from: reporting-api
+        to: reporting-read-db
+        method: POST
+        path: "REFRESH MATERIALIZED VIEW CONCURRENTLY settlement_summary_by_month"
+        duration: 60000
+        description: "Settlement summary materialized view refresh. Only 3 of 7 read models have materialized views"
+      - id: refresh-compliance
+        type: sync
+        from: reporting-api
+        to: reporting-read-db
+        method: POST
+        path: "REFRESH MATERIALIZED VIEW CONCURRENTLY compliance_rate_by_credential_type"
+        duration: 60000
+        description: "Compliance rate materialized view refresh. Individual view failures logged, job continues"
+      - id: get-operational-metrics
+        type: sync
+        from: reporting-api
+        to: reporting-read-db
+        method: GET
+        path: /v1/dashboard/operational
+        protocol: http
+        duration: 200
+        description: "GetOperationalMetricsQuery — aggregates TripVolumeReadModel, OnTimePerformanceReadModel, RescueMetricsReadModel for operational dashboard"
+      - id: get-financial-metrics
+        type: sync
+        from: reporting-api
+        to: reporting-read-db
+        method: GET
+        path: /v1/dashboard/financial
+        protocol: http
+        duration: 200
+        description: "GetFinancialMetricsQuery — aggregates SettlementSummaryReadModel for financial dashboard"
+      - id: district-lookup
+        type: sync
+        from: reporting-api
+        to: enrollment-api
+        method: GET
+        path: "EnrollmentApiClient → /v1/districts"
+        protocol: http
+        duration: 100
+        description: "IDistrictLookupService — cross-BC HTTP call to enrollment-demand for district name resolution. TenantIdDelegatingHandler + CorrelationIdDelegatingHandler propagate headers"
+      - id: cleanup-expired
+        type: sync
+        from: retention-worker
+        to: blob-storage
+        method: DELETE
+        path: "{container}/{tenantId}/..."
+        duration: 5000
+        description: "ReportRetentionCleanupJob deletes expired ReportOutput blobs where IsExpired = true or IsMarkedForDeletion = true"
+
+    steps:
+      - id: refresh-step-1
+        title: "Nightly Materialized View Refresh"
+        narrative: >
+          **MaterializedViewRefreshJob** (`Application/BackgroundJobs/MaterializedViewRefreshJob.cs`)
+          is a `BackgroundService` that runs daily at {color:green|3:00 AM UTC} — deliberately
+          scheduled after the nightly ETL at 2:00 AM to ensure fresh source data. It refreshes
+          3 PostgreSQL materialized views via `REFRESH MATERIALIZED VIEW CONCURRENTLY` (no exclusive
+          locks): `trip_volume_by_district`, `settlement_summary_by_month`, and
+          `compliance_rate_by_credential_type`. The SLA is <10 minutes for 1M+ records.
+          {color:red|Only 3 of the 7 read models have materialized views} — the remaining 4
+          (**RouteOptimizationMetricsReadModel**, **RescueMetricsReadModel**,
+          **OnTimePerformanceReadModel**, **DemandTrackingReadModel**) rely solely on real-time
+          event handler upserts without nightly reconciliation fallback. Individual view failures
+          are logged but do not abort the job — it continues refreshing remaining views. The
+          **IMaterializedViewRefresher** interface abstracts the PostgreSQL-specific refresh
+          operation for testability.
+        activeCalls: [refresh-trip-volume, refresh-settlement, refresh-compliance]
+        revealNodes: [reporting-api, reporting-read-db]
+        duration: 5000
+      - id: refresh-step-2
+        title: "Dashboard Aggregation Queries"
+        narrative: >
+          The **DashboardController** (2 endpoints at `v1/dashboard`) serves pre-aggregated
+          operational and financial metrics. `GET /v1/dashboard/operational` dispatches
+          **GetOperationalMetricsQuery** which aggregates across **TripVolumeReadModel** (keyed
+          by TenantId + DistrictId + Date), **OnTimePerformanceReadModel** (keyed by TenantId +
+          Date + ServiceProvider), and **RescueMetricsReadModel** (keyed by TenantId + Date +
+          RescueReason) via **IReportingReadContext** — a read-only interface exposing 7
+          `IQueryable` projections. `GET /v1/dashboard/financial` dispatches
+          **GetFinancialMetricsQuery** aggregating **SettlementSummaryReadModel** (keyed by
+          TenantId + billing period). All read models have {color:green|global query filters
+          for multi-tenancy} — no manual TenantId filtering needed. The
+          **ReportingDbContext** (read models) is separate from **ReportingWriteDbContext**
+          (domain entities) — a {color:blue|dual-context pattern} that correctly separates read
+          model projections from the ReportDefinition aggregate and its child entities.
+        activeCalls: [get-operational-metrics, get-financial-metrics]
+        revealCalls: [refresh-trip-volume, refresh-settlement, refresh-compliance]
+        duration: 5000
+      - id: refresh-step-3
+        title: "Cross-BC Data Enrichment & Output Retention"
+        narrative: >
+          District name resolution for reports requires a cross-BC HTTP call via
+          **EnrollmentApiClient** (`Infrastructure/ExternalServices/EnrollmentApiClient.cs`)
+          implementing **IDistrictLookupService**. Two delegating handlers ensure context
+          propagation: **TenantIdDelegatingHandler** propagates the TenantId header and
+          **CorrelationIdDelegatingHandler** propagates X-Correlation-ID for distributed tracing.
+          {color:red|This creates a runtime dependency on the enrollment-demand API} — if it is
+          down, reports requiring district names will fail or degrade. Meanwhile,
+          **ReportRetentionCleanupJob** (`Application/BackgroundJobs/`) runs on a schedule to
+          delete expired **ReportOutput** entries — those where `IsExpired` (computed from
+          `ExpiresAt` vs `DateTimeOffset.UtcNow`) or `IsMarkedForDeletion` are true. Actual
+          blob deletion from Azure Blob Storage follows the domain event
+          **ReportOutputMarkedForDeletionEvent**. The blob path convention is
+          `{container}/{tenantId}/{year}/{month}/{reportDefinitionId}/{filename}` — tenant
+          isolation is enforced at the storage path level in addition to database-level RLS.
+          {color:green|ReportsController validates blob path starts with {tenantId}/ prefix}
+          to prevent path traversal attacks.
+        activeCalls: [district-lookup, cleanup-expired]
+        revealNodes: [enrollment-api, retention-worker, blob-storage]
+        revealCalls: [get-operational-metrics, get-financial-metrics]
+        duration: 5000

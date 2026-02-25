@@ -9,7 +9,7 @@ import {
   type Node,
   type Edge,
 } from '@xyflow/react';
-import { StepOverlay } from '../shared';
+import { StepOverlay, EdgeReadinessGate } from '../shared';
 import { BCCoreNode } from './BCCoreNode';
 import { ArtifactNode } from './ArtifactNode';
 import { ChildArtifactNode } from './ChildArtifactNode';
@@ -29,6 +29,7 @@ interface BCDeploymentCanvasProps {
   story: BCDeploymentStory;
   currentStepIndex: number;
   onStepChange?: (step: number) => void;
+  hideOverlay?: boolean;
 }
 
 const nodeTypes = {
@@ -46,14 +47,18 @@ const nodeTypes = {
  * - Step-based focus and zoom
  * - Animated transitions
  */
-export function BCDeploymentCanvas({ 
-  story, 
+export function BCDeploymentCanvas({
+  story,
   currentStepIndex,
-  onStepChange 
+  onStepChange,
+  hideOverlay = false,
 }: BCDeploymentCanvasProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
+  const [edgesReady, setEdgesReady] = useState(false);
+  const onEdgesReady = useCallback(() => setEdgesReady(true), []);
+  useEffect(() => { setEdgesReady(false); }, [story.id]);
 
   const currentStep = story.steps[currentStepIndex] as BCDeploymentStep | undefined;
   
@@ -277,7 +282,7 @@ export function BCDeploymentCanvas({
     <div className="bc-deployment-canvas" style={{ width: '100%', height: '100%', minHeight: '600px' }}>
       <ReactFlow
         nodes={nodes}
-        edges={edges}
+        edges={edgesReady ? edges : []}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         nodeTypes={nodeTypes}
@@ -289,6 +294,7 @@ export function BCDeploymentCanvas({
       >
         <Background color="#ccc" gap={20} />
         <Controls position="bottom-left" />
+        <EdgeReadinessGate onReady={onEdgesReady} />
         <BCDeploymentCameraController activeNodeIds={activeNodeIds} />
         <MiniMap 
           nodeColor={(node) => {
@@ -310,7 +316,7 @@ export function BCDeploymentCanvas({
         <span>{layoutMode}</span>
       </div>
 
-      {currentStep && (
+      {!hideOverlay && currentStep && (
         <StepOverlay
           stepIndex={currentStepIndex}
           totalSteps={story.steps.length}

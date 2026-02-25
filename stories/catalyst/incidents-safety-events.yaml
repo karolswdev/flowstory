@@ -1,0 +1,434 @@
+id: incidents-safety-events
+title: "Incidents & Safety — Cross-BC Event Triggers & Safety Compliance Events"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  The Incidents & Safety EventProcessor consumes safety-critical events from two upstream
+  bounded contexts — Trip Operations and Monitoring & Exceptions — to auto-create safety
+  incidents without human intervention. Ten inbound event handlers transform operational
+  anomalies (vehicle accidents, emergency stops, driver no-shows, route deviations) into
+  structured SafetyIncident aggregates with pre-computed regulatory flags. Outbound, the BC
+  publishes 14 domain events that drive parent notifications (FERPA), corrective action
+  tracking, and cross-platform safety compliance awareness.
+
+sections:
+  # -- Section 1: Inbound Event Consumption & Auto-Incident Creation ---------------
+  - renderer: service-flow
+    title: "Inbound Event Consumption & Auto-Incident Creation"
+    accentColor: "#7C3AED"
+    layout: sequence
+
+    services:
+      - id: trip-ops-api
+        name: "Trip Operations API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: monitoring-ep
+        name: "Monitoring & Exceptions EP"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+      - id: incidents-ep
+        name: "Incidents & Safety EP"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: incidents-db
+        name: "PostgreSQL 16 (incidents)"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: redis
+        name: "Redis"
+        type: cache
+        technology: "Redis 7"
+        status: healthy
+
+    zones:
+      - id: upstream-trip-ops
+        label: "Trip Operations (upstream)"
+        members: [trip-ops-api]
+        color: "rgba(59, 130, 246, 0.06)"
+      - id: upstream-monitoring
+        label: "Monitoring & Exceptions (upstream)"
+        members: [monitoring-ep]
+        color: "rgba(245, 158, 11, 0.06)"
+      - id: event-bus
+        label: "Event Bus"
+        members: [asb]
+        color: "rgba(34, 197, 94, 0.06)"
+      - id: incidents-consumer
+        label: "Incidents & Safety"
+        members: [incidents-ep, incidents-db, redis]
+        color: "rgba(124, 58, 237, 0.06)"
+
+    calls:
+      - id: trip-ops-accident
+        type: publish
+        from: trip-ops-api
+        to: asb
+        messageType: "VehicleAccidentReportedEvent"
+        payload:
+          description: "vehicleRunId, tenantId, accidentDetails, driverInfo, location — published to trip-operations topic"
+      - id: trip-ops-emergency
+        type: publish
+        from: trip-ops-api
+        to: asb
+        messageType: "EmergencyStopActivatedEvent"
+        payload:
+          description: "vehicleRunId, tenantId, reason, location, timestamp — published to trip-operations topic"
+      - id: trip-ops-injury
+        type: publish
+        from: trip-ops-api
+        to: asb
+        messageType: "PassengerInjuryReportedEvent"
+        payload:
+          description: "vehicleRunId, passengerTripId, tenantId, studentId, injuryDetails — published to trip-operations topic"
+      - id: trip-ops-completed-vr
+        type: publish
+        from: trip-ops-api
+        to: asb
+        messageType: "VehicleRunCompletedEvent"
+        payload:
+          description: "vehicleRunId, tenantId, completedAt — for incident correlation tracking"
+      - id: trip-ops-completed-trip
+        type: publish
+        from: trip-ops-api
+        to: asb
+        messageType: "TripCompletedEvent"
+        payload:
+          description: "passengerTripId, tenantId, completedAt — for incident correlation tracking"
+      - id: monitoring-noshow
+        type: publish
+        from: monitoring-ep
+        to: asb
+        messageType: "DriverNoShowDetectedEvent"
+        payload:
+          description: "vehicleRunId, tenantId, driverId, detectedAt — published to monitoring-and-exceptions topic"
+      - id: monitoring-breakdown
+        type: publish
+        from: monitoring-ep
+        to: asb
+        messageType: "VehicleBreakdownDetectedEvent"
+        payload:
+          description: "vehicleRunId, tenantId, vehicleId, location — published to monitoring-and-exceptions topic"
+      - id: monitoring-deviation
+        type: publish
+        from: monitoring-ep
+        to: asb
+        messageType: "RouteDeviationDetectedEvent"
+        payload:
+          description: "vehicleRunId, tenantId, deviationDetails — published to monitoring-and-exceptions topic"
+      - id: monitoring-driver-emergency
+        type: publish
+        from: monitoring-ep
+        to: asb
+        messageType: "DriverEmergencyDetectedEvent"
+        payload:
+          description: "vehicleRunId, tenantId, driverId, emergencyType — CRITICAL auto-escalate, published to monitoring-and-exceptions topic"
+      - id: monitoring-late
+        type: publish
+        from: monitoring-ep
+        to: asb
+        messageType: "LatePickupDetectedEvent"
+        payload:
+          description: "vehicleRunId, passengerTripId, tenantId, expectedTime, actualTime — published to monitoring-and-exceptions topic"
+      - id: subscribe-trip-ops
+        type: subscribe
+        from: asb
+        to: incidents-ep
+        messageType: "trip-operations topic"
+        action: "Subscription: incidents-trip-operations-subscriber — 5 handlers consume VehicleAccidentReportedEvent, EmergencyStopActivatedEvent, PassengerInjuryReportedEvent, VehicleRunCompletedEvent, TripCompletedEvent"
+      - id: subscribe-monitoring
+        type: subscribe
+        from: asb
+        to: incidents-ep
+        messageType: "monitoring-and-exceptions topic"
+        action: "Subscription: incidents-monitoring-subscriber — 5 handlers consume DriverNoShowDetectedEvent, VehicleBreakdownDetectedEvent, RouteDeviationDetectedEvent, DriverEmergencyDetectedEvent, LatePickupDetectedEvent"
+      - id: idempotency-check
+        type: sync
+        from: incidents-ep
+        to: redis
+        method: GET
+        path: "CatalystIncidents:{eventId}"
+        duration: 5
+        description: "Redis idempotency check with 1-hour TTL. All 10 EP handlers decorated with DecorateEventHandlerWithMetrics for Prometheus instrumentation."
+      - id: create-auto-incident
+        type: sync
+        from: incidents-ep
+        to: incidents-db
+        method: POST
+        path: "SafetyIncident.Create()"
+        duration: 150
+        description: "Auto-create SafetyIncident with pre-computed IncidentType, minimum severity, and RegulatoryRequirements. Persisted via IIncidentRepository with transactional outbox."
+
+    steps:
+      - id: events-step-1
+        title: "Trip Operations Safety Events (5 Handlers)"
+        narrative: >
+          The Incidents EP subscribes to the `trip-operations` ASB topic via the
+          `incidents-trip-operations-subscriber` subscription. Five handlers in
+          `EventProcessor/Handlers/` consume safety-critical events from the Trip Operations BC.
+          The three {color:red|safety-critical handlers} auto-create incidents:
+
+
+          **VehicleAccidentReportedEventHandler** creates a `VEHICLE_ACCIDENT` incident with
+          {color:red|HIGH minimum severity} — the aggregate's `Create()` factory enforces this floor.
+          **EmergencyStopActivatedEventHandler** creates a safety incident for emergency stop events.
+          **PassengerInjuryReportedEventHandler** creates a `STUDENT_INJURY` incident with
+          {color:red|HIGH minimum severity} and links the `PassengerTripId` for correlation.
+
+
+          Two correlation handlers — **VehicleRunCompletedEventHandler** and
+          **TripCompletedEventHandler** — track completed VRs and PTs for incident timeline
+          reconstruction. {color:green|All 5 handlers follow the standard idempotency pattern}:
+          check Redis (`CatalystIncidents:{eventId}` prefix, 1-hour TTL) before processing,
+          persist via `IIncidentRepository`, set Redis key after commit. All handlers are
+          decorated with `DecorateEventHandlerWithMetrics` for `catalyst-incidents` Prometheus
+          namespace. Test coverage: 4 EP handler test files in `Catalyst.Incidents.Tests/`
+          including `VehicleAccidentReportedEventHandlerTests` and
+          `EmergencyStopActivatedEventHandlerTests`.
+        activeCalls: [trip-ops-accident, trip-ops-emergency, trip-ops-injury, trip-ops-completed-vr, trip-ops-completed-trip, subscribe-trip-ops, idempotency-check, create-auto-incident]
+        revealNodes: [trip-ops-api, asb, incidents-ep, incidents-db, redis]
+        duration: 6000
+      - id: events-step-2
+        title: "Monitoring & Exceptions Safety Events (5 Handlers)"
+        narrative: >
+          The Incidents EP subscribes to the `monitoring-and-exceptions` ASB topic via
+          `incidents-monitoring-subscriber`. Five handlers convert operational exceptions into
+          structured safety incidents:
+
+
+          **DriverNoShowDetectedEventHandler** creates a `DRIVER_NO_SHOW` incident.
+          **VehicleBreakdownDetectedEventHandler** creates a `VEHICLE_BREAKDOWN` incident with
+          {color:red|MEDIUM minimum severity}. **RouteDeviationDetectedEventHandler** creates a
+          `ROUTE_DEVIATION` incident. **LatePickupDetectedEventHandler** creates a `LATE_PICKUP`
+          incident. The most critical: **DriverEmergencyDetectedEventHandler** creates a
+          `DRIVER_MEDICAL_EMERGENCY` incident that {color:red|auto-escalates to CRITICAL severity}
+          — one of four incident types that bypass normal severity determination. This triggers
+          {color:red|PagerDuty P1 (5-minute response SLA)} and mandatory investigation per
+          the **EscalationRule** value object.
+
+
+          {color:green|The auto-escalation logic lives in the domain, not the handler} — the
+          EP handler simply calls `SafetyIncident.Create()` with the reported severity, and the
+          aggregate's factory method applies the minimum severity floor and auto-escalation rules
+          from `IncidentSeverity` and `EscalationRule`. This means the same CRITICAL enforcement
+          applies whether the incident is created via API or event handler — a key
+          {color:green|Clean Architecture benefit} of keeping business rules in the Domain layer.
+          Test coverage: 7 dedicated EP handler test files validate each auto-creation path.
+        activeCalls: [monitoring-noshow, monitoring-breakdown, monitoring-deviation, monitoring-driver-emergency, monitoring-late, subscribe-monitoring, idempotency-check, create-auto-incident]
+        revealNodes: [monitoring-ep]
+        revealCalls: [trip-ops-accident, trip-ops-emergency, trip-ops-injury, subscribe-trip-ops]
+        duration: 6000
+      - id: events-step-3
+        title: "Auto-Escalation & Regulatory Flag Computation"
+        narrative: >
+          When the EP handler calls **SafetyIncident.Create()**, the 1832-line aggregate root
+          performs a sequence of domain computations before persisting. First, it applies the
+          {color:red|minimum severity floor} by incident type: CRITICAL for
+          `STUDENT_LEFT_ON_VEHICLE` / `UNAUTHORIZED_RELEASE` / `SECURITY_THREAT` /
+          `DRIVER_MEDICAL_EMERGENCY`; HIGH for `VEHICLE_ACCIDENT` / `STUDENT_INJURY` /
+          `DRIVER_INJURY` / `UNSAFE_DROP_OFF`; MEDIUM for `DRIVER_MISCONDUCT` /
+          `STUDENT_ALTERCATION` / `VEHICLE_BREAKDOWN` / `WHEELCHAIR_LIFT_MALFUNCTION`.
+
+
+          Next, **RegulatoryRequirements.Determine()** computes the full `RegulatoryReportingFlag`
+          bitfield. For a `VEHICLE_ACCIDENT` with passenger injury and vehicle tow, this yields:
+          {color:blue|NHTSA (168h) + OSHA (24h if hospitalization) + DOT + FMCSA + Insurance +
+          State + ClientNotification}. The `DeadlinesByAgency` dictionary tracks each agency's
+          deadline in hours, with `MostUrgentDeadlineHours` and `MostUrgentAgency` computed
+          for SLA enforcement. The aggregate raises **IncidentReportedEvent** with
+          `requiresImmediateEscalation` and `requiresNHTSAReporting` flags. The transactional
+          outbox (`outbox_messages` table) ensures {color:green|the incident persist and event
+          publish are atomic} — if the DB commit succeeds, the event will eventually publish
+          to ASB even if the EP crashes after commit.
+        activeCalls: [create-auto-incident]
+        revealCalls: [subscribe-trip-ops, subscribe-monitoring, idempotency-check]
+        duration: 5000
+
+  # -- Section 2: Outbound Safety Events & Cross-BC Integration --------------------
+  - renderer: service-flow
+    title: "Outbound Safety Events & Cross-BC Integration"
+    accentColor: "#059669"
+    layout: sequence
+
+    services:
+      - id: incidents-api
+        name: "Incidents & Safety API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: incidents-db
+        name: "PostgreSQL 16 (incidents)"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+      - id: comms-ep
+        name: "Communications EP"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: compliance-ep
+        name: "Compliance EP"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: provider-ep
+        name: "Provider Network EP"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: reporting-ep
+        name: "Reporting & Analytics EP"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+
+    zones:
+      - id: incidents-source
+        label: "Incidents & Safety (publisher)"
+        members: [incidents-api, incidents-db]
+        color: "rgba(5, 150, 105, 0.06)"
+      - id: event-bus
+        label: "Event Bus"
+        members: [asb]
+        color: "rgba(34, 197, 94, 0.06)"
+      - id: downstream-consumers
+        label: "Downstream Consumers"
+        members: [comms-ep, compliance-ep, provider-ep, reporting-ep]
+        color: "rgba(168, 85, 247, 0.06)"
+
+    calls:
+      - id: publish-escalated
+        type: publish
+        from: incidents-api
+        to: asb
+        messageType: "IncidentEscalatedEvent"
+        payload:
+          description: "incidentId, oldSeverity, newSeverity, escalationReason — severity only increases, never decreases"
+      - id: publish-reported-out
+        type: publish
+        from: incidents-api
+        to: asb
+        messageType: "IncidentReportedEvent"
+        payload:
+          description: "incidentId, tenantId, type, severity, descriptionPreview, requiresImmediateEscalation, requiresNHTSAReporting"
+      - id: publish-investigation-completed
+        type: publish
+        from: incidents-api
+        to: asb
+        messageType: "InvestigationCompletedEvent"
+        payload:
+          description: "incidentId, investigatorId, findingsSummary, evidenceCount, witnessStatementCount, investigationDurationHours"
+      - id: publish-corrective-required
+        type: publish
+        from: incidents-api
+        to: asb
+        messageType: "CorrectiveActionRequiredEvent"
+        payload:
+          description: "incidentId, incidentType, severity, suggestedDeadline, isRegulatoryRequirement, regulatoryBody"
+      - id: publish-parent-notify-out
+        type: publish
+        from: incidents-api
+        to: asb
+        messageType: "ParentNotificationRequiredEvent"
+        payload:
+          description: "incidentId, studentId, parentContactId, notificationPriority, requiredByRegulation"
+      - id: comms-subscribe
+        type: subscribe
+        from: asb
+        to: comms-ep
+        messageType: "IncidentReportedEvent / IncidentEscalatedEvent / ParentNotificationRequiredEvent"
+        action: "Trigger multi-channel notifications: SMS (Twilio), Email (SendGrid), Push (Firebase). FERPA parent notifications have SLA-bound delivery windows."
+      - id: compliance-subscribe
+        type: subscribe
+        from: asb
+        to: compliance-ep
+        messageType: "CorrectiveActionRequiredEvent / CorrectiveActionVerifiedEvent"
+        action: "Track corrective action compliance across provider fleet. Feed into credential and eligibility assessments."
+      - id: provider-subscribe
+        type: subscribe
+        from: asb
+        to: provider-ep
+        messageType: "IncidentReportedEvent / IncidentClosedEvent"
+        action: "Update provider safety record. Repeated incidents may affect provider eligibility scoring."
+      - id: reporting-subscribe
+        type: subscribe
+        from: asb
+        to: reporting-ep
+        messageType: "All 14 incident domain events"
+        action: "Feed incident data into reporting warehouse for trend analysis, regulatory compliance dashboards, and executive summaries."
+
+    steps:
+      - id: outbound-step-1
+        title: "14 Outbound Domain Events — The Safety Signal Bus"
+        narrative: >
+          The **SafetyIncident** aggregate raises {color:blue|14 distinct domain events} across
+          its lifecycle, all published via transactional outbox to the `incidents-and-safety`
+          ASB topic (`Domain/Events/` — 14 files). The event taxonomy maps to lifecycle phases:
+
+
+          **Reporting phase**: `IncidentReportedEvent` (from `Create()`).
+          **Investigation phase**: `InvestigationStartedEvent` (from `BeginInvestigation()` and
+          `ResumeInvestigation()`), `InvestigationCompletedEvent` (from `SubmitInvestigationForReview()`).
+          **Evidence phase**: `EvidenceAttachedEvent` (from `AddEvidence()`),
+          `WitnessStatementRecordedEvent` (from `RecordWitnessStatement()`).
+          **Escalation**: `IncidentEscalatedEvent` (from `Escalate()` —
+          {color:green|severity only increases, never decreases}).
+          **Resolution/Closure**: `IncidentResolvedEvent` (from `ResolveIncident()`),
+          `IncidentClosedEvent` (from `Close()`).
+          **Corrective actions** (4 events): `CorrectiveActionAssignedEvent`,
+          `CorrectiveActionStatusUpdatedEvent`, `CorrectiveActionCompletedEvent`,
+          `CorrectiveActionVerifiedEvent`.
+          **Compliance triggers**: `ParentNotificationRequiredEvent` (FERPA),
+          `CorrectiveActionRequiredEvent` (with `isRegulatoryRequirement` and `regulatoryBody`).
+        activeCalls: [publish-escalated, publish-reported-out, publish-investigation-completed, publish-corrective-required, publish-parent-notify-out]
+        revealNodes: [incidents-api, incidents-db, asb]
+        duration: 6000
+      - id: outbound-step-2
+        title: "Downstream Consumer Integration Pattern"
+        narrative: >
+          Four bounded contexts subscribe to the `incidents-and-safety` topic, each consuming
+          the events relevant to their domain responsibility:
+
+
+          **Communications BC** consumes `IncidentReportedEvent`, `IncidentEscalatedEvent`, and
+          `ParentNotificationRequiredEvent` to deliver multi-channel notifications. For FERPA
+          parent notifications, the delivery SLA is bound to incident severity:
+          {color:red|Immediate (CRITICAL, 30min), SameDay (HIGH, 8h), NextBusinessDay (MEDIUM/LOW, 24h)}.
+
+
+          **Compliance & Eligibility BC** consumes `CorrectiveActionRequiredEvent` and
+          `CorrectiveActionVerifiedEvent` to track corrective action compliance across the provider
+          fleet — feeding into credential assessments and eligibility evaluations (ADR-013 hybrid
+          pattern: Policy/Specification for evaluation, CQRS for lifecycle).
+
+
+          **Provider Network BC** consumes `IncidentReportedEvent` and `IncidentClosedEvent` to
+          maintain provider safety records. Repeated incidents against a provider's fleet may
+          impact their eligibility scoring and assignment priority.
+
+
+          **Reporting & Analytics BC** is the broadest consumer, ingesting {color:blue|all 14
+          domain events} to feed the incident data warehouse for trend analysis, the regulatory
+          compliance dashboards (`GET /v1/incident-reports/trends`, `GET .../compliance`), and
+          executive summary generation. {color:green|The event-driven pattern means these
+          downstream systems are eventually consistent but fully decoupled} — an Incidents BC
+          outage does not cascade to Communications or Reporting.
+        activeCalls: [comms-subscribe, compliance-subscribe, provider-subscribe, reporting-subscribe]
+        revealCalls: [publish-escalated, publish-reported-out, publish-investigation-completed, publish-corrective-required, publish-parent-notify-out]
+        duration: 5000

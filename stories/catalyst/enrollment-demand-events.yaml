@@ -1,0 +1,458 @@
+id: enrollment-demand-events
+title: "Enrollment & Demand — Event Architecture & Conductor Workers"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  Enrollment & Demand publishes 30+ outbound domain events via transactional outbox to Azure
+  Service Bus. These events drive Trip Operations, Assignment, Routing, Pricing, Compliance,
+  Communications, and Settlement. The Conductor trf-processing-workflow orchestrates 21 task
+  workers with full compensation flows for failure recovery.
+
+sections:
+  # -- Section 1: Cross-BC Event Fanout -------------------------------------------
+  - renderer: service-flow
+    title: "Cross-BC Event Fanout"
+    accentColor: "#A855F7"
+    layout: sequence
+
+    services:
+      - id: enrollment-api
+        name: "Enrollment & Demand API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: enrollment-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+      - id: trip-ops-ep
+        name: "Trip Operations EP"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: assignment-ep
+        name: "Assignment EP"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: routing-ep
+        name: "Routing EP"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: compliance-ep
+        name: "Compliance EP"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: comms-ep
+        name: "Communications EP"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: settlement-ep
+        name: "Settlement EP"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: enrollment-ep
+        name: "Enrollment EP (Self)"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+
+    zones:
+      - id: outbox-origin
+        label: "Transactional Outbox"
+        members: [enrollment-api, enrollment-db]
+        color: "rgba(168, 85, 247, 0.06)"
+      - id: event-bus
+        label: "Message Broker"
+        members: [asb]
+        color: "rgba(245, 158, 11, 0.06)"
+      - id: trip-lifecycle
+        label: "Trip Lifecycle Consumers"
+        members: [trip-ops-ep, assignment-ep, routing-ep]
+        color: "rgba(59, 130, 246, 0.06)"
+      - id: support-consumers
+        label: "Support Consumers"
+        members: [compliance-ep, comms-ep, settlement-ep, enrollment-ep]
+        color: "rgba(34, 197, 94, 0.06)"
+
+    calls:
+      - id: outbox-write
+        type: sync
+        from: enrollment-api
+        to: enrollment-db
+        method: POST
+        path: "outbox_messages (atomic with domain entity)"
+        duration: 30
+        description: "SaveChangesAsync override: collects domain events from tracked entities, writes to outbox_messages in same transaction, clears entity events, commits atomically"
+      - id: outbox-relay
+        type: publish
+        from: enrollment-db
+        to: asb
+        messageType: "OutboxProcessor relay"
+        payload:
+          description: "Background service polls outbox_messages table, publishes to enrollment-and-demand ASB topic, marks as processed"
+      - id: trf-approved-fanout
+        type: publish
+        from: asb
+        to: trip-ops-ep
+        messageType: "TrfApprovedEvent"
+        payload:
+          description: "TrfId, StudentId, SchoolId, Direction, Addresses, Schedule, RouteDistanceMiles — creates SubscriptionTrips for nightly SGR generation"
+      - id: trf-updated-routing
+        type: publish
+        from: asb
+        to: routing-ep
+        messageType: "TrfUpdatedEvent"
+        payload:
+          description: "TrfId, ChangedFields dict — triggers re-routing if pickup or dropoff address changed"
+      - id: cep-enrolled-assignment
+        type: subscribe
+        from: asb
+        to: assignment-ep
+        messageType: "CepEnrolledEvent + CepAccommodationsUpdatedEvent + AntiAffinityRuleCreatedEvent"
+        action: "Register/update student constraints for vehicle matching engine — wheelchair, medical support, required capabilities, anti-affinity separation rules"
+      - id: cep-withdrawn-tripops
+        type: subscribe
+        from: asb
+        to: trip-ops-ep
+        messageType: "CepWithdrawnEvent"
+        action: "Cancel all future SubscriptionTrips and pending PassengerTrips for the withdrawn student"
+      - id: cep-eligibility-compliance
+        type: subscribe
+        from: asb
+        to: compliance-ep
+        messageType: "CepEnrollmentSubmittedEvent + CepEligibilityChangedEvent + StudentDistanceCalculatedEvent"
+        action: "Verify eligibility criteria against active policies; distance threshold evaluation per ADR-012"
+      - id: trf-rejected-comms
+        type: subscribe
+        from: asb
+        to: comms-ep
+        messageType: "TrfRejectedEvent + CepRejectedEvent"
+        action: "Send rejection notification to parent via Twilio/SendGrid"
+      - id: ctt-settlement
+        type: subscribe
+        from: asb
+        to: settlement-ep
+        messageType: "ClientTripTypeCreatedEvent + ClientTripTypeUpdatedEvent"
+        action: "Update contract rate references for BC/PD/PM settlement calculations"
+      - id: school-routing
+        type: subscribe
+        from: asb
+        to: routing-ep
+        messageType: "SchoolCreatedEvent + SchoolLocationUpdatedEvent"
+        action: "Register/update school coordinates for route optimization"
+      - id: calendar-tripops
+        type: subscribe
+        from: asb
+        to: trip-ops-ep
+        messageType: "DistrictCalendarUpdatedEvent + SchoolBellScheduleUpdatedEvent"
+        action: "Update trip suppression calendar and schedule recalculation for affected routes"
+      - id: route-self-consume
+        type: subscribe
+        from: asb
+        to: enrollment-ep
+        messageType: "RouteCalculatedEvent (from routing-and-pricing topic)"
+        action: "RouteCalculatedEventHandler calls TRF.SetRouteDetails() — idempotent, skips if route already set"
+
+    steps:
+      - id: event-step-1
+        title: "Transactional Outbox: Atomic Event Capture"
+        narrative: >
+          Every domain mutation in Enrollment & Demand writes events through the **transactional
+          outbox** pattern (R076). `EnrollmentDbContext.SaveChangesAsync()` override collects
+          domain events from all tracked entities, serializes them to `outbox_messages` in the
+          same PostgreSQL transaction as the domain entity changes, then clears the entity events
+          and commits atomically. This guarantees at-least-once delivery: even if the process
+          crashes between commit and publish, the `OutboxProcessor` background service will pick
+          up unsent messages on restart. The outbox table stores event type, payload JSON,
+          correlation ID, and processing status.
+        activeCalls: [outbox-write, outbox-relay]
+        revealNodes: [enrollment-api, enrollment-db, asb]
+        duration: 5000
+      - id: event-step-2
+        title: "Trip Lifecycle Event Streams"
+        narrative: >
+          Three event streams drive the trip lifecycle. (1) **TRF stream**: `TrfApprovedEvent`
+          flows to Trip Operations for SubscriptionTrip creation — the approved TRF carries
+          denormalized route distance, schedule, and addresses so Trip Operations never queries
+          back. `TrfUpdatedEvent` flows to Routing when addresses change, triggering re-routing.
+          (2) **CEP stream**: `CepEnrolledEvent` + `CepAccommodationsUpdatedEvent` +
+          `AntiAffinityRuleCreatedEvent` flow to Assignment for constraint registration —
+          wheelchair requirements, medical support needs, and student separation rules. (3)
+          **Withdrawal stream**: `CepWithdrawnEvent` triggers immediate trip cancellation in
+          Trip Operations and constraint cleanup in Assignment. This is safety-critical: a
+          withdrawn student must never appear on a future VehicleRun.
+        activeCalls: [trf-approved-fanout, trf-updated-routing, cep-enrolled-assignment, cep-withdrawn-tripops]
+        revealNodes: [trip-ops-ep, assignment-ep, routing-ep]
+        revealCalls: [outbox-write, outbox-relay]
+        duration: 6000
+      - id: event-step-3
+        title: "Support & Configuration Event Streams"
+        narrative: >
+          (4) **Compliance stream**: `CepEnrollmentSubmittedEvent`, `CepEligibilityChangedEvent`,
+          and `StudentDistanceCalculatedEvent` flow to Compliance for policy evaluation — distance
+          threshold checks (>= 2.0 miles per ADR-012), IEP verification, McKinney-Vento status.
+          (5) **Notification stream**: `TrfRejectedEvent` and `CepRejectedEvent` flow to
+          Communications for parent notification via Twilio/SendGrid. (6) **Configuration stream**:
+          `ClientTripTypeCreatedEvent`/`UpdatedEvent` flow to Settlement for contract rate alignment.
+          `SchoolCreatedEvent`/`SchoolLocationUpdatedEvent` flow to Routing for coordinate
+          registration. `DistrictCalendarUpdatedEvent`/`SchoolBellScheduleUpdatedEvent` flow to
+          Trip Operations for trip suppression and schedule recalculation. (7) **Self-consumption**:
+          `RouteCalculatedEvent` from `routing-and-pricing` topic consumed by Enrollment EP to
+          enrich TRF with route distance/duration (idempotent `SetRouteDetails()`).
+        activeCalls: [cep-eligibility-compliance, trf-rejected-comms, ctt-settlement, school-routing, calendar-tripops, route-self-consume]
+        revealNodes: [compliance-ep, comms-ep, settlement-ep, enrollment-ep]
+        revealCalls: [trf-approved-fanout, trf-updated-routing, cep-enrolled-assignment, cep-withdrawn-tripops]
+        duration: 6000
+      - id: event-step-4
+        title: "Safety-Critical Events"
+        narrative: >
+          Three event categories carry safety implications and demand guaranteed delivery.
+          **CepAccommodationsUpdatedEvent**: Carries `RequiresSpecialVehicle`, `RequiresMonitor`,
+          and `RequiredCapabilities` — incorrect propagation could assign a wheelchair-bound
+          student to an incompatible vehicle. **EmergencyContactAddedEvent** and
+          **MedicationAddedEvent**: Safety data that drivers need during transport — these events
+          update the passenger profile visible on the Driver MDD. **AntiAffinityRuleCreatedEvent**:
+          Prevents unsafe pairings (student-student, student-driver, student-vehicle) — the
+          Assignment engine must honor these constraints or the matching run fails. The
+          transactional outbox guarantees these events survive process crashes. The 30+ event
+          types published by this single BC make Enrollment & Demand the most prolific event
+          producer in the platform.
+        activeCalls: []
+        focusNodes: [enrollment-api, asb]
+        revealCalls: [cep-eligibility-compliance, trf-rejected-comms, ctt-settlement, school-routing, calendar-tripops, route-self-consume]
+        duration: 5000
+
+  # -- Section 2: Conductor Task Worker Pipeline ----------------------------------
+  - renderer: service-flow
+    title: "Conductor Task Worker Pipeline"
+    accentColor: "#EF4444"
+    layout: sequence
+
+    services:
+      - id: conductor
+        name: "Conductor"
+        type: workflow
+        technology: "Orkes Conductor"
+        status: healthy
+      - id: enrollment-api
+        name: "Enrollment & Demand API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: enrollment-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: routing-api
+        name: "Routing API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: pricing-api
+        name: "Pricing API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: comms-api
+        name: "Communications API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: trip-ops-api
+        name: "Trip Operations API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: redis
+        name: "Redis"
+        type: cache
+        technology: "Redis 7"
+        status: healthy
+
+    zones:
+      - id: orchestrator
+        label: "Workflow Orchestrator"
+        members: [conductor]
+        color: "rgba(239, 68, 68, 0.06)"
+      - id: happy-path
+        label: "Happy Path Workers"
+        members: [enrollment-api, enrollment-db, routing-api, pricing-api]
+        color: "rgba(59, 130, 246, 0.06)"
+      - id: compensation
+        label: "Compensation & Notification"
+        members: [comms-api, trip-ops-api, redis]
+        color: "rgba(245, 158, 11, 0.06)"
+
+    calls:
+      - id: validate-task
+        type: sync
+        from: conductor
+        to: enrollment-api
+        method: POST
+        path: "ValidateTrfSubmissionTask"
+        protocol: http
+        duration: 80
+        description: "Task 1/4: Domain validation — addresses, schedule, eligibility criteria. Returns COMPLETED or FAILED_WITH_TERMINAL_ERROR"
+      - id: geocode-task
+        type: sync
+        from: conductor
+        to: routing-api
+        method: POST
+        path: "GeocodeTrfAddressesTask → Routing /v1/geocode"
+        protocol: http
+        duration: 350
+        status: 200
+        description: "Task 2/4: Geocode pickup/dropoff via Google Maps through Routing BC. Failure triggers RejectTrfGeocodingFailedTask"
+        response:
+          status: 200
+          label: "Coordinates resolved"
+      - id: route-task
+        type: sync
+        from: conductor
+        to: routing-api
+        method: POST
+        path: "CalculateRouteTask → Routing /v1/routes/calculate"
+        protocol: http
+        duration: 400
+        status: 200
+        description: "Task 3/4: Route distance and duration. RouteCalculatedEvent published by Routing BC, consumed by Enrollment EP for TRF enrichment"
+        response:
+          status: 200
+          label: "Route calculated"
+      - id: pricing-task
+        type: sync
+        from: conductor
+        to: pricing-api
+        method: POST
+        path: "CalculatePricingTask → Pricing /v1/calculations"
+        protocol: http
+        duration: 200
+        status: 200
+        description: "Task 4/4: CTTC contract rate calculation based on route distance and trip type"
+        response:
+          status: 200
+          label: "Pricing calculated"
+      - id: finalize-approved-task
+        type: sync
+        from: conductor
+        to: enrollment-api
+        method: POST
+        path: "FinalizeTrfApprovedTask"
+        protocol: http
+        duration: 80
+        description: "Happy path terminus: TRF -> Approved. GenerateSubscriptionTripsTask may follow to create trips in Trip Operations"
+      - id: revert-status-task
+        type: sync
+        from: conductor
+        to: enrollment-api
+        method: POST
+        path: "RevertTrfStatusTask"
+        protocol: http
+        duration: 60
+        description: "Compensation: revert TRF from Approved back to Submitted if downstream steps fail. Approved -> Submitted (compensation reversal)"
+      - id: cancel-trips-task
+        type: sync
+        from: conductor
+        to: trip-ops-api
+        method: POST
+        path: "CancelGeneratedTripsTask → Trip Operations"
+        protocol: http
+        duration: 200
+        description: "Compensation: cancel SubscriptionTrips that were already generated before the pipeline failure was detected"
+      - id: finalize-compensation-task
+        type: sync
+        from: conductor
+        to: enrollment-api
+        method: POST
+        path: "FinalizeCompensationTask"
+        protocol: http
+        duration: 60
+        description: "Compensation terminus: record compensation outcome, create support ticket if needed via CreateSupportTicketTask"
+      - id: notify-outcome-task
+        type: sync
+        from: conductor
+        to: comms-api
+        method: POST
+        path: "NotifyParent*Task (5 variants)"
+        protocol: http
+        duration: 150
+        description: "5 notification tasks: Approved, Pending, RejectedValidation, RejectedGeocoding, Failure — all via Communications BC"
+      - id: idempotency-check
+        type: async
+        from: enrollment-api
+        to: redis
+        messageType: "IdempotencyCheck"
+        payload:
+          path: "GET/SET CatalystEnrollment:{eventId}"
+          description: "Redis idempotency with 1-hour TTL prevents duplicate task execution on Conductor retries"
+
+    steps:
+      - id: worker-step-1
+        title: "Happy Path: 4-Stage Pipeline"
+        narrative: >
+          The `trf-processing-workflow` orchestrates 21 task workers through a 4-stage pipeline.
+          **Stage 1** — `ValidateTrfSubmissionTask`: domain validation of TRF completeness
+          (addresses, schedule, eligibility). **Stage 2** — `GeocodeTrfAddressesTask`: resolves
+          pickup/dropoff coordinates via Routing BC (Google Maps Platform). Three unknown-outcome
+          handlers (`FlagValidationUnknownTask`, `FlagGeocodingUnknownTask`, `FlagForManualReviewTask`)
+          handle ambiguous results by routing to `PendingReview`. **Stage 3** — `CalculateRouteTask`:
+          computes route distance and duration. **Stage 4** — `CalculatePricingTask`: CTTC contract
+          rate lookup. On full success, `FinalizeTrfApprovedTask` transitions TRF to `Approved` and
+          `GenerateSubscriptionTripsTask` creates trips in Trip Operations. Redis idempotency checks
+          (1-hour TTL, `CatalystEnrollment:` prefix) prevent duplicate execution on Conductor retries.
+        activeCalls: [validate-task, geocode-task, route-task, pricing-task, finalize-approved-task, idempotency-check]
+        revealNodes: [conductor, enrollment-api, routing-api, pricing-api, redis]
+        duration: 6000
+      - id: worker-step-2
+        title: "Compensation: 3-Task Reversal Chain"
+        narrative: >
+          Pipeline failures trigger a compensation workflow with three reversal tasks.
+          **RevertTrfStatusTask**: reverts TRF from `Approved` back to `Submitted` (the only
+          non-terminal backward transition in the TRF state machine). **CancelGeneratedTripsTask**:
+          calls Trip Operations via `ITripOperationsClient` to cancel any **SubscriptionTrips**
+          that were already generated before the failure was detected — this prevents orphaned
+          trips from appearing in the next SGR run. **FinalizeCompensationTask**: records the
+          compensation outcome and optionally creates a support ticket via `ISupportTicketClient`
+          for manual investigation. The compensation chain is critical because the pipeline
+          spans 4 external services (Enrollment, Routing, Pricing, Trip Operations) — partial
+          completion without rollback would leave the system in an inconsistent state.
+        activeCalls: [revert-status-task, cancel-trips-task, finalize-compensation-task]
+        revealNodes: [trip-ops-api]
+        revealCalls: [validate-task, geocode-task, route-task, pricing-task, finalize-approved-task, idempotency-check]
+        duration: 5000
+      - id: worker-step-3
+        title: "Notification: 5 Outcome Paths"
+        narrative: >
+          Five notification task workers cover every pipeline outcome, each calling Communications
+          BC via `ICommunicationsClient`. **NotifyParentApprovedTask**: TRF approved, trips will
+          be generated. **NotifyParentPendingTask**: TRF flagged for manual review (ambiguous
+          validation or geocoding result). **NotifyParentRejectedValidationTask**: TRF rejected
+          due to validation failure (missing data, ineligible student). **NotifyParentRejectedGeocodingTask**:
+          TRF rejected because pickup or dropoff address could not be geocoded.
+          **NotifyParentFailureTask**: system error during processing, support ticket created.
+          The 21 workers break down as: 4 pipeline stages, 3 finalization tasks (approve, pending
+          review, flag unknown), 2 rejection tasks, 5 notification tasks, 3 compensation tasks,
+          1 trip generation task, 3 unknown-outcome handlers. Each worker uses the `AsyncWorkerHost`
+          pattern to prevent thread pool starvation.
+        activeCalls: [notify-outcome-task]
+        revealNodes: [comms-api]
+        revealCalls: [revert-status-task, cancel-trips-task, finalize-compensation-task]
+        duration: 5000

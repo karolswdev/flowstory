@@ -1,0 +1,377 @@
+id: provider-network-lifecycle
+title: "Provider Network — Onboarding & Fleet Management"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  The Provider Network bounded context manages the supply side of transportation — service
+  providers, drivers, monitors, vehicles, and dispatch areas. Provider onboarding flows through
+  a Conductor-orchestrated pipeline with background checks via Checkr webhook. Once onboarded,
+  providers register vehicles, get assigned to dispatch areas, and maintain credentials. The
+  domain uses TPH (Table-Per-Hierarchy) inheritance for Driver/Monitor under abstract Provider,
+  and enforces an 8-state EmploymentStatus state machine from Applicant to Active or Terminated.
+
+sections:
+  # -- Section 1: Provider Onboarding ------------------------------------------------
+  - renderer: service-flow
+    title: "Provider Onboarding"
+    accentColor: "#3B82F6"
+    layout: sequence
+
+    services:
+      - id: provider-api
+        name: "Provider Network API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: provider-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: conductor
+        name: "Conductor"
+        type: workflow
+        technology: "Orkes Conductor"
+        status: healthy
+      - id: checkr
+        name: "Checkr API"
+        type: external
+        technology: "Checkr (STUB)"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+      - id: compliance-ep
+        name: "Compliance Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+
+    zones:
+      - id: onboarding-pipeline
+        label: "Onboarding Pipeline"
+        members: [provider-api, provider-db, conductor, checkr]
+        color: "rgba(59, 130, 246, 0.06)"
+      - id: downstream
+        label: "Downstream"
+        members: [asb, compliance-ep]
+        color: "rgba(34, 197, 94, 0.06)"
+
+    calls:
+      - id: onboard-provider
+        type: sync
+        from: provider-api
+        to: provider-db
+        method: POST
+        path: /v1/providers
+        protocol: http
+        duration: 150
+        status: 201
+        payload:
+          employmentType: "ServiceProviderW2 | ServiceProvider1099 | D2D_Independent"
+          discriminator: "Driver | Monitor"
+        description: "OnboardProviderCommand — Driver.Create() or Monitor.Create() via TPH. Sets EmploymentStatus = Applicant."
+        response:
+          status: 201
+          label: "Provider created (Applicant)"
+      - id: start-workflow
+        type: sync
+        from: provider-api
+        to: conductor
+        method: POST
+        path: "provider-onboarding-workflow v1"
+        protocol: http
+        duration: 200
+        status: 200
+        description: "Initiates 4-step Conductor workflow with 7-day timeout for background check completion."
+      - id: initiate-bg-check
+        type: sync
+        from: conductor
+        to: checkr
+        method: POST
+        path: "InitiateBackgroundCheckTask — Checkr API"
+        protocol: http
+        duration: 120
+        status: 200
+        description: "Task 1: Initiate Checkr background check. Provider.RecordBackgroundCheckInitiation(checkId). OIG/SAM exclusion list check runs in parallel."
+      - id: webhook-callback
+        type: sync
+        from: checkr
+        to: provider-api
+        method: POST
+        path: /api/webhooks/background-checks
+        protocol: http
+        duration: 80
+        status: 200
+        description: "HMAC-SHA256 validated webhook. ProcessBackgroundCheckWebhookCommand fires. Provider.CompleteBackgroundCheck() or Provider.Suspend(). Resumes Conductor EVENT task."
+      - id: verify-approve
+        type: sync
+        from: conductor
+        to: provider-api
+        method: POST
+        path: "VerifyCredentialsTask + ApproveProviderTask"
+        protocol: http
+        duration: 100
+        status: 200
+        description: "Tasks 3-4: ValidateAllRequirementsComplete() abstract method — Driver checks license + certifications, Monitor checks basic requirements. Approve() transitions RequirementsPending -> PendingReview -> Eligible."
+      - id: persist-onboard
+        type: sync
+        from: provider-api
+        to: provider-db
+        method: POST
+        path: "providers + outbox_messages (ProviderOnboardedEvent, ProviderApprovedEvent)"
+        duration: 30
+        description: "State + outbox atomic commit. TPH discriminator persisted for Driver/Monitor."
+      - id: publish-onboarded
+        type: publish
+        from: provider-api
+        to: asb
+        messageType: "ProviderOnboardedEvent + ProviderApprovedEvent"
+        payload:
+          description: "ProviderOnboardedEvent carries provider type, employment type, service provider ID. ProviderApprovedEvent triggers downstream credential tracking."
+      - id: compliance-consume
+        type: subscribe
+        from: asb
+        to: compliance-ep
+        messageType: "ProviderApprovedEvent"
+        action: "Initialize credential tracking for newly approved provider"
+
+    steps:
+      - id: onboard-step-1
+        title: "Registration & TPH Dispatch"
+        narrative: >
+          `POST /v1/providers` triggers **OnboardProviderCommand**. The command dispatches to
+          **Driver.Create()** or **Monitor.Create()** based on the discriminator — both inherit from
+          abstract **Provider** via TPH (Table-Per-Hierarchy). The factory method sets initial
+          `EmploymentStatus = Applicant` and records `EmploymentType` (ServiceProviderW2,
+          ServiceProvider1099, or D2D_Independent). D2D (Direct-to-Driver) providers have nullable
+          `ServiceProviderId` and require **D2DTaxInfo** (W-9) for 1099 payments. The
+          **ProviderOnboardedEvent** is raised, and the Conductor **provider-onboarding-workflow**
+          is started with a 7-day timeout to allow for background check completion.
+        activeCalls: [onboard-provider, start-workflow]
+        revealNodes: [provider-api, provider-db, conductor]
+        duration: 5000
+      - id: onboard-step-2
+        title: "Background Check & Exclusion Lists"
+        narrative: >
+          Conductor fires **InitiateBackgroundCheckTask** — calls the Checkr API (currently STUB
+          awaiting credentials) and records `BackgroundCheckId` on the Provider aggregate.
+          **CheckExclusionListsTask** runs in parallel, verifying the provider against OIG/SAM
+          exclusion lists. The workflow then waits on an EVENT task (`wait_bg_check_complete`)
+          for up to 7 days. When Checkr calls back via `POST /api/webhooks/background-checks`,
+          HMAC-SHA256 signature validation runs first. **ProcessBackgroundCheckWebhookCommand**
+          either calls `Provider.CompleteBackgroundCheck(date)` (success) or `Provider.Suspend(reason)`
+          (failure). PII is set via `SetPiiForBackgroundCheck(dob, ssn)` with encrypted SSN
+          storage through the Data Protection API, then cleared via `ClearPii()` after check completion.
+        activeCalls: [initiate-bg-check, webhook-callback]
+        revealNodes: [checkr]
+        revealCalls: [onboard-provider, start-workflow]
+        duration: 6000
+      - id: onboard-step-3
+        title: "Credential Verification & Approval"
+        narrative: >
+          **VerifyCredentialsTask** calls the abstract `ValidateAllRequirementsComplete()` — Driver
+          validates license (DriverLicense VO), certified vehicle types, and certifications. Monitor
+          validates basic requirements only. **ApproveProviderTask** transitions through
+          `RequirementsPending` -> `PendingReview` -> `Eligible`. The 8-state **EmploymentStatus**
+          machine enforces allowed transitions: `Applicant` -> `ProfileCreated` -> `RequirementsPending`
+          -> `PendingReview` -> `Eligible` -> `Active`. Each transition is guarded by the
+          `AllowedTransitions` dictionary. **CreateVerificationRecordTask** persists the audit trail.
+        activeCalls: [verify-approve, persist-onboard]
+        revealNodes: [provider-db]
+        revealCalls: [initiate-bg-check, webhook-callback]
+        duration: 5000
+      - id: onboard-step-4
+        title: "Handoff to Fleet & Compliance"
+        narrative: >
+          **ProviderOnboardedEvent** and **ProviderApprovedEvent** publish via transactional outbox
+          relay to the `provider-network-and-assignment` ASB topic. Compliance BC initializes
+          credential tracking for the new provider. Assignment BC registers the provider as available
+          for matching. The provider is now `Eligible` and ready for fleet setup — vehicle registration,
+          dispatch area assignment, and credential management. Next: the fleet management lifecycle.
+        activeCalls: [publish-onboarded, compliance-consume]
+        revealNodes: [asb, compliance-ep]
+        revealCalls: [verify-approve, persist-onboard]
+        duration: 4000
+
+  # -- Section 2: Vehicle Fleet & Dispatch Areas ------------------------------------
+  - renderer: service-flow
+    title: "Vehicle Fleet & Dispatch Areas"
+    accentColor: "#22C55E"
+    layout: sequence
+
+    services:
+      - id: provider-api
+        name: "Provider Network API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: provider-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: redis
+        name: "Redis"
+        type: cache
+        technology: "Redis 7"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+      - id: assignment-ep
+        name: "Assignment Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: blob-storage
+        name: "Azure Blob Storage"
+        type: storage
+        technology: "Azure Blob"
+        status: healthy
+
+    zones:
+      - id: fleet-core
+        label: "Fleet Management"
+        members: [provider-api, provider-db, redis, blob-storage]
+        color: "rgba(34, 197, 94, 0.06)"
+      - id: consumers
+        label: "Downstream Consumers"
+        members: [asb, assignment-ep]
+        color: "rgba(168, 85, 247, 0.06)"
+
+    calls:
+      - id: register-vehicle
+        type: sync
+        from: provider-api
+        to: provider-db
+        method: POST
+        path: /v1/vehicles
+        protocol: http
+        duration: 120
+        status: 201
+        payload:
+          make: "string"
+          model: "string"
+          vin: "17-char validated (excludes I/O/Q)"
+          vehicleType: "Sedan | SUV | Minivan | Van | Wheelchair | Stretcher"
+          capacity: "VehicleCapacity VO"
+        description: "RegisterVehicleCommand — EligibilityStatus = PendingReview. VIN regex validated. VehicleRegisteredEvent raised with PII-masked VIN and license plate."
+        response:
+          status: 201
+          label: "Vehicle registered (PendingReview)"
+      - id: approve-vehicle
+        type: sync
+        from: provider-api
+        to: provider-db
+        method: POST
+        path: /v1/vehicles/{id}/approve
+        protocol: http
+        duration: 80
+        status: 200
+        description: "ApproveVehicleCommand — PendingReview -> Approved -> Eligible. Updates inspection, insurance policy (InsurancePolicy VO), capacity (VehicleCapacity VO)."
+      - id: create-dispatch-area
+        type: sync
+        from: provider-api
+        to: provider-db
+        method: POST
+        path: /v1/dispatch-areas
+        protocol: http
+        duration: 100
+        status: 201
+        payload:
+          geoJsonBoundary: "Polygon | MultiPolygon"
+          maxActiveProviders: "integer >= 1"
+        description: "CreateDispatchAreaCommand — GeoJSON boundary validated (Polygon/MultiPolygon only). MaxActiveProviders enforced."
+        response:
+          status: 201
+          label: "Dispatch area created"
+      - id: assign-to-da
+        type: sync
+        from: provider-api
+        to: provider-db
+        method: POST
+        path: /v1/dispatch-areas/{id}/providers
+        protocol: http
+        duration: 80
+        status: 200
+        payload:
+          providerId: "guid"
+          priority: "integer"
+          effectiveDate: "date"
+        description: "AssignProviderToDispatchAreaCommand — Creates ProviderDaAssignment junction entity. Capacity invariant: cannot exceed MaxActiveProviders."
+      - id: upload-credential-doc
+        type: sync
+        from: provider-api
+        to: blob-storage
+        method: POST
+        path: /v1/credentials/{id}/upload-document
+        protocol: http
+        duration: 200
+        status: 200
+        description: "UploadCredentialDocumentCommand — AzureBlobStorageService uploads to Azure Blob. CredentialDocumentUploadedEvent raised."
+      - id: publish-fleet-events
+        type: publish
+        from: provider-api
+        to: asb
+        messageType: "VehicleRegisteredEvent + ProviderAssignedToDaEvent + VehicleCapacityUpdatedEvent"
+        payload:
+          description: "Fleet changes fan out to Assignment (matching availability) and Compliance (credential tracking). VIN/license plate masked in event payloads."
+      - id: assignment-fleet-consume
+        type: subscribe
+        from: asb
+        to: assignment-ep
+        messageType: "VehicleRegisteredEvent"
+        action: "Update available vehicle pool for driver-to-VR matching"
+
+    steps:
+      - id: fleet-step-1
+        title: "Vehicle Registration & Eligibility"
+        narrative: >
+          `POST /v1/vehicles` fires **RegisterVehicleCommand**. The Vehicle aggregate validates VIN
+          format (17 characters, excludes I/O/Q), license plate (1-20 chars), and state code
+          (2 uppercase letters). Initial `EligibilityStatus = PendingReview`. The **VehicleCapacity** VO
+          captures StandardSeats, WheelchairPositions, CarSeatPositions, AideSpace, and SupportsSpecialNeeds.
+          **VehicleRegisteredEvent** is raised with `MaskVin()` and `MaskLicensePlate()` applied to the
+          event payload — PII never leaves the BC in cleartext. Approval via `POST /v1/vehicles/{id}/approve`
+          transitions `PendingReview` -> `Approved` -> `Eligible`. The **EligibilityStatus** state machine
+          has no terminal state — `Ineligible` vehicles can always be resubmitted for review.
+        activeCalls: [register-vehicle, approve-vehicle]
+        revealNodes: [provider-api, provider-db]
+        duration: 5000
+      - id: fleet-step-2
+        title: "Dispatch Areas & Provider Assignment"
+        narrative: >
+          **DispatchArea** aggregates define geographic service zones with GeoJSON boundaries (Polygon
+          or MultiPolygon only). `POST /v1/dispatch-areas` creates zones with `MaxActiveProviders`
+          capacity constraints. `POST /v1/dispatch-areas/{id}/providers` creates a **ProviderDaAssignment**
+          junction entity with priority ranking and effective date. Invariants enforced: no duplicate
+          active assignments for the same provider, capacity cannot be reduced below active count,
+          MaxActiveProviders >= 1. The `/v1/dispatch-areas/map-data` endpoint returns all areas with
+          boundaries and capacity data for the operations map overlay. **ProviderAssignedToDaEvent**
+          notifies Assignment BC of supply changes in the dispatch area.
+        activeCalls: [create-dispatch-area, assign-to-da]
+        revealCalls: [register-vehicle, approve-vehicle]
+        duration: 5000
+      - id: fleet-step-3
+        title: "Credential Tracking & Document Storage"
+        narrative: >
+          Credentials (DriverLicense, CPR, FirstAid, TBClearance, VehicleInspection, Insurance,
+          SpecialNeeds, BehavioralIntervention) are managed via the **Credential** aggregate.
+          `POST /v1/credentials/{id}/upload-document` uploads to **Azure Blob Storage** via
+          `AzureBlobStorageService`. The **ExpirationDate** VO provides 30-day Warning and 7-day
+          Critical thresholds. Two background jobs run continuously: **CredentialExpirationJob**
+          scans all credentials and calls `Credential.CheckExpiration()`, and **InspectionReminderJob**
+          scans vehicles for expiring inspections. Notification deduplication uses a 24-hour window
+          via `LastExpirationNotificationAt`. Fleet events fan out to Assignment and Compliance
+          downstream, with VIN and license plate masked in all event payloads.
+        activeCalls: [upload-credential-doc, publish-fleet-events, assignment-fleet-consume]
+        revealNodes: [blob-storage, asb, assignment-ep, redis]
+        revealCalls: [create-dispatch-area, assign-to-da]
+        duration: 5000

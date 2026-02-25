@@ -1,5 +1,5 @@
-import { useMemo, useCallback } from 'react';
-import { StepOverlay } from '../shared';
+import { useMemo, useCallback, useState, useEffect } from 'react';
+import { StepOverlay, EdgeReadinessGate } from '../shared';
 import {
   ReactFlow,
   Background,
@@ -51,6 +51,7 @@ interface PipelineCanvasProps {
   story: PipelineStory;
   currentStepIndex: number;
   onStepChange?: (step: number) => void;
+  hideOverlay?: boolean;
 }
 
 // ============================================================================
@@ -199,6 +200,7 @@ export function PipelineCanvas({
   story,
   currentStepIndex,
   onStepChange,
+  hideOverlay = false,
 }: PipelineCanvasProps) {
   // Compute active/completed elements based on current step
   const { activeStages, activeJobs, activeGates, completedStages, completedJobs } = useMemo(() => {
@@ -235,6 +237,10 @@ export function PipelineCanvas({
     return ids;
   }, [activeStages, activeJobs]);
 
+  const [edgesReady, setEdgesReady] = useState(false);
+  const onEdgesReady = useCallback(() => setEdgesReady(true), []);
+  useEffect(() => { setEdgesReady(false); }, [story.pipeline?.name]);
+
   const onNodeClick = useCallback((_event: React.MouseEvent, _node: Node) => {}, []);
 
   const triggerIcon = TRIGGER_TYPE_ICONS[story.pipeline.trigger.type] || '🔄';
@@ -255,7 +261,7 @@ export function PipelineCanvas({
 
       <ReactFlow
         nodes={nodes}
-        edges={edges}
+        edges={edgesReady ? edges : []}
         nodeTypes={nodeTypes}
         onNodeClick={onNodeClick}
         connectionMode={ConnectionMode.Loose}
@@ -269,6 +275,7 @@ export function PipelineCanvas({
       >
         <Background color="#e0e0e0" gap={20} />
         <Controls showInteractive={false} />
+        <EdgeReadinessGate onReady={onEdgesReady} />
         <PipelineCameraController activeNodeIds={activeNodeIds} />
         <MiniMap
           nodeColor={(node) => {
@@ -281,12 +288,14 @@ export function PipelineCanvas({
         />
       </ReactFlow>
 
-      <StepOverlay
-        stepIndex={currentStepIndex}
-        totalSteps={story.steps.length}
-        title={story.steps[currentStepIndex]?.title}
-        narrative={story.steps[currentStepIndex]?.narrative}
-      />
+      {!hideOverlay && (
+        <StepOverlay
+          stepIndex={currentStepIndex}
+          totalSteps={story.steps.length}
+          title={story.steps[currentStepIndex]?.title}
+          narrative={story.steps[currentStepIndex]?.narrative}
+        />
+      )}
     </div>
   );
 }

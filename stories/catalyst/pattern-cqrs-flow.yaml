@@ -1,0 +1,394 @@
+id: pattern-cqrs-flow
+title: "CQRS — Write Path, Read Path & Pipeline Behaviors"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  Three perspectives on CQRS: the write path (command → aggregate → domain event →
+  outbox), the read path (query → AsNoTracking projection → DTO), and the MediatR
+  pipeline behaviors that apply cross-cutting concerns uniformly to both.
+
+sections:
+  # ── Section 1: Write Path ───────────────────────────────────────────────
+  - renderer: service-flow
+    title: "Write Path"
+    accentColor: "#8E3FBF"
+    layout: sequence
+
+    services:
+      - id: controller
+        name: "API Controller"
+        type: api
+        technology: "REST Endpoint"
+        status: healthy
+      - id: pipeline
+        name: "MediatR Pipeline"
+        type: worker
+        technology: "IPipelineBehavior"
+        status: healthy
+      - id: handler
+        name: "Command Handler"
+        type: worker
+        technology: "ICommandHandler<T>"
+        status: healthy
+      - id: aggregate
+        name: "Aggregate Root"
+        type: api
+        technology: "Domain Entity"
+        status: healthy
+      - id: db
+        name: "PostgreSQL"
+        type: database
+        technology: "EF Core + Outbox"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+
+    zones:
+      - id: api
+        label: "API Layer"
+        members: [controller]
+        color: "rgba(142, 63, 191, 0.04)"
+      - id: application
+        label: "Application Layer"
+        members: [pipeline, handler]
+        color: "rgba(142, 63, 191, 0.08)"
+      - id: domain
+        label: "Domain Layer"
+        members: [aggregate]
+        color: "rgba(142, 63, 191, 0.12)"
+      - id: infra
+        label: "Infrastructure"
+        members: [db, asb]
+        color: "rgba(142, 63, 191, 0.04)"
+
+    calls:
+      - id: http-post
+        type: sync
+        from: controller
+        to: pipeline
+        method: POST
+        path: "/v1/batches/{id}/approve"
+        protocol: http
+        duration: 5
+        description: "Controller creates ApproveSettlementBatchCommand, dispatches via MediatR"
+      - id: validate
+        type: sync
+        from: pipeline
+        to: pipeline
+        method: VALIDATE
+        path: "ValidationBehavior → FluentValidation rules → TenantScopingBehavior → MetricsBehavior"
+        duration: 3
+        description: "Pipeline behaviors run before handler: validation, tenant, metrics"
+      - id: dispatch-to-handler
+        type: sync
+        from: pipeline
+        to: handler
+        method: INVOKE
+        path: "ApproveSettlementBatchHandler.Handle()"
+        duration: 2
+        description: "Handler receives validated, tenant-scoped command"
+      - id: load-aggregate
+        type: sync
+        from: handler
+        to: db
+        method: GET
+        path: "repository.GetByIdAsync(command.BatchId)"
+        duration: 15
+        description: "Load full aggregate with change tracking"
+      - id: mutate
+        type: sync
+        from: handler
+        to: aggregate
+        method: INVOKE
+        path: "batch.MarkAsApproved(command.ApprovedBy)"
+        duration: 1
+        description: "Aggregate enforces invariants, mutates state, raises domain event"
+      - id: save
+        type: sync
+        from: handler
+        to: db
+        method: POST
+        path: "SaveChangesAsync() — state + outbox_messages in ONE transaction"
+        duration: 30
+        description: "Atomic commit: domain state and domain events"
+      - id: relay
+        type: publish
+        from: db
+        to: asb
+        messageType: "SettlementApprovedEvent"
+        payload:
+          description: "Background outbox relay publishes to ASB topic"
+
+    steps:
+      - id: write-step-1
+        title: "Command Dispatch & Pipeline"
+        narrative: >
+          A `POST /v1/batches/{id}/approve` request hits the controller. The controller creates
+          an **ApproveSettlementBatchCommand** and dispatches it through MediatR. Before the handler
+          executes, three pipeline behaviors fire in sequence: **ValidationBehavior** runs
+          FluentValidation rules (rejects malformed input with HTTP 400), **TenantScopingBehavior**
+          ensures the command's TenantId matches the JWT claim, and **MetricsBehavior** starts a
+          Stopwatch for `catalyst_command_duration_seconds`. The handler never sees an invalid or
+          cross-tenant command — the pipeline guarantees it.
+        activeCalls: [http-post, validate, dispatch-to-handler]
+        revealNodes: [controller, pipeline, handler]
+        duration: 5000
+      - id: write-step-2
+        title: "Aggregate Mutation & Domain Event"
+        narrative: >
+          The handler loads the full **SettlementBatch** aggregate from the repository with EF Core
+          change tracking. It calls `batch.MarkAsApproved(approvedBy)` — the aggregate's public
+          mutation method. Inside, the aggregate checks its guard (is the batch in `Calculated`
+          status?), mutates state (`Status = Approved`, `ApprovedAt = now`, `ApprovedBy = userId`),
+          and raises **SettlementApprovedEvent**. The handler calls `SaveChangesAsync()`. EF Core
+          writes the state change and the serialized domain event to `outbox_messages` in a single
+          PostgreSQL transaction. The outbox relay publishes to Azure Service Bus. The write path
+          produces a complete, auditable record of what changed and why.
+        activeCalls: [load-aggregate, mutate, save, relay]
+        revealNodes: [aggregate, db, asb]
+        revealCalls: [http-post, validate, dispatch-to-handler]
+        duration: 6000
+
+  # ── Section 2: Read Path ────────────────────────────────────────────────
+  - renderer: service-flow
+    title: "Read Path"
+    accentColor: "#4A8BC5"
+    layout: sequence
+
+    services:
+      - id: controller
+        name: "API Controller"
+        type: api
+        technology: "REST Endpoint"
+        status: healthy
+      - id: pipeline
+        name: "MediatR Pipeline"
+        type: worker
+        technology: "IPipelineBehavior"
+        status: healthy
+      - id: handler
+        name: "Query Handler"
+        type: worker
+        technology: "IQueryHandler<T>"
+        status: healthy
+      - id: db
+        name: "PostgreSQL"
+        type: database
+        technology: "EF Core (NoTracking)"
+        status: healthy
+      - id: dto
+        name: "DTO Projection"
+        type: api
+        technology: "AutoMapper"
+        status: healthy
+
+    zones:
+      - id: api
+        label: "API Layer"
+        members: [controller]
+        color: "rgba(74, 139, 197, 0.04)"
+      - id: application
+        label: "Application Layer"
+        members: [pipeline, handler]
+        color: "rgba(74, 139, 197, 0.08)"
+      - id: infra
+        label: "Infrastructure"
+        members: [db, dto]
+        color: "rgba(74, 139, 197, 0.04)"
+
+    calls:
+      - id: http-get
+        type: sync
+        from: controller
+        to: pipeline
+        method: GET
+        path: "/v1/batches?status=Calculated&page=1&pageSize=25"
+        protocol: http
+        duration: 3
+        description: "Controller creates SearchSettlementBatchesQuery with filters"
+      - id: validate-query
+        type: sync
+        from: pipeline
+        to: pipeline
+        method: VALIDATE
+        path: "TenantScopingBehavior → MetricsBehavior (no FluentValidation for queries)"
+        duration: 1
+        description: "Lightweight pipeline — tenant scoping and metrics only"
+      - id: dispatch-query
+        type: sync
+        from: pipeline
+        to: handler
+        method: INVOKE
+        path: "SearchSettlementBatchesHandler.Handle()"
+        duration: 1
+        description: "Handler builds IQueryable chain"
+      - id: query-db
+        type: sync
+        from: handler
+        to: db
+        method: GET
+        path: "AsNoTracking().Where(filters).OrderBy(sort).Skip/Take(pagination)"
+        duration: 10
+        description: "No change tracking, no aggregate hydration — SQL projection only"
+      - id: project
+        type: sync
+        from: db
+        to: dto
+        method: INVOKE
+        path: "ProjectTo<SettlementBatchSummaryDto>() — SELECT only needed columns"
+        duration: 2
+        description: "AutoMapper generates SQL SELECT with only the columns the UI needs"
+      - id: return-page
+        type: sync
+        from: handler
+        to: controller
+        method: RESPONSE
+        status: 200
+        duration: 1
+        description: "PagedResult<SettlementBatchSummaryDto> with totalCount, page, items"
+
+    steps:
+      - id: read-step-1
+        title: "Query Dispatch"
+        narrative: >
+          A `GET /v1/batches?status=Calculated&page=1` request creates a
+          **SearchSettlementBatchesQuery** with filter and pagination parameters. The MediatR
+          pipeline is lighter for queries — no FluentValidation (query params are simple types),
+          just **TenantScopingBehavior** and **MetricsBehavior**. The handler receives a
+          tenant-scoped query object.
+        activeCalls: [http-get, validate-query, dispatch-query]
+        revealNodes: [controller, pipeline, handler]
+        duration: 4000
+      - id: read-step-2
+        title: "Projection — Not Hydration"
+        narrative: >
+          The handler builds an `IQueryable` chain: `.AsNoTracking()` (no change tracking
+          overhead), `.Where(b => b.Status == query.Status)` (filter), `.OrderByDescending(b =>
+          b.CreatedAt)` (sort), `.Skip/Take` (pagination). **AutoMapper's `ProjectTo<T>()`**
+          generates a SQL `SELECT` with only the columns needed for the DTO — not the full
+          aggregate. No domain logic executes. No navigation properties are loaded unless the DTO
+          needs them. The database does the filtering, sorting, and pagination. The handler returns
+          a `PagedResult<SettlementBatchSummaryDto>` with total count, page metadata, and items.
+          This is why the read path is fast: it never touches the domain model.
+        activeCalls: [query-db, project, return-page]
+        revealNodes: [db, dto]
+        revealCalls: [http-get, validate-query, dispatch-query]
+        duration: 6000
+
+  # ── Section 3: Pipeline Behaviors ───────────────────────────────────────
+  - renderer: service-flow
+    title: "Pipeline Behaviors"
+    accentColor: "#22C55E"
+    layout: sequence
+
+    services:
+      - id: mediator
+        name: "MediatR.Send()"
+        type: gateway
+        technology: "Dispatch"
+        status: healthy
+      - id: validation
+        name: "Validation Behavior"
+        type: worker
+        technology: "FluentValidation"
+        status: healthy
+      - id: tenant
+        name: "Tenant Scoping"
+        type: worker
+        technology: "TenantContextProvider"
+        status: healthy
+      - id: metrics
+        name: "Metrics Behavior"
+        type: worker
+        technology: "MetricsBehavior<T>"
+        status: healthy
+      - id: handler
+        name: "Handler"
+        type: api
+        technology: "Command or Query"
+        status: healthy
+
+    zones:
+      - id: cross-cutting
+        label: "Cross-Cutting Pipeline (runs on every request)"
+        members: [mediator, validation, tenant, metrics]
+        color: "rgba(34, 197, 94, 0.06)"
+      - id: business
+        label: "Business Logic"
+        members: [handler]
+        color: "rgba(59, 130, 246, 0.06)"
+
+    calls:
+      - id: dispatch
+        type: sync
+        from: mediator
+        to: validation
+        method: INVOKE
+        path: "ValidationBehavior<TRequest, TResponse>"
+        duration: 3
+        description: "First behavior: run FluentValidation rules, reject with ValidationException on failure"
+      - id: scope-tenant
+        type: sync
+        from: validation
+        to: tenant
+        method: INVOKE
+        path: "TenantScopingBehavior — set TenantId from JWT on the request"
+        duration: 1
+        description: "Second behavior: ensure every command/query carries the correct TenantId"
+      - id: start-metrics
+        type: sync
+        from: tenant
+        to: metrics
+        method: INVOKE
+        path: "MetricsBehavior — Stopwatch.Start(), record catalyst_command_duration_seconds"
+        duration: 1
+        description: "Third behavior: measure execution time, record success/failure counters"
+      - id: execute-handler
+        type: sync
+        from: metrics
+        to: handler
+        method: INVOKE
+        path: "next() — the actual command or query handler executes"
+        duration: 50
+        description: "Handler runs inside the behavior pipeline — fully instrumented"
+      - id: metrics-stop
+        type: sync
+        from: handler
+        to: metrics
+        method: RESPONSE
+        duration: 1
+        description: "Stopwatch.Stop() — duration, command_type, bounded_context, outcome recorded"
+
+    steps:
+      - id: pipeline-step-1
+        title: "Three Behaviors, Every Handler"
+        narrative: >
+          Every `MediatR.Send()` call — whether command or query — passes through the same
+          pipeline of **IPipelineBehavior** implementations. **ValidationBehavior** runs
+          FluentValidation rules and throws `ValidationException` on failure (the controller
+          catches this and returns HTTP 400). **TenantScopingBehavior** extracts the `tenant_id`
+          from the JWT and sets it on the request — handlers never need to worry about tenant
+          context. **MetricsBehavior** wraps the handler in a Stopwatch, recording
+          `catalyst_command_duration_seconds` (histogram), `catalyst_command_total` (counter), and
+          `catalyst_command_errors_total` (counter) with dimensions for command_type,
+          bounded_context, and outcome.
+        activeCalls: [dispatch, scope-tenant, start-metrics]
+        revealNodes: [mediator, validation, tenant, metrics]
+        duration: 5000
+      - id: pipeline-step-2
+        title: "Handler Executes Instrumented"
+        narrative: >
+          The handler executes inside the behavior pipeline. It never validates input (that
+          happened in ValidationBehavior). It never resolves tenant context (that happened in
+          TenantScopingBehavior). It never records metrics (that happens in MetricsBehavior).
+          The handler's only job is business logic. This separation means adding a new cross-cutting
+          concern — rate limiting, caching, circuit breaking — requires implementing one
+          `IPipelineBehavior` and registering it. Zero handler modification. 369 handlers gain
+          the new behavior automatically.
+        activeCalls: [execute-handler, metrics-stop]
+        revealNodes: [handler]
+        revealCalls: [dispatch, scope-tenant, start-metrics]
+        duration: 5000

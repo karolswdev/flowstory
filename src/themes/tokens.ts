@@ -8,6 +8,11 @@
 export interface ThemeTokens {
   name: 'light' | 'dark';
 
+  // Typography
+  fontFamily: string;
+  fontFamilyDisplay: string;
+  fontFamilyMono: string;
+
   // Brand colors
   primary: string;
   primaryHover: string;
@@ -65,6 +70,11 @@ export interface ThemeTokens {
 /** Light Theme — Tailwind palette */
 export const lightTheme: ThemeTokens = {
   name: 'light',
+
+  // Typography
+  fontFamily: "'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+  fontFamilyDisplay: "'DM Sans', 'Plus Jakarta Sans', sans-serif",
+  fontFamilyMono: "'JetBrains Mono', 'SF Mono', 'Fira Code', monospace",
 
   // Brand
   primary: '#3b82f6',
@@ -124,31 +134,36 @@ export const lightTheme: ThemeTokens = {
 export const darkTheme: ThemeTokens = {
   name: 'dark',
 
+  // Typography
+  fontFamily: "'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+  fontFamilyDisplay: "'DM Sans', 'Plus Jakarta Sans', sans-serif",
+  fontFamilyMono: "'JetBrains Mono', 'SF Mono', 'Fira Code', monospace",
+
   // Brand
   primary: '#60a5fa',
   primaryHover: '#3b82f6',
   secondary: '#4ade80',
 
-  // Backgrounds
-  bgPrimary: '#0f172a',
-  bgSecondary: '#1e293b',
-  bgTertiary: '#334155',
-  bgElevated: '#1e293b',
+  // Backgrounds — deep navy
+  bgPrimary: '#0B0B1F',
+  bgSecondary: '#12122B',
+  bgTertiary: '#1C1C3A',
+  bgElevated: '#161635',
 
   // Surfaces
-  surfacePrimary: '#0f172a',
-  surfaceSecondary: '#1e293b',
-  surfaceBorder: '#334155',
+  surfacePrimary: '#0B0B1F',
+  surfaceSecondary: '#12122B',
+  surfaceBorder: 'rgba(255, 255, 255, 0.08)',
 
-  // Text
-  textPrimary: '#f1f5f9',
-  textSecondary: '#94a3b8',
-  textMuted: '#64748b',
-  textInverse: '#0f172a',
+  // Text — tuned for navy contrast
+  textPrimary: '#E8EAF0',
+  textSecondary: '#8B8FAA',
+  textMuted: '#5C5F7A',
+  textInverse: '#0B0B1F',
 
-  // Borders
-  border: '#334155',
-  borderStrong: '#475569',
+  // Borders — subtle white alpha
+  border: 'rgba(255, 255, 255, 0.08)',
+  borderStrong: 'rgba(255, 255, 255, 0.15)',
 
   // Nodes
   nodeActor: '#c084fc',
@@ -172,10 +187,10 @@ export const darkTheme: ThemeTokens = {
   error: '#f87171',
   info: '#60a5fa',
 
-  // Shadows
-  shadowSm: '0 1px 3px rgba(0, 0, 0, 0.3)',
-  shadowMd: '0 4px 8px rgba(0, 0, 0, 0.4)',
-  shadowLg: '0 10px 20px rgba(0, 0, 0, 0.5)',
+  // Shadows — layered depth
+  shadowSm: '0 2px 6px rgba(0,0,0,0.5), 0 0 2px rgba(0,0,0,0.3), 0 0 20px rgba(10,10,40,0.3)',
+  shadowMd: '0 4px 12px rgba(0,0,0,0.6), 0 0 4px rgba(0,0,0,0.3), 0 0 30px rgba(10,10,40,0.25)',
+  shadowLg: '0 8px 24px rgba(0,0,0,0.6), 0 0 6px rgba(0,0,0,0.3), 0 0 40px rgba(15,15,50,0.2)',
 };
 
 /** Get theme by name */

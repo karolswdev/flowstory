@@ -1,0 +1,404 @@
+id: trip-ops-operational-heartbeat
+title: "Trip Operations — Operational Heartbeat"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  A day in the life of Trip Operations — from the nightly batch generation at
+  2 AM through the morning dispatch cascade, into the student journey (PT state
+  machine), and down to the real-time GPS telemetry pipeline that powers the
+  fleet map. Three perspectives: daily rhythm, student lifecycle, infrastructure.
+
+sections:
+  # ── Section 1: Event Storm — Daily Timeline ────────────────────────
+  - renderer: event-storming
+    title: "Daily Rhythm"
+    accentColor: "#F59E0B"
+
+    actors:
+      - id: scheduler
+        name: Nightly Scheduler
+        icon: "\u23F0"
+      - id: dispatch
+        name: Dispatcher
+        icon: "\U0001F3A7"
+      - id: driver-actor
+        name: Driver
+        icon: "\U0001F468\u200D\U0001F33E"
+      - id: vehicle
+        name: Vehicle (GPS)
+        icon: "\U0001F690"
+
+    aggregates:
+      - id: sgr-agg
+        name: ScheduledGenerationRun
+      - id: vr-agg
+        name: VehicleRun
+      - id: pt-agg
+        name: PassengerTrip
+
+    events:
+      - id: sgr-completed
+        name: SgrCompletedEvent
+        aggregate: sgr-agg
+        description: "Nightly batch: VRs + PTs from subscription templates"
+      - id: vr-created
+        name: VehicleRunCreatedEvent
+        aggregate: vr-agg
+        description: "VR in NEW state with stops populated"
+      - id: offer-sent
+        name: OfferSentToDriverEvent
+        aggregate: vr-agg
+        description: "Offer queued and dispatched to driver device"
+      - id: offer-accepted
+        name: OfferAcceptedEvent
+        aggregate: vr-agg
+        description: "Driver confirmed — VR ready for dispatch"
+      - id: vr-started
+        name: VehicleRunStartedEvent
+        aggregate: vr-agg
+        description: "Driver begins route — TOSTOP"
+      - id: gps-updated
+        name: GpsLocationUpdatedEvent
+        aggregate: vr-agg
+        description: "30s GPS cadence: PostGIS + ETA + SignalR"
+      - id: pt-boarded
+        name: PtBoardedEvent
+        aggregate: pt-agg
+        description: "Student scanned and on board"
+      - id: pt-dropoff
+        name: PtDroppedOffEvent
+        aggregate: pt-agg
+        description: "REVENUE-CRITICAL: triggers BC/PD/PM"
+      - id: vr-completed
+        name: VehicleRunCompletedEvent
+        aggregate: vr-agg
+        description: "All stops complete — post-service"
+
+    commands:
+      - id: trigger-sgr
+        name: TriggerSgrCommand
+        actor: scheduler
+        aggregate: sgr-agg
+        description: "Initiates nightly Conductor workflow"
+      - id: send-offer
+        name: SendOfferCommand
+        actor: dispatch
+        aggregate: vr-agg
+        description: "Queue + dispatch driver offer"
+      - id: start-vr
+        name: StartVrCommand
+        actor: driver-actor
+        aggregate: vr-agg
+        description: "Driver begins daily route"
+      - id: ingest-gps
+        name: IngestGpsLocationCommand
+        actor: vehicle
+        aggregate: vr-agg
+        description: "GPS telemetry ingestion"
+      - id: board-pt
+        name: BoardPtCommand
+        actor: driver-actor
+        aggregate: pt-agg
+        description: "Student pickup with ID scan"
+      - id: dropoff-pt
+        name: DropOffPtCommand
+        actor: driver-actor
+        aggregate: pt-agg
+        description: "Student dropoff at school"
+
+    policies:
+      - id: assignment-policy
+        name: "Auto-Assignment"
+        trigger: sgr-completed
+        description: "Assignment BC matches drivers to VRs"
+      - id: settlement-policy
+        name: "Settlement Pipeline"
+        trigger: pt-dropoff
+        description: "BC/PD/PM calculation"
+      - id: risk-detection
+        name: "At-Risk Detection"
+        trigger: gps-updated
+        description: "Monitoring flags stale VRs"
+
+    steps:
+      - title: "2:00 AM — Nightly Generation"
+        description: "The scheduler triggers SGR generation via Conductor. The 6-step pipeline processes active **SubscriptionRuns**, creates **VehicleRuns** and **PassengerTrips**, patches stop-to-PT linkage, and detects conflicts. Hundreds of VRs materialize in under 5 minutes for the next school day."
+        highlightCommands: [trigger-sgr]
+        highlightEvents: [sgr-completed, vr-created]
+        focusAggregate: sgr-agg
+        showPolicies: true
+        duration: 5000
+
+      - title: "5:30 AM — Offer Cascade"
+        description: "Dispatchers send offers to drivers via the 4-step pipeline: `Queue` \u2192 `Send` \u2192 `Confirm` \u2192 `Accept`. Each step is a separate command. At-risk detection flags any VR within 90 minutes of start that hasn't been accepted — *triggering proactive rescue*."
+        highlightCommands: [send-offer]
+        highlightEvents: [offer-sent, offer-accepted]
+        focusAggregate: vr-agg
+        showPolicies: true
+        duration: 5000
+
+      - title: "7:00 AM — Routes Go Live"
+        description: "Drivers start their routes. GPS telemetry flows at 30-second intervals — PostGIS persistence, ETA recalculation, **SignalR** broadcast to the fleet map. Students are boarded with ID scan verification. The operational heartbeat is running."
+        highlightCommands: [start-vr, ingest-gps, board-pt]
+        highlightEvents: [vr-started, gps-updated, pt-boarded]
+        focusAggregate: vr-agg
+        duration: 5000
+
+      - title: "7:45 AM — The Revenue Moment"
+        description: "Each student dropoff fires **PtDroppedOffEvent** — *the most important event in the platform*. It carries denormalized `DriverId`, `ServiceProviderId`, `MonitorId` so Settlement can calculate **BC/PD/PM** without querying Trip Ops. {color:red|If this event is lost, drivers go unpaid.} **Transactional outbox** guarantees delivery. 50K of these fire daily."
+        highlightCommands: [dropoff-pt]
+        highlightEvents: [pt-dropoff, vr-completed]
+        showPolicies: true
+        duration: 5000
+
+      # BRIDGE → PT State Machine
+      - title: "The Student Journey"
+        description: "The daily rhythm tells the story from the system's perspective. Now let's trace a single student's journey through the 16-state **PassengerTrip** lifecycle — from creation to settlement."
+        focusAggregate: pt-agg
+        duration: 3000
+
+  # ── Section 2: PT State Diagram — The Student Journey ──────────────
+  - renderer: state-diagram
+    title: "PT State Machine"
+    accentColor: "#22C55E"
+    direction: LR
+
+    phases:
+      - { id: pre-dispatch, label: "Pre-Dispatch", color: "rgba(245, 158, 11, 0.06)", order: 1 }
+      - { id: active-trip, label: "Active Trip", color: "rgba(34, 197, 94, 0.06)", order: 2 }
+      - { id: post-trip, label: "Post-Trip", color: "rgba(168, 85, 247, 0.06)", order: 3 }
+      - { id: terminal, label: "Terminal", color: "rgba(239, 68, 68, 0.06)", order: 4 }
+
+    states:
+      - { id: new, label: NEW, type: initial, phase: pre-dispatch, description: "Created by SGR or ad-hoc" }
+      - { id: grouping, label: GROUPING, type: normal, variant: info, phase: pre-dispatch, description: "Grouped into a VR" }
+      - { id: dispatching, label: DISPATCHING, type: normal, variant: info, phase: pre-dispatch, description: "VR dispatched to driver" }
+      - { id: accepted, label: ACCEPTED, type: normal, variant: success, phase: pre-dispatch, description: "Driver accepted the offer" }
+      - { id: topu, label: TOPU, type: normal, variant: success, phase: active-trip, description: "En route to pickup" }
+      - { id: atpu, label: ATPU, type: normal, variant: warning, phase: active-trip, description: "At pickup — waiting for student" }
+      - { id: onboard, label: ONBOARD, type: normal, variant: success, phase: active-trip, description: "Student scanned and aboard" }
+      - { id: todo, label: TODO, type: normal, variant: success, phase: active-trip, description: "En route to dropoff" }
+      - { id: atdo, label: ATDO, type: normal, variant: warning, phase: active-trip, description: "At dropoff — student exiting" }
+      - { id: postservice, label: POSTSERVICE, type: normal, variant: info, phase: post-trip, description: "Dropoff complete \u2014 validation begins" }
+      - { id: postcompleteness, label: POSTCOMPLETENESS, type: normal, variant: info, phase: post-trip, description: "Completeness verified" }
+      - { id: postreadiness, label: POSTREADINESS, type: normal, variant: info, phase: post-trip, description: "Billing readiness confirmed" }
+      - { id: booked, label: BOOKED, type: normal, variant: success, phase: post-trip, description: "Ready for settlement" }
+      - { id: settled, label: SETTLED, type: terminal, variant: success, phase: terminal, description: "BC/PD/PM calculated" }
+      - { id: cancelled, label: CANCELLED, type: terminal, variant: error, phase: terminal, description: "Trip cancelled" }
+      - { id: noshow, label: NOSHOW, type: terminal, variant: error, phase: terminal, description: "Student not present" }
+
+    transitions:
+      - { id: new-grouping, source: new, target: grouping, trigger: "group" }
+      - { id: grouping-dispatching, source: grouping, target: dispatching, trigger: "dispatch" }
+      - { id: dispatching-accepted, source: dispatching, target: accepted, trigger: "accept" }
+      - { id: accepted-topu, source: accepted, target: topu, trigger: "en_route" }
+      - { id: topu-atpu, source: topu, target: atpu, trigger: "arrive_pickup" }
+      - { id: atpu-onboard, source: atpu, target: onboard, trigger: "board (ID scan)" }
+      - { id: onboard-todo, source: onboard, target: todo, trigger: "depart_pickup" }
+      - { id: todo-atdo, source: todo, target: atdo, trigger: "arrive_dropoff" }
+      - { id: atdo-postservice, source: atdo, target: postservice, trigger: "dropoff \u26A1" }
+      - { id: postservice-postcompleteness, source: postservice, target: postcompleteness, trigger: "validate" }
+      - { id: postcompleteness-postreadiness, source: postcompleteness, target: postreadiness, trigger: "billing" }
+      - { id: postreadiness-booked, source: postreadiness, target: booked, trigger: "book" }
+      - { id: booked-settled, source: booked, target: settled, trigger: "settle" }
+      - { id: atpu-noshow, source: atpu, target: noshow, trigger: "no_show" }
+      - { id: topu-noshow, source: topu, target: noshow, trigger: "no_show" }
+      - { id: new-cancelled, source: new, target: cancelled, trigger: "cancel" }
+
+    steps:
+      - title: "Born — NEW from SGR"
+        narrative: "Every **PassengerTrip** starts in `NEW` state, linked to a student (`StudentId`), a **SubscriptionTrip** template, and optionally a **VehicleRun**. Ad-hoc trips skip the SubscriptionTrip link — created directly by dispatchers for same-day emergencies."
+        activeStates: [new]
+        duration: 4000
+
+      - title: "Pre-Dispatch — Grouping & Assignment"
+        narrative: "`GROUPING` assigns the PT to a VR. `DISPATCHING` means the VR has been sent to a driver. `ACCEPTED` means the driver confirmed. At this point, settlement data is copied from the VR — `DriverId`, `ServiceProviderId`, `MonitorId` — *denormalized for event self-containment*."
+        activeStates: [grouping, dispatching, accepted]
+        activeTransitions: [new-grouping, grouping-dispatching, dispatching-accepted]
+        duration: 5000
+
+      - title: "Pickup Sequence — TOPU \u2192 ATPU \u2192 ONBOARD"
+        narrative: "The driver approaches the pickup (`TOPU`), arrives (`ATPU` — geofence verified within 0.5 miles via Haversine), and boards the student (`ONBOARD` — requires `StudentIdScanned`). **PtBoardedEvent** fires, triggering parent SMS via Communications BC."
+        activeStates: [topu, atpu, onboard]
+        activeTransitions: [accepted-topu, topu-atpu, atpu-onboard]
+        duration: 5000
+
+      - title: "The Revenue Transition — ATDO \u2192 POSTSERVICE"
+        narrative: "The driver arrives at the dropoff (`ATDO`) and confirms the student exits. The `ATDO` \u2192 `POSTSERVICE` transition fires **PtDroppedOffEvent** — *the revenue-critical event* carrying denormalized `DriverId` + `ServiceProviderId` + `MonitorId`. This single transition initiates the entire **BC/PD/PM** settlement pipeline."
+        activeStates: [todo, atdo, postservice]
+        activeTransitions: [onboard-todo, todo-atdo, atdo-postservice]
+        duration: 6000
+
+      - title: "Post-Trip & Settlement"
+        narrative: "Three Conductor-validated gates: completeness (all data present?), billing readiness (CTTC contract matched?), then `BOOKED`. Settlement BC processes the event and transitions to `SETTLED`. Exception paths: `NOSHOW` from `ATPU` (student absent) or `CANCELLED` from any pre-dispatch state."
+        activeStates: [postcompleteness, postreadiness, booked, settled, noshow, cancelled]
+        activeTransitions: [postservice-postcompleteness, postcompleteness-postreadiness, postreadiness-booked, booked-settled, atpu-noshow, new-cancelled]
+        duration: 5000
+
+      # BRIDGE → GPS Pipeline
+      - title: "The Real-Time Layer"
+        narrative: "While students ride, a parallel pipeline keeps the fleet map alive and parents informed. Let's zoom into the GPS \u2192 PostGIS \u2192 ETA \u2192 **SignalR** pipeline that powers real-time visibility."
+        activeStates: [topu, onboard, todo]
+        duration: 3000
+
+  # ── Section 3: Service Flow — GPS \u2192 SignalR Pipeline ──────────────
+  - renderer: service-flow
+    title: "Real-Time Pipeline"
+    accentColor: "#8B5CF6"
+    layout: sequence
+
+    services:
+      - id: driver-device
+        name: Driver Device
+        type: external
+        technology: "Mobile App (30s)"
+      - id: trip-api
+        name: Trip Ops API
+        type: api
+        technology: ".NET 10"
+        status: healthy
+      - id: gps-vo
+        name: GpsReading VO
+        type: worker
+        technology: "Self-Validating"
+        status: healthy
+      - id: postgis
+        name: PostGIS
+        type: database
+        technology: "SRID 4326 + GIST"
+        status: healthy
+      - id: eta-engine
+        name: ETA Engine
+        type: worker
+        technology: "3 estimates"
+        status: healthy
+      - id: pt-cache
+        name: PT Cache
+        type: cache
+        technology: "Redis (TTL 300s)"
+        status: healthy
+      - id: trip-ep
+        name: Trip Ops EP
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: fleet-map
+        name: Fleet Map
+        type: external
+        technology: "Trip HQ (SignalR)"
+
+    queues:
+      - id: outbox-q
+        name: outbox_messages
+        type: queue
+        broker: redis
+      - id: asb-q
+        name: trip-operations topic
+        type: topic
+        broker: servicebus
+        consumers: 7
+
+    calls:
+      - id: gps-ingest
+        type: sync
+        from: driver-device
+        to: trip-api
+        method: POST
+        path: "v1/gps/ingest"
+        protocol: http
+        duration: 35
+        status: 200
+
+      - id: validate-reading
+        type: sync
+        from: trip-api
+        to: gps-vo
+        method: CREATE
+        path: "accuracy<50m, staleness<30s"
+        duration: 1
+
+      - id: persist-gps
+        type: sync
+        from: trip-api
+        to: postgis
+        method: INSERT
+        path: "geometry(Point,4326)"
+        duration: 8
+
+      - id: calc-eta
+        type: sync
+        from: trip-api
+        to: eta-engine
+        method: COMPUTE
+        path: "Likely + Optimistic + Pessimistic"
+        duration: 5
+
+      - id: check-cache
+        type: sync
+        from: trip-api
+        to: pt-cache
+        method: GET
+        path: "pt-cache:{tenantId}:{ptId}"
+        duration: 1
+        status: 200
+
+      - id: outbox-write
+        type: sync
+        from: trip-api
+        to: outbox-q
+        method: INSERT
+        path: "GpsLocationUpdatedEvent"
+        duration: 3
+
+      - id: relay-asb
+        type: publish
+        from: outbox-q
+        to: asb-q
+        messageType: GpsLocationUpdatedEvent
+
+      - id: ep-consume
+        type: subscribe
+        from: asb-q
+        to: trip-ep
+        messageType: GpsLocationUpdatedEvent
+        action: GpsLocationUpdatedEventHandler
+
+      - id: broadcast
+        type: sync
+        from: trip-ep
+        to: fleet-map
+        method: BROADCAST
+        path: "vr-{vrId} + district-{tenantId}"
+        duration: 3
+
+    steps:
+      - id: rt-ingest
+        title: "GPS Arrives Every 30 Seconds"
+        narrative: "Each vehicle reports position, heading, and speed every 30 seconds via `POST v1/gps/ingest`. At peak operations (33 vehicles per tenant), this generates ~66 requests per minute — each must complete quickly to avoid GPS staleness."
+        activeCalls: [gps-ingest]
+        duration: 4000
+
+      - id: rt-validate
+        title: "Self-Validating GpsReading"
+        narrative: "**GpsReading** validates at construction: accuracy under 50 meters (GPS noise), timestamp within 30 seconds (staleness). Invalid readings are rejected *before any database I/O* — the domain layer is the first guard."
+        activeCalls: [validate-reading]
+        duration: 3500
+
+      - id: rt-persist-eta
+        title: "PostGIS Persistence + ETA Calculation"
+        narrative: "The point is stored as PostGIS `geometry(Point, SRID 4326)` with a GIST index. Simultaneously, the **ETA engine** computes three estimates — *likely*, *optimistic*, *pessimistic* — factoring in rush hour, driver behavior history, and route type (urban/highway/mixed)."
+        activeCalls: [persist-gps, calc-eta, check-cache]
+        duration: 5000
+
+      - id: rt-async
+        title: "Outbox \u2192 ASB \u2192 EP \u2192 SignalR"
+        narrative: "The **transactional outbox** ensures **GpsLocationUpdatedEvent** survives crashes. The outbox relay publishes to Azure Service Bus. The EventProcessor subscribes, checks Redis idempotency, and broadcasts to **SignalR** groups — both VR-specific (`vr-{vrId}`) and district-wide (`district-{tenantId}`)."
+        activeCalls: [outbox-write, relay-asb, ep-consume, broadcast]
+        duration: 5000
+
+      - id: rt-e2e
+        title: "End-to-End Pipeline"
+        narrative: "From driver's phone to dispatcher's fleet map. The sync path (validate + persist + ETA) returns {color:green|HTTP 200}. The async path (outbox + ASB + EP + SignalR) handles the fan-out. At 50K daily trips, *millions of GPS points flow through this pipeline every day*."
+        activeCalls: [gps-ingest, persist-gps, calc-eta, outbox-write, relay-asb, ep-consume, broadcast]
+        focusNodes: [driver-device, fleet-map]
+        duration: 5000

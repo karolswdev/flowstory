@@ -17,6 +17,7 @@ interface EventStormingCanvasProps {
   story: EventStormingStory;
   currentStepIndex: number;
   onStepChange?: (step: number) => void;
+  hideOverlay?: boolean;
 }
 
 // Sticky note dimensions
@@ -128,10 +129,11 @@ function HotspotMarker({ x, y, note, type }: { x: number; y: number; note: strin
 /**
  * EventStormingCanvas - Main canvas for Event Storming visualization
  */
-export function EventStormingCanvas({ 
-  story, 
+export function EventStormingCanvas({
+  story,
   currentStepIndex,
-  onStepChange 
+  onStepChange,
+  hideOverlay = false,
 }: EventStormingCanvasProps) {
   const currentStep = story.steps[currentStepIndex] as EventStormingStep | undefined;
   
@@ -442,40 +444,44 @@ export function EventStormingCanvas({
         </defs>
       </svg>
       
-      {/* Info panel */}
-      <AnimatePresence mode="wait">
-        {currentStep && (
-          <motion.div 
-            className="es-info"
-            variants={fadeUp}
-            initial="initial"
-            animate="animate"
-            exit="exit"
-            transition={TRANSITION.default}
-            key={currentStepIndex}
-          >
-            <h3>{currentStep.title}</h3>
-            <p>{currentStep.description}</p>
-          </motion.div>
-        )}
-      </AnimatePresence>
-      
-      {/* Navigation */}
-      <div className="es-nav">
-        <button 
-          onClick={() => onStepChange?.(Math.max(0, currentStepIndex - 1))}
-          disabled={currentStepIndex === 0}
-        >
-          ← Previous
-        </button>
-        <span>{currentStepIndex + 1} / {story.steps.length}</span>
-        <button 
-          onClick={() => onStepChange?.(Math.min(story.steps.length - 1, currentStepIndex + 1))}
-          disabled={currentStepIndex >= story.steps.length - 1}
-        >
-          Next →
-        </button>
-      </div>
+      {!hideOverlay && (
+        <>
+          {/* Info panel */}
+          <AnimatePresence mode="wait">
+            {currentStep && (
+              <motion.div
+                className="es-info"
+                variants={fadeUp}
+                initial="initial"
+                animate="animate"
+                exit="exit"
+                transition={TRANSITION.default}
+                key={currentStepIndex}
+              >
+                <h3>{currentStep.title}</h3>
+                <p>{currentStep.description}</p>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Navigation */}
+          <div className="es-nav">
+            <button
+              onClick={() => onStepChange?.(Math.max(0, currentStepIndex - 1))}
+              disabled={currentStepIndex === 0}
+            >
+              ← Previous
+            </button>
+            <span>{currentStepIndex + 1} / {story.steps.length}</span>
+            <button
+              onClick={() => onStepChange?.(Math.min(story.steps.length - 1, currentStepIndex + 1))}
+              disabled={currentStepIndex >= story.steps.length - 1}
+            >
+              Next →
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

@@ -1,0 +1,530 @@
+id: identity-access-events
+title: "Identity & Access — User Lifecycle Events & Cross-BC Tenant Propagation"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  Identity & Access publishes 17 domain events via the transactional outbox (R076) to the
+  `identity-and-access` ASB topic. User lifecycle events (created, deactivated, reactivated,
+  email changed) and role mutation events (assigned, revoked) drive FusionAuth synchronization
+  and cross-BC authorization. Tenant events (created, updated, deactivated, configuration changed)
+  propagate tenant context — timezone, branding, notification settings, feature flags — to all
+  13 downstream bounded contexts. The permission model with wildcard support and hierarchical
+  DataScope (Global > Tenant > Assigned > Self) underpins platform-wide authorization.
+
+sections:
+  # -- Section 1: User Lifecycle & Role Events --------------------------------------
+  - renderer: service-flow
+    title: "User Lifecycle Events & FusionAuth Sync"
+    accentColor: "#3B82F6"
+    layout: sequence
+
+    services:
+      - id: identity-api
+        name: "Identity & Access API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: identity-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: outbox
+        name: "Outbox Processor"
+        type: event-processor
+        technology: ".NET 10 BackgroundService"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+      - id: fusionauth
+        name: "FusionAuth"
+        type: external
+        technology: "FusionAuth IdP"
+        status: healthy
+      - id: redis
+        name: "Redis"
+        type: cache
+        technology: "Redis"
+        status: healthy
+      - id: comms-ep
+        name: "Communications EP"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: compliance-ep
+        name: "Compliance EP"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+
+    zones:
+      - id: identity-core
+        label: "Identity & Access"
+        members: [identity-api, identity-db, outbox]
+        color: "rgba(59, 130, 246, 0.06)"
+      - id: sync-layer
+        label: "IdP Sync & Cache"
+        members: [fusionauth, redis]
+        color: "rgba(245, 158, 11, 0.06)"
+      - id: event-consumers
+        label: "Event Consumers"
+        members: [asb, comms-ep, compliance-ep]
+        color: "rgba(34, 197, 94, 0.06)"
+
+    calls:
+      - id: user-create
+        type: sync
+        from: identity-api
+        to: identity-db
+        method: POST
+        path: /v1/identity/users
+        protocol: http
+        duration: 120
+        description: "CreateUserCommand -> User.Create(id, tenantId, email, fusionAuthUserId, correlationId). Raises UserCreatedEvent. 12 endpoints on UserController."
+      - id: user-deactivate
+        type: sync
+        from: identity-api
+        to: identity-db
+        method: DELETE
+        path: /v1/identity/users/{id}
+        protocol: http
+        duration: 80
+        description: "DeactivateUserCommand -> User.Deactivate(). Soft delete: Active -> Inactive. Raises UserDeactivatedEvent."
+      - id: user-reactivate
+        type: sync
+        from: identity-api
+        to: identity-db
+        method: POST
+        path: /v1/identity/users/{id}/reactivate
+        protocol: http
+        duration: 80
+        description: "ReactivateUserCommand -> User.Activate(). Inactive -> Active. Raises UserReactivatedEvent."
+      - id: assign-role
+        type: sync
+        from: identity-api
+        to: identity-db
+        method: POST
+        path: /v1/identity/users/{id}/roles
+        protocol: http
+        duration: 60
+        description: "AssignRoleToUserCommand -> User.AssignRole(). Raises RoleAssignedEvent consumed by RoleAssignedEventHandler."
+      - id: revoke-role
+        type: sync
+        from: identity-api
+        to: identity-db
+        method: DELETE
+        path: /v1/identity/users/{id}/roles/{roleId}
+        protocol: http
+        duration: 60
+        description: "RevokeRoleFromUserCommand -> User.RevokeRole(). Raises RoleRevokedEvent consumed by RoleRevokedEventHandler."
+      - id: outbox-publish
+        type: async
+        from: outbox
+        to: asb
+        messageType: "Domain Events"
+        description: "OutboxProcessor background service reads outbox_messages table and publishes to identity-and-access ASB topic. R076 transactional outbox guarantees at-least-once delivery."
+      - id: role-sync-assign
+        type: sync
+        from: identity-api
+        to: fusionauth
+        method: POST
+        path: "RoleAssignedEventHandler -> FusionAuthService"
+        protocol: http
+        duration: 150
+        description: "Application-layer handler syncs role assignment to FusionAuth. Eventual consistency window exists (Risk #3)."
+      - id: role-sync-revoke
+        type: sync
+        from: identity-api
+        to: fusionauth
+        method: DELETE
+        path: "RoleRevokedEventHandler -> FusionAuthService"
+        protocol: http
+        duration: 150
+        description: "Application-layer handler syncs role revocation to FusionAuth. Eventual consistency window exists (Risk #3)."
+      - id: cache-invalidate
+        type: sync
+        from: identity-api
+        to: redis
+        method: POST
+        path: "PermissionCacheInvalidator"
+        protocol: http
+        duration: 15
+        description: "Flushes permission cache on role/permission changes so cross-BC authorization checks use latest state"
+      - id: comms-consume
+        type: subscribe
+        from: asb
+        to: comms-ep
+        messageType: "UserCreatedEvent"
+        action: "Send welcome notification to newly created user"
+      - id: compliance-consume
+        type: subscribe
+        from: asb
+        to: compliance-ep
+        messageType: "UserDeactivatedEvent"
+        action: "Revoke active credentials and compliance records for deactivated user"
+
+    steps:
+      - id: event-step-1
+        title: "User Aggregate Domain Events (7 Events)"
+        narrative: >
+          The **User** aggregate (`Domain/Aggregates/User.cs`, 458 lines) raises 7 domain events
+          through its lifecycle methods:
+
+          - **UserCreatedEvent** — raised by `User.Create()` factory. Carries userId, tenantId,
+          email, fusionAuthUserId, correlationId.
+          - **UserDeactivatedEvent** — raised by `User.Deactivate()`. Soft delete: `Active -> Inactive`.
+          No physical deletion — preserves audit trail.
+          - **UserReactivatedEvent** — raised by `User.Activate()`. Reverses deactivation:
+          `Inactive -> Active`.
+          - **UserEmailChangedEvent** — raised by `User.UpdateEmail()`. Triggers re-verification flow.
+          - **RoleAssignedEvent** — raised by `User.AssignRole()`. Consumed by **RoleAssignedEventHandler**
+          which syncs to FusionAuth via **IIdentityProviderService** (implemented by **FusionAuthService**).
+          - **RoleRevokedEvent** — raised by `User.RevokeRole()`. Consumed by **RoleRevokedEventHandler**
+          for FusionAuth sync.
+          - **PasswordResetRequestedEvent** — raised when `POST /v1/identity/password-reset/request`
+          triggers the **RequestPasswordResetCommand**.
+
+          All events are persisted atomically with domain changes via the transactional outbox
+          (`outbox_messages` table in **IdentityAccessDbContext**, R076 migration
+          `20260219070530_AddOutboxMessages`). The **OutboxProcessor** background service polls
+          and publishes to the `identity-and-access` ASB topic.
+
+          {color:red|Note: UserController /reset-password endpoint reuses InviteUserCommand (Risk #7).
+          Semantically different operations share the same handler — may cause audit log confusion.}
+        activeCalls: [user-create, user-deactivate, user-reactivate, assign-role, revoke-role, outbox-publish]
+        revealNodes: [identity-api, identity-db, outbox, asb]
+        duration: 6000
+
+      - id: event-step-2
+        title: "FusionAuth Synchronization (3 Event Handlers)"
+        narrative: >
+          Identity & Access has **no EventProcessor project** — this is by design per ADR-014.
+          Instead, 3 application-layer event handlers in `Application/Handlers/` provide
+          synchronous FusionAuth synchronization:
+
+          1. **UserCreatedEventHandler** — post-creation processing after `UserCreatedEvent`.
+          Handles any FusionAuth-side configuration needed beyond what the `CreateFusionAuthUserTask`
+          Conductor worker already set up.
+
+          2. **RoleAssignedEventHandler** — syncs role assignment to FusionAuth via
+          **IIdentityProviderService** (`FusionAuthService`). This ensures the FusionAuth JWT
+          reflects the latest role assignments.
+
+          3. **RoleRevokedEventHandler** — syncs role revocation to FusionAuth. Removes the role
+          from FusionAuth's user record.
+
+          {color:red|Risk #3: FusionAuth sync is eventual. There is a short window where Catalyst
+          and FusionAuth states diverge — a user may have a role in Catalyst but not yet in
+          FusionAuth (or vice versa). The next token refresh resolves the divergence.}
+
+          The **PermissionCacheInvalidator** (Redis-backed via `IPermissionCacheInvalidator`)
+          flushes cached permission lookups whenever roles or permissions change. This ensures
+          the **InternalPermissionsController** (`v1/internal/permissions`) returns fresh data
+          to other BCs performing authorization checks.
+
+          {color:green|Good: The 3 handlers + 14 Conductor workers cover all async needs without
+          a separate EventProcessor deployment — simpler operational footprint for this BC.}
+        activeCalls: [role-sync-assign, role-sync-revoke, cache-invalidate]
+        revealNodes: [fusionauth, redis]
+        revealCalls: [user-create, user-deactivate, user-reactivate, assign-role, revoke-role, outbox-publish]
+        duration: 6000
+
+      - id: event-step-3
+        title: "Cross-BC Event Consumption"
+        narrative: >
+          Domain events published to the `identity-and-access` ASB topic are consumed by
+          downstream BCs. The 17 outbound events serve three categories:
+
+          **User lifecycle** (consumed by Communications, Compliance, Trip Operations):
+          `UserCreatedEvent` triggers welcome notifications. `UserDeactivatedEvent` triggers
+          credential revocation in Compliance and session termination across BCs.
+          `UserReactivatedEvent` re-enables access. `UserEmailChangedEvent` triggers
+          re-verification via **EmailVerificationController** (`v1/identity/email-verification`,
+          2 endpoints — `POST /verify` and `GET /verify`, both `[AllowAnonymous]`).
+
+          **Role mutations** (consumed by all BCs for authorization refresh):
+          `RoleAssignedEvent` and `RoleRevokedEvent` propagate through the permission cache
+          invalidation pipeline. The **InternalPermissionsController** serves fresh permission
+          data to BCs via `GetPermissionCodesForRolesAsync` and `GetPermissionsWithScopesForRolesAsync`.
+
+          **API key lifecycle** (consumed by API gateway layer):
+          `ApiKeyCreatedEvent` and `ApiKeyRevokedEvent` enable real-time M2M access control.
+          The **ApiKey** entity's `LastUsedAt` tracking (`UpdateLastUsed()`) provides key usage
+          telemetry for rotation decisions.
+
+          {color:blue|Cross-ref: All downstream consumers use Redis-based idempotency (1-hour TTL)
+          per the shared EventHandler pattern in Catalyst.Shared.Infrastructure.}
+        activeCalls: [comms-consume, compliance-consume]
+        revealCalls: [role-sync-assign, role-sync-revoke, cache-invalidate]
+        duration: 5000
+
+      - id: event-step-4
+        title: "Tenant Events & Configuration Propagation"
+        narrative: >
+          The **Tenant** aggregate (`Domain/Aggregates/Tenant.cs`, 548 lines) raises 4 events
+          that propagate tenant context across the platform:
+
+          - **TenantCreatedEvent** — raised by `Tenant.Create()`. Consumed by all BCs to register
+          the new tenant in their local stores. The **TenantConfiguration** VO carries initial
+          settings: TimeZone, DefaultLocale, SupportPhone, SupportEmail.
+
+          - **TenantUpdatedEvent** — raised by `Tenant.Update()`. Propagates name/contact changes.
+
+          - **TenantDeactivatedEvent** — raised by `Tenant.Deactivate()`. {color:red|This is
+          PERMANENT — the state machine enforces `Inactive -> X` (cannot reactivate). All users
+          under this tenant are effectively locked out. Downstream BCs must cease operations for
+          this tenant.}
+
+          - **TenantConfigurationUpdatedEvent** — raised by `Tenant.ConfigureSettings()`. This is
+          the richest event — it carries the full **TenantConfiguration** record including nested
+          VOs: **TenantBranding** (LogoUrl, PrimaryColor, PortalDisplayName), **TenantNotificationSettings**
+          (DelayThresholdMinutes, EtaUpdateIntervalMinutes, DailySummaryTime), **BusinessHoursConfiguration**
+          (StartTime, EndTime, OperatingDays, Is24x7), and **IdentityProviderConfiguration**
+          (ProviderType, FederationEnabled, AzureAdB2C config, SAML config, GroupToRoleMapping).
+
+          The `PUT /v1/tenants/{id}/configuration` endpoint (`ConfigureTenantSettingsCommand`)
+          is the single entry point for all tenant configuration changes — SYSTEM_ADMIN only.
+          Downstream BCs use TenantConfiguration for timezone-aware scheduling (Trip Operations),
+          branding (Trip HQ), notification preferences (Communications), and business hours
+          (Monitoring threshold calculation).
+
+          {color:green|Good: Configuration stored as PostgreSQL JSONB via EF Core `ToJson()` —
+          schema-flexible, queryable, and versioned through domain events.}
+        activeCalls: []
+        revealCalls: [comms-consume, compliance-consume]
+        duration: 5000
+
+  # -- Section 2: Role & Permission Management -------------------------------------
+  - renderer: service-flow
+    title: "Role & Permission Management"
+    accentColor: "#10B981"
+    layout: sequence
+
+    services:
+      - id: identity-api
+        name: "Identity & Access API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: identity-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: redis
+        name: "Redis"
+        type: cache
+        technology: "Redis"
+        status: healthy
+      - id: other-bc-api
+        name: "Other BC APIs"
+        type: api
+        technology: ".NET 10"
+        status: healthy
+
+    zones:
+      - id: identity-core
+        label: "Identity & Access"
+        members: [identity-api, identity-db, redis]
+        color: "rgba(16, 185, 129, 0.06)"
+      - id: consumers
+        label: "Authorization Consumers"
+        members: [other-bc-api]
+        color: "rgba(168, 85, 247, 0.06)"
+
+    calls:
+      - id: create-role
+        type: sync
+        from: identity-api
+        to: identity-db
+        method: POST
+        path: /v1/identity/roles
+        protocol: http
+        duration: 80
+        description: "CreateRoleCommand -> Role.CreateCustomRole(id, tenantId, name, description). System roles use CreateSystemRole with TenantId = Guid.Empty."
+      - id: assign-permission
+        type: sync
+        from: identity-api
+        to: identity-db
+        method: POST
+        path: /v1/identity/roles/{roleId}/permissions
+        protocol: http
+        duration: 60
+        description: "AssignPermissionToRoleCommand -> creates RolePermission join entity with DataScope (Global/Tenant/Assigned/Self)"
+      - id: revoke-permission
+        type: sync
+        from: identity-api
+        to: identity-db
+        method: DELETE
+        path: /v1/identity/roles/{roleId}/permissions/{permissionId}
+        protocol: http
+        duration: 50
+        description: "RevokePermissionFromRoleCommand -> removes RolePermission association"
+      - id: invalidate-cache
+        type: sync
+        from: identity-api
+        to: redis
+        method: POST
+        path: "PermissionCacheInvalidator"
+        protocol: http
+        duration: 15
+        description: "Flushes permission cache after role/permission mutations"
+      - id: m2m-lookup
+        type: sync
+        from: other-bc-api
+        to: identity-api
+        method: GET
+        path: /v1/internal/permissions
+        protocol: http
+        duration: 25
+        description: "M2M permission lookup — GetPermissionCodesForRolesAsync returns permission codes for given role set. AllowAnonymous, network-secured."
+      - id: m2m-scoped
+        type: sync
+        from: other-bc-api
+        to: identity-api
+        method: GET
+        path: /v1/internal/permissions/with-scopes
+        protocol: http
+        duration: 30
+        description: "GetPermissionsWithScopesForRolesAsync returns permissions with DataScope for fine-grained authorization checks"
+      - id: preferences-get
+        type: sync
+        from: identity-api
+        to: identity-db
+        method: GET
+        path: /v1/identity/users/me/preferences
+        protocol: http
+        duration: 40
+        description: "GetUserPreferencesQuery returns UserPreferences VO — timezone, density, default page size, saved filters (max 50)"
+      - id: preferences-update
+        type: sync
+        from: identity-api
+        to: identity-db
+        method: PUT
+        path: /v1/identity/users/me/preferences
+        protocol: http
+        duration: 60
+        description: "UpdateUserPreferencesCommand -> User.UpdatePreferences(). Immutable VO with With*() fluent builders."
+
+    steps:
+      - id: rbac-step-1
+        title: "Role Hierarchy & System Role Seeding"
+        narrative: >
+          The **Role** aggregate (`Domain/Aggregates/Role.cs`, 281 lines) supports two creation
+          paths: `Role.CreateSystemRole(id, name, description)` for platform-wide roles with
+          `TenantId = Guid.Empty`, and `Role.CreateCustomRole(id, tenantId, name, description)`
+          for tenant-specific roles. 12 system roles are seeded during tenant provisioning:
+
+          **Global scope**: SYSTEM_ADMIN (full platform), SERVICE_ACCOUNT (M2M integration).
+          **Tenant scope**: DISTRICT_ADMIN, DISPATCHER, SERVICE_MANAGEMENT_TEAM, ROUTING_OPERATIONS,
+          FIELD_OPERATIONS, READ_ONLY.
+          **Assigned scope**: DRIVER (assigned trips only), PARENT (linked students only).
+          **Self scope**: STUDENT, GUEST (limited self-service).
+
+          The **RoleController** (`v1/identity/roles`, 4 endpoints) and **RolePermissionController**
+          (`v1/identity/roles/{roleId}/permissions`, 3 endpoints) manage the RBAC model.
+          `IsSystemRole` flag prevents modification of platform roles — only custom roles are
+          editable. The `UpdateRoleCommand` handler uses `Role.UpdateDescription()`.
+
+          {color:green|Good: System roles are immutable after seeding — prevents accidental
+          privilege escalation through role modification.}
+        activeCalls: [create-role, assign-permission, revoke-permission, invalidate-cache]
+        revealNodes: [identity-api, identity-db, redis]
+        duration: 5000
+
+      - id: rbac-step-2
+        title: "Permission Wildcards & Cross-BC Authorization"
+        narrative: >
+          The **Permission** aggregate (`Domain/Aggregates/Permission.cs`, 274 lines) uses a
+          `{resource}:{action}` code format with wildcard matching. `Permission.Matches(code)` supports:
+          `*:*` for superadmin access, `{resource}:*` for all actions on a resource, and exact
+          matches. All permissions have `TenantId = Guid.Empty` — they are global definitions.
+          **DataScope** on the **RolePermission** join entity controls visibility: a DISPATCHER
+          with `trips:read` at `Tenant` scope sees all tenant trips, while a DRIVER with
+          `trips:read` at `Assigned` scope sees only their assigned trips.
+
+          The **InternalPermissionsController** (`v1/internal/permissions`, 3 endpoints) is the
+          M2M authorization gateway. Other BCs call `GET /v1/internal/permissions?roles=DISPATCHER,DRIVER`
+          to resolve permission codes, or `GET /v1/internal/permissions/with-scopes` for scope-aware
+          authorization. A `/health` endpoint enables readiness probes.
+
+          {color:red|These M2M endpoints are `[AllowAnonymous]` secured only by Kubernetes network
+          policy (Risk #2). Production AKS must enforce NetworkPolicy restricting access to
+          internal ClusterIPs only.}
+
+          {color:blue|Cross-ref: The shared TenantIsolationFilter (Layer 1) and EF Core global
+          query filters (Layer 2) consume the tenant_id claim that Identity & Access provisions.
+          This BC is the source of truth for who can access what, everywhere.}
+        activeCalls: [m2m-lookup, m2m-scoped]
+        revealNodes: [other-bc-api]
+        revealCalls: [create-role, assign-permission, revoke-permission, invalidate-cache]
+        duration: 6000
+
+      - id: rbac-step-3
+        title: "User Preferences & Saved Filters"
+        narrative: >
+          The **UserPreferences** VO (`Domain/ValueObjects/UserPreferences.cs`, sealed record)
+          provides per-user customization stored as PostgreSQL JSONB on the `identity.users` table.
+          Properties: Timezone, DateFormat, TimeFormat, Density (**DisplayDensity** enum:
+          Compact/Normal/Comfortable), DefaultPageSize, DefaultDistrictId, and SavedFilters
+          (max 50, enforced by domain validation).
+
+          The **SavedFilter** VO (`Domain/ValueObjects/SavedFilter.cs`, sealed record) stores
+          per-module filter presets: Id, Name (max 100 chars), Module (string key), FilterJson
+          (serialized filter criteria), IsDefault (per-module default support), CreatedAt.
+
+          The **UserPreferencesController** (`v1/identity/users/me`, 8 endpoints) provides the
+          full preference lifecycle:
+          `GET/PUT /preferences` for bulk preference read/write,
+          `GET /filters` and `GET /filters/{module}` for filter retrieval,
+          `POST /filters` for creation via **AddSavedFilterCommand**,
+          `PUT /filters/{filterId}` for update via **UpdateSavedFilterCommand**,
+          `DELETE /filters/{filterId}` for removal via **DeleteSavedFilterCommand**,
+          `POST /filters/{filterId}/set-default` via **SetDefaultFilterCommand**.
+
+          Immutable VO mutation uses fluent builders: `User.UpdatePreferences()` creates a new
+          **UserPreferences** instance via `With*()` methods — no in-place mutation.
+
+          {color:green|Good: JSONB storage with EF Core ToJson() provides schema flexibility —
+          new preference fields can be added without database migrations.}
+        activeCalls: [preferences-get, preferences-update]
+        revealCalls: [m2m-lookup, m2m-scoped]
+        duration: 5000
+
+      - id: rbac-step-4
+        title: "Audit Trail & System Information"
+        narrative: >
+          The **AuditLogController** (`v1/identity/audit-log`, 5 endpoints, DISTRICT_ADMIN/SYSTEM_ADMIN)
+          provides comprehensive audit querying through 5 query handlers:
+
+          - **SearchAuditEntriesQuery** — `GET /search` with pagination, returns `PagedResult<AuditEntryDto>`.
+          Full-text search across audit entries.
+          - **GetEntityAuditTrailQuery** — `GET /entity/{entityType}/{entityId}` returns all changes
+          to a specific entity (User, Tenant, Role, etc.).
+          - **GetUserActivityQuery** — `GET /user/{userId}` returns all actions performed by a user.
+          - **GetCorrelationAuditTrailQuery** — `GET /correlation/{correlationId}` traces a single
+          operation across multiple entities using correlation IDs propagated by
+          **CorrelationIdDelegatingHandler**.
+          - **GetAuditSummaryQuery** — `GET /summary` returns `AuditSummaryDto` with aggregate
+          statistics.
+
+          The **SystemInfoController** (`v1/identity/system`, 2 endpoints, SYSTEM_ADMIN only)
+          exposes runtime information: **GetSystemInfoQuery** returns `SystemInfoDto` (version,
+          uptime, runtime stats), **GetSystemConfigurationQuery** returns `SystemConfigurationDto`
+          (feature flags, integration statuses). These support the admin dashboard.
+
+          {color:green|Good: Correlation-based audit trail enables cross-entity operation tracing —
+          essential for debugging distributed saga failures in tenant provisioning and user
+          onboarding workflows.}
+
+          {color:blue|Cross-ref: 814 tests across 64 files validate the full domain model,
+          command/query handlers, validators, infrastructure services, and API controllers.
+          Coverage includes FusionAuthServiceTests, TokenServiceTests, AzureAdB2CServiceTests.}
+        activeCalls: []
+        revealCalls: [preferences-get, preferences-update]
+        duration: 5000

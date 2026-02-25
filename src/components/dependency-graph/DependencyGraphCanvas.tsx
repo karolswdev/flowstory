@@ -21,6 +21,7 @@ interface DependencyGraphCanvasProps {
   story: DependencyGraphStory;
   currentStepIndex: number;
   onStepChange?: (step: number) => void;
+  hideOverlay?: boolean;
 }
 
 const NODE_SIZE = 80;
@@ -57,7 +58,7 @@ function ServiceNodeSVG({ node, x, y, isHighlighted, isDimmed, delay = 0 }: {
   );
 }
 
-export function DependencyGraphCanvas({ story, currentStepIndex, onStepChange }: DependencyGraphCanvasProps) {
+export function DependencyGraphCanvas({ story, currentStepIndex, onStepChange, hideOverlay = false }: DependencyGraphCanvasProps) {
   const currentStep = story.steps[currentStepIndex] as DependencyGraphStep | undefined;
   
   const layout = useMemo(() => {
@@ -88,6 +89,8 @@ export function DependencyGraphCanvas({ story, currentStepIndex, onStepChange }:
       stepTitle={currentStep?.title}
       stepDescription={currentStep?.description}
       onStepChange={onStepChange}
+      showInfo={!hideOverlay}
+      showNav={!hideOverlay}
       infoClassName="dep-info"
       navClassName="dep-nav"
     >

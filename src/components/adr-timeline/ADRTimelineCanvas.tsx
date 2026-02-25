@@ -9,6 +9,7 @@ interface ADRTimelineCanvasProps {
   story: ADRTimelineStory;
   currentStepIndex: number;
   onStepChange?: (step: number) => void;
+  hideOverlay?: boolean;
 }
 
 const { cardWidth, cardHeight, cardGap } = ADR_TIMELINE_LAYOUT;
@@ -115,10 +116,11 @@ function ADRCard({
 /**
  * ADRTimelineCanvas - Architecture Decision Records timeline visualization
  */
-export function ADRTimelineCanvas({ 
-  story, 
+export function ADRTimelineCanvas({
+  story,
   currentStepIndex,
-  onStepChange 
+  onStepChange,
+  hideOverlay = false,
 }: ADRTimelineCanvasProps) {
   const currentStep = story.steps[currentStepIndex] as ADRTimelineStep | undefined;
   const categories = story.categories || DEFAULT_CATEGORIES;
@@ -255,40 +257,44 @@ export function ADRTimelineCanvas({
         ))}
       </div>
       
-      {/* Info panel */}
-      <AnimatePresence mode="wait">
-        {currentStep && (
-          <motion.div 
-            className="adr-info"
-            variants={fadeUp}
-            initial="initial"
-            animate="animate"
-            exit="exit"
-            transition={TRANSITION.default}
-            key={currentStepIndex}
-          >
-            <h3>{currentStep.title}</h3>
-            <p>{currentStep.description}</p>
-          </motion.div>
-        )}
-      </AnimatePresence>
-      
-      {/* Navigation */}
-      <div className="adr-nav">
-        <button 
-          onClick={() => onStepChange?.(Math.max(0, currentStepIndex - 1))}
-          disabled={currentStepIndex === 0}
-        >
-          ← Previous
-        </button>
-        <span>{currentStepIndex + 1} / {story.steps.length}</span>
-        <button 
-          onClick={() => onStepChange?.(Math.min(story.steps.length - 1, currentStepIndex + 1))}
-          disabled={currentStepIndex >= story.steps.length - 1}
-        >
-          Next →
-        </button>
-      </div>
+      {!hideOverlay && (
+        <>
+          {/* Info panel */}
+          <AnimatePresence mode="wait">
+            {currentStep && (
+              <motion.div
+                className="adr-info"
+                variants={fadeUp}
+                initial="initial"
+                animate="animate"
+                exit="exit"
+                transition={TRANSITION.default}
+                key={currentStepIndex}
+              >
+                <h3>{currentStep.title}</h3>
+                <p>{currentStep.description}</p>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Navigation */}
+          <div className="adr-nav">
+            <button
+              onClick={() => onStepChange?.(Math.max(0, currentStepIndex - 1))}
+              disabled={currentStepIndex === 0}
+            >
+              ← Previous
+            </button>
+            <span>{currentStepIndex + 1} / {story.steps.length}</span>
+            <button
+              onClick={() => onStepChange?.(Math.min(story.steps.length - 1, currentStepIndex + 1))}
+              disabled={currentStepIndex >= story.steps.length - 1}
+            >
+              Next →
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

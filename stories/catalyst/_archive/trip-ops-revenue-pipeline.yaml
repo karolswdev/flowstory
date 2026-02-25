@@ -1,0 +1,563 @@
+id: trip-ops-revenue-pipeline
+title: "Trip Operations — Revenue Pipeline"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  The most important data path in the platform: from a student being
+  dropped off at school, through the transactional outbox, to the
+  Settlement BC calculating BC/PD/PM. If this pipeline breaks,
+  drivers go unpaid and districts go unbilled.
+
+sections:
+  # ── Section 1: Service Flow — The Revenue-Critical Path ─────────────
+  - renderer: service-flow
+    title: "Revenue Path"
+    accentColor: "#EF4444"
+    layout: sequence
+
+    services:
+      - id: driver-app
+        name: Driver App
+        type: external
+        technology: "Mobile"
+      - id: trip-api
+        name: Trip Ops API
+        type: api
+        technology: ".NET 10"
+        status: healthy
+        instances: 2
+      - id: pt-aggregate
+        name: PassengerTrip
+        type: worker
+        technology: "Domain Aggregate"
+        status: healthy
+      - id: trip-db
+        name: trip_operations DB
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: ep
+        name: Trip Ops EP
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: settlement
+        name: Settlement BC
+        type: api
+        technology: ".NET 10"
+        status: healthy
+      - id: comms
+        name: Communications
+        type: api
+        technology: ".NET 10"
+        status: healthy
+      - id: monitoring
+        name: Monitoring
+        type: api
+        technology: ".NET 10"
+        status: healthy
+      - id: reporting
+        name: Reporting
+        type: api
+        technology: ".NET 10"
+        status: healthy
+
+    queues:
+      - id: outbox
+        name: outbox_messages
+        type: queue
+        broker: redis
+        consumers: 1
+      - id: trip-topic
+        name: trip-operations
+        type: topic
+        broker: servicebus
+        consumers: 6
+
+    zones:
+      - id: critical-zone
+        label: "Revenue-Critical Path"
+        members: [trip-api, pt-aggregate, trip-db, outbox]
+        color: "rgba(239, 68, 68, 0.05)"
+      - id: downstream
+        label: "Downstream Consumers"
+        members: [settlement, comms, monitoring, reporting]
+        color: "rgba(168, 85, 247, 0.05)"
+
+    calls:
+      - id: dropoff-request
+        type: sync
+        from: driver-app
+        to: trip-api
+        method: POST
+        path: "v1/pt/{id}/dropoff"
+        protocol: http
+        duration: 48
+        status: 200
+
+      - id: guard-mutate
+        type: sync
+        from: trip-api
+        to: pt-aggregate
+        method: TRANSITION
+        path: "ATDO → POSTSERVICE"
+        duration: 2
+
+      - id: denormalize
+        type: sync
+        from: pt-aggregate
+        to: pt-aggregate
+        method: COPY
+        path: "DriverId, ProviderId, MonitorId from VR"
+        duration: 1
+
+      - id: atomic-commit
+        type: sync
+        from: pt-aggregate
+        to: trip-db
+        method: "SaveChanges"
+        path: "PT state + outbox_messages"
+        duration: 12
+
+      - id: outbox-relay
+        type: publish
+        from: trip-db
+        to: outbox
+        method: RELAY
+        path: "PtDroppedOffEvent"
+
+      - id: publish-asb
+        type: publish
+        from: outbox
+        to: trip-topic
+        method: PUBLISH
+        path: "PtDroppedOffEvent"
+
+      - id: settlement-consume
+        type: subscribe
+        from: trip-topic
+        to: settlement
+        messageType: PtDroppedOffEvent
+        action: "CalculateBcPdPm"
+
+      - id: comms-consume
+        type: subscribe
+        from: trip-topic
+        to: comms
+        messageType: PtDroppedOffEvent
+        action: "SendParentNotification"
+
+      - id: monitoring-consume
+        type: subscribe
+        from: trip-topic
+        to: monitoring
+        messageType: PtDroppedOffEvent
+        action: "RecordTripMetrics"
+
+      - id: reporting-consume
+        type: subscribe
+        from: trip-topic
+        to: reporting
+        messageType: PtDroppedOffEvent
+        action: "UpdateDashboards"
+
+    steps:
+      - id: rev-dropoff
+        title: "The Revenue Moment"
+        narrative: "A driver taps 'Drop Off' on their mobile app. This single POST request is the most important API call in the platform — it initiates the entire revenue pipeline."
+        activeCalls: [dropoff-request]
+        duration: 4000
+        narration:
+          speaker: "Architect"
+          message: "50K+ daily trips means 50K+ PtDroppedOffEvents per day. Every one must be reliably delivered."
+
+      - id: rev-guard
+        title: "Guard → Mutate → Event"
+        narrative: "The PassengerTrip aggregate validates the transition (must be in ATDO state), mutates internal state to POSTSERVICE, timestamps ActualDropoffTime, and raises PtDroppedOffEvent. The event carries denormalized settlement data — DriverId, ServiceProviderId, MonitorId — copied from the parent VR at assignment time."
+        activeCalls: [guard-mutate, denormalize]
+        duration: 5000
+
+      - id: rev-outbox
+        title: "Transactional Outbox — Atomic Guarantee"
+        narrative: "SaveChangesAsync writes both the PT state change AND the PtDroppedOffEvent to outbox_messages in a single PostgreSQL transaction. If the process crashes after the DB commit but before ASB publish, the outbox relay will pick it up on restart. This is the non-negotiable guarantee."
+        activeCalls: [atomic-commit, outbox-relay]
+        duration: 5000
+
+      - id: rev-fanout
+        title: "Four Downstream Consumers"
+        narrative: "PtDroppedOffEvent fans out to four bounded contexts. Settlement calculates BC/PD/PM. Communications sends a parent notification ('Your child has arrived'). Monitoring records trip metrics. Reporting updates dashboards. All from a single event."
+        activeCalls: [publish-asb, settlement-consume, comms-consume, monitoring-consume, reporting-consume]
+        duration: 5000
+
+      # BRIDGE
+      - id: rev-bridge
+        title: "The PT Journey to POSTSERVICE"
+        narrative: "The dropoff is just one transition in a 16-state machine. Let's trace the full Passenger Trip lifecycle — from creation during SGR generation to the settlement-ready BOOKED state."
+        focusNodes: [pt-aggregate]
+        duration: 3500
+
+  # ── Section 2: State Diagram — PT Lifecycle ─────────────────────────
+  - renderer: state-diagram
+    title: "PT State Machine"
+    accentColor: "#A855F7"
+    direction: LR
+
+    phases:
+      - id: generation
+        label: "Generation"
+        color: "rgba(245, 158, 11, 0.06)"
+        order: 1
+      - id: dispatch
+        label: "Dispatch"
+        color: "rgba(59, 130, 246, 0.06)"
+        order: 2
+      - id: pickup
+        label: "Pickup"
+        color: "rgba(34, 197, 94, 0.06)"
+        order: 3
+      - id: transit
+        label: "Transit"
+        color: "rgba(99, 102, 241, 0.06)"
+        order: 4
+      - id: dropoff
+        label: "Drop-Off"
+        color: "rgba(239, 68, 68, 0.06)"
+        order: 5
+      - id: post
+        label: "Post-Trip"
+        color: "rgba(168, 85, 247, 0.06)"
+        order: 6
+      - id: terminal-pt
+        label: "Terminal"
+        color: "rgba(107, 114, 128, 0.06)"
+        order: 7
+
+    states:
+      - id: pt-new
+        label: NEW
+        type: initial
+        phase: generation
+        description: "Created by SGR pipeline"
+      - id: pt-grouping
+        label: GROUPING
+        type: normal
+        variant: info
+        phase: generation
+        description: "Grouped into a VR's stop list"
+      - id: pt-dispatching
+        label: DISPATCHING
+        type: normal
+        variant: info
+        phase: dispatch
+        description: "VR offer sent to driver"
+      - id: pt-accepted
+        label: ACCEPTED
+        type: normal
+        variant: success
+        phase: dispatch
+        description: "Driver accepted the VR"
+      - id: pt-topu
+        label: TOPU
+        type: normal
+        variant: success
+        phase: pickup
+        description: "En route to pickup"
+      - id: pt-atpu
+        label: ATPU
+        type: normal
+        variant: success
+        phase: pickup
+        description: "At pickup location"
+      - id: pt-onboard
+        label: ONBOARD
+        type: normal
+        variant: success
+        phase: transit
+        description: "Student scanned — on the bus"
+      - id: pt-todo
+        label: TODO
+        type: normal
+        variant: info
+        phase: transit
+        description: "En route to dropoff"
+      - id: pt-atdo
+        label: ATDO
+        type: normal
+        variant: info
+        phase: dropoff
+        description: "At dropoff location"
+      - id: pt-postservice
+        label: POSTSERVICE
+        type: normal
+        variant: warning
+        phase: post
+        description: "Dropped off — PtDroppedOffEvent fired"
+      - id: pt-postcompleteness
+        label: POSTCOMPLETENESS
+        type: normal
+        variant: info
+        phase: post
+        description: "Completeness validated"
+      - id: pt-postreadiness
+        label: POSTREADINESS
+        type: normal
+        variant: info
+        phase: post
+        description: "Billing ready"
+      - id: pt-booked
+        label: BOOKED
+        type: normal
+        variant: success
+        phase: post
+        description: "Settlement-ready"
+      - id: pt-settled
+        label: SETTLED
+        type: terminal
+        variant: success
+        phase: terminal-pt
+        description: "BC/PD/PM calculated"
+      - id: pt-cancelled
+        label: CANCELLED
+        type: terminal
+        variant: error
+        phase: terminal-pt
+        description: "Trip cancelled"
+      - id: pt-noshow
+        label: NOSHOW
+        type: terminal
+        variant: error
+        phase: terminal-pt
+        description: "Student did not appear"
+
+    transitions:
+      - id: pt-new-grouping
+        from: pt-new
+        to: pt-grouping
+        label: "group_into_vr"
+      - id: pt-grouping-dispatching
+        from: pt-grouping
+        to: pt-dispatching
+        label: "dispatch"
+      - id: pt-dispatching-accepted
+        from: pt-dispatching
+        to: pt-accepted
+        label: "driver_accepts"
+      - id: pt-accepted-topu
+        from: pt-accepted
+        to: pt-topu
+        label: "vr_starts"
+      - id: pt-topu-atpu
+        from: pt-topu
+        to: pt-atpu
+        label: "arrive_at_pickup"
+      - id: pt-atpu-onboard
+        from: pt-atpu
+        to: pt-onboard
+        label: "board (scan ID)"
+      - id: pt-onboard-todo
+        from: pt-onboard
+        to: pt-todo
+        label: "depart_pickup"
+      - id: pt-todo-atdo
+        from: pt-todo
+        to: pt-atdo
+        label: "arrive_at_dropoff"
+      - id: pt-atdo-postservice
+        from: pt-atdo
+        to: pt-postservice
+        label: "dropoff"
+      - id: pt-postservice-completeness
+        from: pt-postservice
+        to: pt-postcompleteness
+        label: "validate"
+      - id: pt-completeness-readiness
+        from: pt-postcompleteness
+        to: pt-postreadiness
+        label: "check_billing"
+      - id: pt-readiness-booked
+        from: pt-postreadiness
+        to: pt-booked
+        label: "approve"
+      - id: pt-booked-settled
+        from: pt-booked
+        to: pt-settled
+        label: "settlement_complete"
+      - id: pt-atpu-noshow
+        from: pt-atpu
+        to: pt-noshow
+        label: "student_absent"
+      - id: pt-any-cancelled
+        from: pt-new
+        to: pt-cancelled
+        label: "cancel"
+
+    steps:
+      - title: "Birth — SGR Generation"
+        narrative: "Every Passenger Trip begins in NEW, created by the nightly SGR pipeline from SubscriptionTrip templates. It's immediately grouped into a VR's stop list (GROUPING) and enters the dispatch pipeline."
+        activeStates: [pt-new, pt-grouping]
+        activeTransitions: [pt-new-grouping]
+        duration: 4000
+        narration:
+          speaker: "Architect"
+          message: "PT has 16 states — mirroring the VR machine but from the student's perspective."
+
+      - title: "Dispatch & Acceptance"
+        narrative: "When the VR's driver offer is accepted, all PTs in that VR advance from DISPATCHING to ACCEPTED. The PT inherits DriverId, ServiceProviderId, and MonitorId from the VR — this denormalization is critical for the settlement event."
+        activeStates: [pt-dispatching, pt-accepted]
+        activeTransitions: [pt-grouping-dispatching, pt-dispatching-accepted]
+        duration: 4000
+
+      - title: "The Student Journey"
+        narrative: "TOPU → ATPU → ONBOARD → TODO → ATDO: the physical journey of the student. At ATPU, the driver scans the student's ID (custody transfer proof). At ATDO, the student is at the school. Each state change updates the Stop disposition in the parent VR's JSONB."
+        activeStates: [pt-topu, pt-atpu, pt-onboard, pt-todo, pt-atdo]
+        activeTransitions: [pt-accepted-topu, pt-topu-atpu, pt-atpu-onboard, pt-onboard-todo, pt-todo-atdo]
+        duration: 5000
+
+      - title: "The Revenue Transition"
+        narrative: "ATDO → POSTSERVICE fires PtDroppedOffEvent — the single most revenue-critical event in the platform. The event carries ActualDropoffTime, GPS coordinates, and the denormalized DriverId + ServiceProviderId + MonitorId. This one transition triggers BC/PD/PM settlement for every completed trip."
+        activeStates: [pt-postservice]
+        activeTransitions: [pt-atdo-postservice]
+        duration: 5000
+
+      - title: "Post-Trip to Settlement"
+        narrative: "Three validation gates: POSTCOMPLETENESS (all trips in the VR resolved), POSTREADINESS (billing data verified), BOOKED (settlement-ready). Once Settlement processes the PtDroppedOffEvent, the PT reaches its final state: SETTLED. The student got to school. The driver gets paid. The district gets billed."
+        activeStates: [pt-postcompleteness, pt-postreadiness, pt-booked, pt-settled]
+        activeTransitions: [pt-postservice-completeness, pt-completeness-readiness, pt-readiness-booked, pt-booked-settled]
+        duration: 5000
+
+      - title: "Alternate Endings"
+        narrative: "NOSHOW at pickup (student absent — triggers Monitoring alert and parent notification) or CANCELLED at any point. Both are terminal states. NOSHOW still generates a partial settlement record — the driver showed up, so they're compensated."
+        activeStates: [pt-noshow, pt-cancelled]
+        activeTransitions: [pt-atpu-noshow, pt-any-cancelled]
+        duration: 4000
+
+  # ── Section 3: HTTP Flow — Settlement Event Payload ─────────────────
+  - renderer: http-flow
+    title: "Event Anatomy"
+    accentColor: "#059669"
+    layout: sequence
+
+    participants:
+      - id: trip-ops-api
+        name: Trip Ops API
+        type: server
+        icon: "\U0001F690"
+        baseUrl: "http://api.catalyst.local/trip-operations"
+      - id: outbox-relay
+        name: Outbox Relay
+        type: service
+        icon: "\U0001F4E6"
+      - id: asb
+        name: Azure Service Bus
+        type: external
+        icon: "\U0001F4EC"
+      - id: settlement-ep
+        name: Settlement EP
+        type: service
+        icon: "\U0001F4B0"
+        baseUrl: "internal"
+
+    exchanges:
+      - id: dropoff-call
+        request:
+          from: trip-ops-api
+          to: outbox-relay
+          method: INSERT
+          path: outbox_messages
+          headers:
+            Content-Type: application/json
+          body:
+            eventType: PtDroppedOffEvent
+            payload:
+              passengerTripId: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+              vehicleRunId: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+              tenantId: "8a14e92a-3577-4c6d-a27a-f8d02a3c4e5b"
+              studentId: "student-guid"
+              cepId: "cep-guid"
+              driverId: "driver-guid"
+              serviceProviderId: "provider-guid"
+              monitorId: "monitor-guid-or-null"
+              scheduledDropoffTime: "2026-02-22T07:45:00Z"
+              actualDropoffTime: "2026-02-22T07:43:12Z"
+              latitude: 39.7392
+              longitude: -104.9903
+              tripOrigin: "ScheduledGeneration"
+          bodyType: json
+        response:
+          status: 200
+          statusText: "Committed"
+          body: { outboxId: "guid", scheduledRelay: "immediate" }
+        timing:
+          total: 12
+
+      - id: relay-to-asb
+        request:
+          from: outbox-relay
+          to: asb
+          method: PUBLISH
+          path: "topic: trip-operations"
+          body:
+            messageId: "guid"
+            eventType: PtDroppedOffEvent
+            correlationId: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+            retryCount: 0
+            maxRetries: 10
+          bodyType: json
+        response:
+          status: 200
+          statusText: "Accepted"
+        timing:
+          total: 25
+
+      - id: settlement-receive
+        request:
+          from: asb
+          to: settlement-ep
+          method: DELIVER
+          path: "subscription: settlement-bc"
+          headers:
+            x-message-id: "guid"
+            x-correlation-id: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+          body:
+            action: "CalculateBcPdPmCommand"
+            driverId: "driver-guid"
+            serviceProviderId: "provider-guid"
+            monitorId: "monitor-guid-or-null"
+            scheduledTime: "2026-02-22T07:45:00Z"
+            actualTime: "2026-02-22T07:43:12Z"
+            varianceMinutes: -1.8
+          bodyType: json
+        response:
+          status: 200
+          statusText: "Processed"
+          body: { settlementId: "guid", bcAmount: 42.50, pdAmount: 38.25, pmAmount: 4.25 }
+        timing:
+          total: 85
+
+    steps:
+      - id: anatomy-outbox
+        title: "Event Payload — What PtDroppedOffEvent Carries"
+        narrative: "The event is self-contained — no cross-service lookups needed. It carries the passenger trip context (studentId, cepId, tripOrigin), the settlement-critical triple (driverId, serviceProviderId, monitorId), and the time variance (scheduled vs actual dropoff). This denormalization was a deliberate design decision: Settlement can calculate BC/PD/PM from a single event."
+        activeExchanges: [dropoff-call]
+        duration: 6000
+        narration:
+          speaker: "Architect"
+          message: "The driverId, serviceProviderId, and monitorId were copied from the VR at assignment time. This is the 'Revenue-Critical Denormalization' pattern."
+
+      - id: anatomy-relay
+        title: "Outbox Relay — Guaranteed Delivery"
+        narrative: "The outbox relay reads from outbox_messages with exponential backoff. Maximum 10 retries. After 10 failures, the event moves to a dead-letter queue monitored by PagerDuty (P1 alert). Manual intervention required — because a lost PtDroppedOffEvent means an unpaid driver."
+        activeExchanges: [relay-to-asb]
+        duration: 5000
+
+      - id: anatomy-settlement
+        title: "Settlement Receives — BC/PD/PM Calculated"
+        narrative: "Settlement's EventProcessor receives the event, extracts the settlement triple, and calculates: Bill Client (BC) = what the district owes, Pay Driver (PD) = what the driver earns, Pay Monitor (PM) = what the ride monitor earns. The variance (scheduled vs actual) may trigger penalty or bonus calculations. Result: $42.50 BC, $38.25 PD, $4.25 PM."
+        activeExchanges: [settlement-receive]
+        duration: 5000
+
+      - id: anatomy-summary
+        title: "One Event, One Revenue Record"
+        narrative: "Every student dropoff creates a settlement record. 50K daily trips = 50K PtDroppedOffEvents = 50K BC/PD/PM calculations. The end-to-end latency from driver tap to settlement record is under 500ms. This is the financial backbone of EverDriven's transportation platform."
+        activeExchanges: [dropoff-call, relay-to-asb, settlement-receive]
+        duration: 5000

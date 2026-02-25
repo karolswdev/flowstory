@@ -1,0 +1,587 @@
+id: trip-ops-operational-heartbeat
+title: "Trip Operations — Operational Heartbeat"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  The daily rhythm of Trip Operations: from nightly batch generation
+  through the morning dispatch cascade, into the real-time GPS tracking
+  loop, and through to settlement-ready trip completion. Three perspectives
+  — domain event storm, VR state machine, and the live GPS→SignalR pipeline.
+
+sections:
+  # ── Section 1: Event Storm — The Daily Rhythm ───────────────────────
+  - renderer: event-storming
+    title: "Daily Rhythm"
+    accentColor: "#F59E0B"
+
+    actors:
+      - id: scheduler
+        name: Nightly Scheduler
+        icon: "\u23F0"
+        color: "#F59E0B"
+      - id: dispatch
+        name: Dispatcher
+        icon: "\U0001F3A7"
+        color: "#3B82F6"
+      - id: driver-actor
+        name: Driver
+        icon: "\U0001F468\u200D\U0001F33E"
+        color: "#22C55E"
+      - id: vehicle
+        name: Vehicle (GPS)
+        icon: "\U0001F690"
+        color: "#8B5CF6"
+
+    aggregates:
+      - id: sgr-agg
+        name: ScheduledGenerationRun
+        color: "rgba(245, 158, 11, 0.15)"
+      - id: vr-agg
+        name: VehicleRun
+        color: "rgba(59, 130, 246, 0.15)"
+      - id: pt-agg
+        name: PassengerTrip
+        color: "rgba(34, 197, 94, 0.15)"
+
+    events:
+      - id: sgr-completed
+        name: SgrCompletedEvent
+        aggregate: sgr-agg
+        description: "Nightly batch created VRs + PTs from subscription templates"
+        icon: "\u2705"
+      - id: vr-created
+        name: VehicleRunCreatedEvent
+        aggregate: vr-agg
+        description: "New VR in NEW state, stops populated from subscription trips"
+        icon: "\U0001F195"
+      - id: offer-sent
+        name: OfferSentToDriverEvent
+        aggregate: vr-agg
+        description: "Driver offer queued and dispatched"
+        icon: "\U0001F4E8"
+      - id: offer-accepted
+        name: OfferAcceptedEvent
+        aggregate: vr-agg
+        description: "Driver confirmed — VR ready for dispatch"
+        icon: "\U0001F44D"
+      - id: vr-started
+        name: VehicleRunStartedEvent
+        aggregate: vr-agg
+        description: "Driver begins route — VR transitions to TOSTOP"
+        icon: "\U0001F6A6"
+      - id: gps-updated
+        name: GpsLocationUpdatedEvent
+        aggregate: vr-agg
+        description: "30-second GPS cadence — PostGIS + ETA recalculation"
+        icon: "\U0001F4E1"
+      - id: pt-boarded
+        name: PtBoardedEvent
+        aggregate: pt-agg
+        description: "Student scanned and on board — PT transitions to ONBOARD"
+        icon: "\U0001F392"
+      - id: pt-dropoff
+        name: PtDroppedOffEvent
+        aggregate: pt-agg
+        description: "REVENUE-CRITICAL — triggers BC/PD/PM settlement pipeline"
+        icon: "\U0001F4B0"
+      - id: vr-completed
+        name: VehicleRunCompletedEvent
+        aggregate: vr-agg
+        description: "All stops complete — VR enters post-service processing"
+        icon: "\U0001F3C1"
+
+    commands:
+      - id: trigger-sgr
+        name: TriggerSgrCommand
+        actor: scheduler
+        aggregate: sgr-agg
+        description: "Initiates nightly Conductor workflow"
+      - id: send-offer
+        name: SendOfferCommand
+        actor: dispatch
+        aggregate: vr-agg
+        description: "Queue driver offer for acceptance"
+      - id: start-vr
+        name: StartVrCommand
+        actor: driver-actor
+        aggregate: vr-agg
+        description: "Driver begins daily route"
+      - id: ingest-gps
+        name: IngestGpsLocationCommand
+        actor: vehicle
+        aggregate: vr-agg
+        description: "GPS telemetry ingestion (30s cadence)"
+      - id: board-pt
+        name: BoardPtCommand
+        actor: driver-actor
+        aggregate: pt-agg
+        description: "Student pickup with ID scan"
+      - id: dropoff-pt
+        name: DropOffPtCommand
+        actor: driver-actor
+        aggregate: pt-agg
+        description: "Student dropoff at school"
+
+    policies:
+      - id: assignment-policy
+        name: "Auto-Assignment"
+        trigger: sgr-completed
+        description: "Assignment BC matches drivers to VRs"
+      - id: settlement-policy
+        name: "Settlement Pipeline"
+        trigger: pt-dropoff
+        description: "BC/PD/PM calculation in Settlement BC"
+      - id: risk-detection
+        name: "At-Risk Detection"
+        trigger: gps-updated
+        description: "Monitoring flags VRs within 90 min of start without OFFERACCEPTED"
+
+    steps:
+      - id: es-night
+        title: "2:00 AM — Nightly Generation"
+        narrative: "The scheduler triggers SGR generation via Conductor. The 6-step pipeline checks calendar exclusions, filters active subscription runs, creates VRs and PTs, patches stop-to-PT linkage, and detects conflicts. Hundreds of VRs materialize in under 5 minutes."
+        activeCommands: [trigger-sgr]
+        activeEvents: [sgr-completed, vr-created]
+        activeAggregates: [sgr-agg]
+        duration: 5000
+        narration:
+          speaker: "Architect"
+          message: "SGR generation is the foundation — every VR and PT for tomorrow's routes is born here."
+
+      - id: es-morning
+        title: "5:30 AM — Offer & Dispatch"
+        narrative: "Dispatchers send offers to drivers. Each offer follows a 4-step workflow: Queue → Send → Accept → Confirm. Once accepted, the VR is ready for dispatch. At-risk detection flags any VR within 90 minutes of start that hasn't been accepted."
+        activeCommands: [send-offer]
+        activeEvents: [offer-sent, offer-accepted]
+        activeAggregates: [vr-agg]
+        activePolicies: [assignment-policy, risk-detection]
+        duration: 5000
+
+      - id: es-active
+        title: "7:00 AM — Routes Go Live"
+        narrative: "Drivers start their routes. GPS telemetry flows at 30-second intervals — PostGIS persistence, ETA recalculation, SignalR broadcast to the fleet map. Students are boarded with ID scan verification."
+        activeCommands: [start-vr, ingest-gps, board-pt]
+        activeEvents: [vr-started, gps-updated, pt-boarded]
+        activeAggregates: [vr-agg, pt-agg]
+        duration: 5000
+
+      - id: es-revenue
+        title: "7:45 AM — The Revenue Moment"
+        narrative: "Each student dropoff fires the PtDroppedOffEvent — the single most important event in the platform. It carries denormalized DriverId, ServiceProviderId, and MonitorId so Settlement can calculate BC/PD/PM without cross-service queries. Lost events mean unpaid drivers."
+        activeCommands: [dropoff-pt]
+        activeEvents: [pt-dropoff, vr-completed]
+        activePolicies: [settlement-policy]
+        duration: 5000
+
+      # BRIDGE
+      - id: es-bridge
+        title: "Inside the VR State Machine"
+        narrative: "Behind every command and event is a 16-state machine. Let's trace a Vehicle Run from birth to settlement."
+        activeAggregates: [vr-agg]
+        duration: 3000
+
+  # ── Section 2: State Diagram — VR Lifecycle ─────────────────────────
+  - renderer: state-diagram
+    title: "VR State Machine"
+    accentColor: "#3B82F6"
+    direction: LR
+
+    phases:
+      - id: pre-dispatch
+        label: "Pre-Dispatch"
+        color: "rgba(245, 158, 11, 0.06)"
+        order: 1
+      - id: offer-phase
+        label: "Driver Offer"
+        color: "rgba(59, 130, 246, 0.06)"
+        order: 2
+      - id: active
+        label: "Active Route"
+        color: "rgba(34, 197, 94, 0.06)"
+        order: 3
+      - id: post-service
+        label: "Post-Service"
+        color: "rgba(168, 85, 247, 0.06)"
+        order: 4
+      - id: terminal
+        label: "Terminal"
+        color: "rgba(239, 68, 68, 0.06)"
+        order: 5
+
+    states:
+      - id: new
+        label: NEW
+        type: initial
+        phase: pre-dispatch
+        description: "Created by SGR generation"
+      - id: reserved
+        label: RESERVED
+        type: normal
+        variant: info
+        phase: pre-dispatch
+        description: "Assignment linked a driver"
+      - id: offerqueued
+        label: OFFERQUEUED
+        type: normal
+        variant: info
+        phase: offer-phase
+        description: "Offer prepared for driver"
+      - id: offersent
+        label: OFFERSENT
+        type: normal
+        variant: info
+        phase: offer-phase
+        description: "Offer delivered to driver device"
+      - id: offerconfirmed
+        label: OFFERCONFIRMED
+        type: normal
+        variant: info
+        phase: offer-phase
+        description: "Driver acknowledged receipt"
+      - id: offeraccepted
+        label: OFFERACCEPTED
+        type: normal
+        variant: success
+        phase: offer-phase
+        description: "Driver accepted — ready for dispatch"
+      - id: tostop
+        label: TOSTOP
+        type: normal
+        variant: success
+        phase: active
+        description: "En route to next stop"
+      - id: atstop
+        label: ATSTOP
+        type: normal
+        variant: success
+        phase: active
+        description: "Arrived at stop — boarding/alighting"
+      - id: break
+        label: BREAK
+        type: normal
+        variant: info
+        phase: active
+        description: "Driver on scheduled break"
+      - id: postservice
+        label: POSTSERVICE
+        type: normal
+        variant: info
+        phase: post-service
+        description: "Route done — post-trip validation"
+      - id: postcompleteness
+        label: POSTCOMPLETENESS
+        type: normal
+        variant: info
+        phase: post-service
+        description: "Completeness check (all PTs resolved)"
+      - id: postreadiness
+        label: POSTREADINESS
+        type: normal
+        variant: info
+        phase: post-service
+        description: "Billing readiness verified"
+      - id: booked
+        label: BOOKED
+        type: normal
+        variant: success
+        phase: post-service
+        description: "Ready for settlement processing"
+      - id: settled
+        label: SETTLED
+        type: terminal
+        variant: success
+        phase: terminal
+        description: "BC/PD/PM calculated — driver paid"
+      - id: archived
+        label: ARCHIVED
+        type: terminal
+        variant: info
+        phase: terminal
+        description: "Moved to cold storage"
+      - id: cancelled
+        label: CANCELLED
+        type: terminal
+        variant: error
+        phase: terminal
+        description: "Cancelled before completion"
+
+    transitions:
+      - id: new-reserved
+        from: new
+        to: reserved
+        label: "assign"
+      - id: reserved-offerqueued
+        from: reserved
+        to: offerqueued
+        label: "queue_offer"
+      - id: offerqueued-offersent
+        from: offerqueued
+        to: offersent
+        label: "send_offer"
+      - id: offersent-offerconfirmed
+        from: offersent
+        to: offerconfirmed
+        label: "confirm_receipt"
+      - id: offerconfirmed-offeraccepted
+        from: offerconfirmed
+        to: offeraccepted
+        label: "accept_offer"
+      - id: offeraccepted-tostop
+        from: offeraccepted
+        to: tostop
+        label: "start_vr"
+      - id: tostop-atstop
+        from: tostop
+        to: atstop
+        label: "arrive_at_stop"
+      - id: atstop-tostop
+        from: atstop
+        to: tostop
+        label: "depart_stop"
+      - id: tostop-break
+        from: tostop
+        to: break
+        label: "start_break"
+      - id: break-tostop
+        from: break
+        to: tostop
+        label: "end_break"
+      - id: atstop-postservice
+        from: atstop
+        to: postservice
+        label: "last_stop_complete"
+      - id: postservice-postcompleteness
+        from: postservice
+        to: postcompleteness
+        label: "validate"
+      - id: postcompleteness-postreadiness
+        from: postcompleteness
+        to: postreadiness
+        label: "check_billing"
+      - id: postreadiness-booked
+        from: postreadiness
+        to: booked
+        label: "approve"
+      - id: booked-settled
+        from: booked
+        to: settled
+        label: "settlement_complete"
+      - id: settled-archived
+        from: settled
+        to: archived
+        label: "archive (90 days)"
+      - id: any-cancelled
+        from: new
+        to: cancelled
+        label: "cancel"
+
+    steps:
+      - title: "Birth — SGR Creates the VR"
+        narrative: "Every Vehicle Run starts in NEW state, created by the nightly SGR generation pipeline. It carries a list of Stops (JSONB) and links to a SubscriptionRun template."
+        activeStates: [new]
+        duration: 4000
+        narration:
+          speaker: "Architect"
+          message: "VehicleRun has 16 states — the most complex state machine in Catalyst."
+
+      - title: "Pre-Dispatch — Driver Offer Pipeline"
+        narrative: "The Assignment BC links a driver (RESERVED), then the 4-step offer workflow begins. Each step is a separate command with its own validation. If no driver accepts within 90 minutes of scheduled start, an AtRiskDetectedEvent fires."
+        activeStates: [reserved, offerqueued, offersent, offerconfirmed, offeraccepted]
+        activeTransitions: [new-reserved, reserved-offerqueued, offerqueued-offersent, offersent-offerconfirmed, offerconfirmed-offeraccepted]
+        duration: 5000
+
+      - title: "Active Route — The TOSTOP/ATSTOP Loop"
+        narrative: "The heart of the operational day. The VR alternates between TOSTOP (en route) and ATSTOP (at a stop for boarding/alighting). GPS flows at 30-second intervals. Each stop has its own 8-state disposition micro-machine."
+        activeStates: [tostop, atstop, break]
+        activeTransitions: [offeraccepted-tostop, tostop-atstop, atstop-tostop, tostop-break, break-tostop]
+        duration: 5000
+
+      - title: "Post-Service — Settlement Pipeline"
+        narrative: "After the last stop, the VR passes through three validation gates: post-service review, completeness check (all PTs resolved), and billing readiness. Each gate is a separate state transition with its own validation rules."
+        activeStates: [postservice, postcompleteness, postreadiness, booked]
+        activeTransitions: [atstop-postservice, postservice-postcompleteness, postcompleteness-postreadiness, postreadiness-booked]
+        duration: 5000
+
+      - title: "Terminal — Settled & Archived"
+        narrative: "SETTLED means BC/PD/PM calculations are complete — drivers are paid, districts are billed. After 90 days, ARCHIVED moves the VR to cold storage. CANCELLED is reachable from any pre-completion state."
+        activeStates: [settled, archived, cancelled]
+        activeTransitions: [booked-settled, settled-archived, any-cancelled]
+        duration: 4000
+
+      # BRIDGE
+      - title: "The Real-Time Layer"
+        narrative: "While the VR cycles through TOSTOP/ATSTOP, a parallel pipeline keeps the fleet map alive. Let's zoom into the GPS → SignalR pipeline that powers real-time visibility."
+        activeStates: [tostop, atstop]
+        duration: 3000
+
+  # ── Section 3: Service Flow — GPS → SignalR Pipeline ────────────────
+  - renderer: service-flow
+    title: "Real-Time Pipeline"
+    accentColor: "#22C55E"
+    layout: sequence
+
+    services:
+      - id: driver-device
+        name: Driver Device
+        type: external
+        technology: "Mobile App"
+      - id: trip-api
+        name: Trip Ops API
+        type: api
+        technology: ".NET 10"
+        status: healthy
+      - id: gps-reading
+        name: GpsReading VO
+        type: worker
+        technology: "Self-Validating"
+        status: healthy
+      - id: postgis-db
+        name: PostGIS
+        type: database
+        technology: "SRID 4326 + GIST"
+        status: healthy
+      - id: eta-engine
+        name: ETA Engine
+        type: worker
+        technology: "EtaAdjustments VO"
+        status: healthy
+      - id: pt-cache
+        name: PT Cache
+        type: cache
+        technology: "Redis (TTL 300s)"
+        status: healthy
+      - id: trip-ep
+        name: Trip Ops EP
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: fleet-map
+        name: Fleet Map
+        type: external
+        technology: "Trip HQ (SignalR)"
+
+    queues:
+      - id: outbox-q
+        name: outbox_messages
+        type: queue
+        broker: redis
+      - id: asb-q
+        name: trip-operations topic
+        type: topic
+        broker: servicebus
+        consumers: 7
+
+    calls:
+      - id: gps-ingest
+        type: sync
+        from: driver-device
+        to: trip-api
+        method: POST
+        path: "v1/gps/ingest"
+        protocol: http
+        duration: 35
+        status: 200
+
+      - id: validate-reading
+        type: sync
+        from: trip-api
+        to: gps-reading
+        method: CREATE
+        path: "accuracy<50m, staleness<30s"
+        duration: 1
+
+      - id: persist-gps
+        type: sync
+        from: trip-api
+        to: postgis-db
+        method: INSERT
+        path: "geometry(Point,4326)"
+        duration: 8
+
+      - id: calc-eta
+        type: sync
+        from: trip-api
+        to: eta-engine
+        method: COMPUTE
+        path: "Likely + Optimistic + Pessimistic"
+        duration: 5
+
+      - id: check-cache
+        type: sync
+        from: trip-api
+        to: pt-cache
+        method: GET
+        path: "pt-cache:{tenantId}:{ptId}"
+        duration: 1
+        status: 200
+
+      - id: outbox-write
+        type: sync
+        from: trip-api
+        to: outbox-q
+        method: INSERT
+        path: "GpsLocationUpdatedEvent"
+        duration: 3
+
+      - id: relay-asb
+        type: publish
+        from: outbox-q
+        to: asb-q
+        method: RELAY
+        path: "GpsLocationUpdatedEvent"
+
+      - id: ep-consume
+        type: subscribe
+        from: asb-q
+        to: trip-ep
+        messageType: GpsLocationUpdatedEvent
+        action: GpsLocationUpdatedEventHandler
+
+      - id: broadcast
+        type: sync
+        from: trip-ep
+        to: fleet-map
+        method: BROADCAST
+        path: "vr-{vrId} + district-{tenantId}"
+        duration: 3
+
+    steps:
+      - id: rt-ingest
+        title: "GPS Arrives Every 30 Seconds"
+        narrative: "Each vehicle reports its position, heading, and speed every 30 seconds. At peak operations (33 vehicles per tenant), this generates ~66 requests per minute — each must complete in under 50ms to avoid GPS staleness."
+        activeCalls: [gps-ingest]
+        duration: 4000
+        narration:
+          speaker: "Architect"
+          message: "The 30-second cadence is the heartbeat — miss two cycles and the vehicle goes stale on the fleet map."
+
+      - id: rt-validate
+        title: "Self-Validating Value Object"
+        narrative: "GpsReading validates at construction: accuracy must be under 50 meters (GPS noise filter), timestamp must be within 30 seconds (staleness guard). Invalid readings are rejected before any database I/O."
+        activeCalls: [validate-reading]
+        duration: 4000
+
+      - id: rt-persist
+        title: "PostGIS Persistence + ETA"
+        narrative: "The point is stored as a PostGIS geometry(Point, SRID 4326) with a GIST index for spatial queries. Simultaneously, the ETA engine computes three arrival estimates — likely, optimistic, and pessimistic — factoring in rush hour, driver behavior, and historical error rates."
+        activeCalls: [persist-gps, calc-eta]
+        duration: 5000
+
+      - id: rt-cache
+        title: "PT Cache-Aside (85%+ Hit Rate)"
+        narrative: "The PT cache in Redis (TTL 300s) holds pre-loaded PassengerTrip projections. During active routes, 33 vehicles x 8 PTs = 264 cache lookups per GPS cycle. The cache reduces database load by 85%+ compared to direct queries."
+        activeCalls: [check-cache]
+        duration: 4000
+
+      - id: rt-async
+        title: "Outbox → ASB → EP → SignalR"
+        narrative: "The transactional outbox ensures GpsLocationUpdatedEvent survives process crashes. The outbox relay publishes to Azure Service Bus. The EventProcessor subscribes, checks Redis idempotency, and broadcasts to SignalR groups — both VR-specific and district-wide."
+        activeCalls: [outbox-write, relay-asb, ep-consume, broadcast]
+        duration: 5000
+
+      - id: rt-e2e
+        title: "150-250ms End-to-End"
+        narrative: "From the driver's phone to the dispatcher's fleet map — 150 to 250 milliseconds. The sync path (validation + persist + ETA) takes 35ms. The async path (outbox relay + ASB + EP + SignalR) adds 115-215ms. At 50K daily trips, this pipeline processes millions of GPS points per day."
+        activeCalls: [gps-ingest, persist-gps, calc-eta, outbox-write, relay-asb, ep-consume, broadcast]
+        focusNodes: [driver-device, fleet-map]
+        duration: 5000

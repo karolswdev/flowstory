@@ -1,0 +1,1 @@
+export { CompositeCanvas } from './CompositeCanvas';

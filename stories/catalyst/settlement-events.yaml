@@ -1,0 +1,462 @@
+id: settlement-events
+title: "Settlement — Event-Driven Orchestration & Cross-Context Integration"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  Settlement's event-driven architecture spans two dimensions: inbound events from Trip Operations
+  that feed the trip completion pipeline (PtDroppedOffEvent → raw SQL upsert into
+  settlement_trip_completions), and outbound Conductor workflow orchestration that coordinates
+  multi-step calculation, compensation, and reversal sagas across 4 cross-context HTTP clients.
+  The transactional outbox pattern ensures domain events are published atomically with state changes,
+  while 10 Conductor task workers handle the full settlement lifecycle including failure detection,
+  compensation calculation, and saga reversal.
+
+sections:
+  # -- Section 1: Inbound Events & Trip Completion Pipeline ----------------------------
+  - renderer: service-flow
+    title: "Inbound Events & Trip Completion Pipeline"
+    accentColor: "#F59E0B"
+    layout: sequence
+
+    services:
+      - id: trip-ops-api
+        name: "Trip Operations API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+      - id: settlement-ep
+        name: "Settlement Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: settlement-db
+        name: "PostgreSQL 16 (settlement)"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: redis
+        name: "Redis"
+        type: cache
+        technology: "Redis"
+        status: healthy
+      - id: outbox
+        name: "Outbox (outbox_messages)"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+
+    zones:
+      - id: trip-ops-zone
+        label: "Trip Operations BC"
+        members: [trip-ops-api]
+        color: "rgba(59, 130, 246, 0.06)"
+      - id: messaging
+        label: "Messaging Infrastructure"
+        members: [asb, redis]
+        color: "rgba(245, 158, 11, 0.06)"
+      - id: settlement-zone
+        label: "Settlement BC"
+        members: [settlement-ep, settlement-db, outbox]
+        color: "rgba(139, 92, 246, 0.06)"
+
+    calls:
+      - id: pt-dropoff-publish
+        type: publish
+        from: trip-ops-api
+        to: asb
+        messageType: "PtDroppedOffEvent"
+        payload:
+          description: "PassengerTripId, VehicleRunId, StudentId, DriverId, ServiceProviderId, MonitorId, ActualDropoffTime, Latitude, Longitude, TenantId"
+      - id: pt-dropoff-subscribe
+        type: subscribe
+        from: asb
+        to: settlement-ep
+        messageType: "PtDroppedOffEvent"
+        description: "Subscription: settlement-trip-subscriber on trip-operations topic"
+      - id: idempotency-check
+        type: sync
+        from: settlement-ep
+        to: redis
+        method: GET
+        path: "settlement:pt-dropoff:{EventId}"
+        protocol: http
+        duration: 5
+        description: "Redis idempotency check — 1-hour TTL, key prefix settlement:pt-dropoff:. If exists, handler returns immediately (skip duplicate processing)."
+      - id: upsert-completion
+        type: sync
+        from: settlement-ep
+        to: settlement-db
+        method: POST
+        path: "INSERT INTO settlement_trip_completions ... ON CONFLICT UPDATE"
+        protocol: http
+        duration: 50
+        description: "Raw SQL upsert into settlement_trip_completions (NOT EF Core managed). Unique constraint on (tenant_id, passenger_trip_id). ON CONFLICT: updates actual_dropoff_time, driver_id, service_provider_id, monitor_id."
+      - id: idempotency-set
+        type: sync
+        from: settlement-ep
+        to: redis
+        method: SET
+        path: "settlement:pt-dropoff:{EventId} TTL=3600"
+        protocol: http
+        duration: 3
+        description: "Mark event as processed in Redis with 1-hour TTL"
+      - id: settlement-self-subscribe
+        type: subscribe
+        from: asb
+        to: settlement-ep
+        messageType: "Settlement domain events"
+        description: "Subscription: settlement-event-processor on settlement topic — processes own domain events for side effects"
+      - id: outbox-write
+        type: sync
+        from: settlement-db
+        to: outbox
+        method: POST
+        path: "outbox_messages INSERT (same transaction)"
+        protocol: http
+        duration: 5
+        description: "Domain events written to outbox_messages table in same DB transaction as aggregate state changes — IOutboxDbContext interface"
+
+    steps:
+      - id: event-step-1
+        title: "PtDroppedOffEvent: Trip Completion Ingestion"
+        narrative: >
+          When a Passenger Trip reaches the `AtDropoff` -> `Completed` transition in Trip Operations,
+          **PtDroppedOffEvent** is published to the `trip-operations` ASB topic. The Settlement Event Processor
+          (`Catalyst.Settlement.EventProcessor/Program.cs`) subscribes via the `settlement-trip-subscriber`
+          subscription — this is the {color:blue|only cross-topic subscription} in the Settlement BC.
+
+
+          **PtDroppedOffEventHandler** (`EventProcessor/Handlers/PtDroppedOffEventHandler.cs`) implements a
+          {color:green|three-phase processing pattern}:
+
+
+          Phase 1: **Idempotency check** — queries Redis with key `settlement:pt-dropoff:{EventId}` (1-hour TTL,
+          instance prefix `CatalystSettlement:`). If the key exists, the handler returns immediately, preventing
+          duplicate processing from ASB redelivery.
+
+
+          Phase 2: **Raw SQL upsert** — inserts into `settlement_trip_completions` table (not EF Core managed)
+          with `ON CONFLICT (tenant_id, passenger_trip_id) DO UPDATE SET actual_dropoff_time, driver_id,
+          service_provider_id, monitor_id`. Captures: passenger_trip_id, vehicle_run_id, student_id, driver_id,
+          service_provider_id, monitor_id, actual_dropoff_time, latitude, longitude. Billing period is calculated
+          from the dropoff timestamp.
+
+
+          Phase 3: **Idempotency mark** — sets the Redis key with 1-hour TTL.
+          {color:red|Risk: the settlement_trip_completions table is created via raw SQL — it has no EF Core
+          migration and no model representation. Schema drift risk if the table structure needs updating}.
+        activeCalls: [pt-dropoff-publish, pt-dropoff-subscribe, idempotency-check, upsert-completion, idempotency-set]
+        revealNodes: [trip-ops-api, asb, settlement-ep, settlement-db, redis]
+        duration: 7000
+      - id: event-step-2
+        title: "Transactional Outbox & Self-Subscription"
+        narrative: >
+          Settlement uses {color:green|transactional outbox} for all domain event publishing. **SettlementDbContext**
+          (`Infrastructure/Data/SettlementDbContext.cs`) extends `DomainEventPublishingDbContext` and implements
+          `IOutboxDbContext`. When any command handler calls `SaveChangesAsync()`, domain events raised by
+          aggregates (via `Entity<T>.AddDomainEvent()`) are serialized and written to the `outbox_messages`
+          table in the SAME database transaction as the domain state change. A background processor then
+          publishes these to the `settlement` ASB topic.
+
+
+          The Event Processor subscribes to TWO topics:
+
+          1. `trip-operations` topic via `settlement-trip-subscriber` — for **PtDroppedOffEvent** (cross-context)
+
+          2. `settlement` topic via `settlement-event-processor` — for the BC's own 13 outbound events (self-subscription for side effects)
+
+
+          This self-subscription pattern enables {color:green|decoupled side effects}: when
+          **SettlementCalculatedEvent** is published, downstream handlers in the same EP can trigger
+          notifications, metrics recording, or reporting updates without coupling the command handler
+          to those concerns. All 13 domain events flow through the outbox:
+          SettlementBatchCreated, SettlementCalculated, SettlementApproved, SettlementRejected,
+          SettlementPaid, SettlementReconciled, DisputeCreated, DisputeResolved,
+          AdjustmentRequested, AdjustmentApproved, AdjustmentRejected, AdjustmentApplied,
+          ReconciliationDiscrepancy.
+
+
+          {color:red|Risk: the FailingCommunicationsClient stub is used when Communications BaseUrl
+          is not configured — settlement notification delivery silently fails in development}.
+        activeCalls: [outbox-write, settlement-self-subscribe]
+        revealNodes: [outbox]
+        revealCalls: [pt-dropoff-publish, pt-dropoff-subscribe, idempotency-check, upsert-completion, idempotency-set]
+        duration: 6000
+
+  # -- Section 2: Conductor Workflow Orchestration & Compensation Sagas -----------------
+  - renderer: service-flow
+    title: "Conductor Workflow Orchestration & Compensation Sagas"
+    accentColor: "#EF4444"
+    layout: sequence
+
+    services:
+      - id: conductor
+        name: "Conductor"
+        type: workflow
+        technology: "Orkes Conductor"
+        status: healthy
+      - id: settlement-ep
+        name: "Settlement Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: settlement-db
+        name: "PostgreSQL 16 (settlement)"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: pricing-api
+        name: "Pricing API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: trip-ops-api
+        name: "Trip Operations API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: provider-api
+        name: "Provider Network API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: comms-api
+        name: "Communications API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+
+    zones:
+      - id: orchestration
+        label: "Conductor Orchestration"
+        members: [conductor, settlement-ep]
+        color: "rgba(239, 68, 68, 0.06)"
+      - id: cross-context
+        label: "Cross-Context HTTP Clients"
+        members: [pricing-api, trip-ops-api, provider-api, comms-api]
+        color: "rgba(59, 130, 246, 0.06)"
+      - id: persistence
+        label: "Settlement Persistence"
+        members: [settlement-db]
+        color: "rgba(139, 92, 246, 0.06)"
+
+    calls:
+      - id: calc-workflow-start
+        type: sync
+        from: conductor
+        to: settlement-ep
+        method: POST
+        path: "settlement-calculation-workflow (5 steps, 30min timeout)"
+        protocol: http
+        duration: 200
+        description: "Conductor dispatches settlement-calculation-workflow tasks to 5 registered workers: CreateSettlementBatchTask, FetchBookedTripsTask, CalculateBcTask, CalculatePdPmTask, CompleteSettlementBatchTask"
+      - id: fetch-trips-http
+        type: sync
+        from: settlement-ep
+        to: trip-ops-api
+        method: GET
+        path: "ISettlementTripClient → trip-operations-api:8080"
+        protocol: http
+        duration: 800
+        description: "FetchBookedTripsTask: Polly resilience (3x exponential retry, circuit breaker 5 failures/30s, jitter). TenantIdDelegatingHandler + CorrelationIdDelegatingHandler. 60s base timeout, 30s per-request."
+      - id: fetch-rates-http
+        type: sync
+        from: settlement-ep
+        to: pricing-api
+        method: GET
+        path: "IPricingClient → pricing-api:8080"
+        protocol: http
+        duration: 400
+        description: "CalculateBcTask: Fetches CTTC ContractRateDto per trip. 30s timeout, 10s per-request. Polly: 3x exponential retry, circuit breaker."
+      - id: fetch-provider-rates-http
+        type: sync
+        from: settlement-ep
+        to: provider-api
+        method: GET
+        path: "IProviderNetworkClient → provider-network-api:8080"
+        protocol: http
+        duration: 350
+        description: "CalculatePdPmTask: Fetches ProviderRateDto and MonitorRateDto. 30s timeout, 10s per-request."
+      - id: compensation-workflow
+        type: sync
+        from: conductor
+        to: settlement-ep
+        method: POST
+        path: "settlement-compensation-workflow (4 steps)"
+        protocol: http
+        duration: 300
+        description: "Compensation saga: DetectSettlementFailureTask → CalculateCompensationTask → RequestCompensationApprovalTask (> $10K) → ProcessCompensationPaymentTask (idempotency keys)"
+      - id: reversal-workflow
+        type: sync
+        from: conductor
+        to: settlement-ep
+        method: POST
+        path: "settlement-compensation-reversal-workflow"
+        protocol: http
+        duration: 200
+        description: "Saga compensation: ReverseCompensationTask reverses payments on failure. Ensures financial consistency across the compensation pipeline."
+      - id: notify-compensation
+        type: sync
+        from: settlement-ep
+        to: comms-api
+        method: POST
+        path: "NotifyCompensationTask → ICommunicationsClient"
+        protocol: http
+        duration: 150
+        description: "Sends compensation notifications via Communications BC. Falls back to FailingCommunicationsClient when Services:Communications:BaseUrl is not configured."
+      - id: persist-results
+        type: sync
+        from: settlement-ep
+        to: settlement-db
+        method: POST
+        path: "CompleteSettlementBatchTask → SaveChangesAsync"
+        protocol: http
+        duration: 100
+        description: "Persists calculated BC/PD/PM totals, DriverPayment + ServiceProviderPayment + ClientInvoice entities, CompensationRecord tracking"
+
+    steps:
+      - id: workflow-step-1
+        title: "Settlement Calculation Workflow: 5-Step Pipeline"
+        narrative: >
+          The `settlement-calculation-workflow` (`src/workflows/settlement/settlement-calculation-workflow.json`)
+          orchestrates the core BC/PD/PM pipeline through 5 sequential Conductor tasks, each registered as a
+          worker in the Settlement Event Processor (`EventProcessor/Program.cs`):
+
+
+          Step 1: **CreateSettlementBatchTask** (`Application/Tasks/CreateSettlementBatchTask.cs`) — creates
+          **SettlementBatch** aggregate via `SettlementBatch.Create(tenantId, billingPeriodStart, billingPeriodEnd,
+          correlationId)`. Idempotent. 3 retries with exponential backoff (30s base, 2x multiplier).
+
+
+          Step 2: **FetchBookedTripsTask** (`Application/Tasks/FetchBookedTripsTask.cs`) — calls Trip Operations
+          via **SettlementTripHttpClient** with {color:green|full Polly resilience stack}: 3x exponential retry,
+          circuit breaker (5 failures in 30s window), jitter. Returns `BookedTripDto[]`. 300s timeout, 3 retries.
+
+
+          Step 3: **CalculateBcTask** (`Application/Tasks/CalculateBcTask.cs`) — fetches CTTC rates from Pricing
+          via **PricingHttpClient**, then invokes the 911-line **SettlementCalculationService.CalculateBc()**
+          for each trip. 600s timeout, 2 retries (fixed 30s backoff).
+
+
+          Step 4: **CalculatePdPmTask** (`Application/Tasks/CalculatePdPmTask.cs`) — fetches provider/monitor
+          rates via **ProviderNetworkHttpClient**, calls `CalculatePd()` + `CalculatePm()`. Creates
+          **DriverPayment** and **ServiceProviderPayment** entities. 600s timeout, 2 retries.
+
+
+          Step 5: **CompleteSettlementBatchTask** (`Application/Tasks/CompleteSettlementBatchTask.cs`) —
+          `batch.MarkAsCalculated()` with totals, raises **SettlementCalculatedEvent** via transactional outbox.
+          5 retries with exponential backoff.
+        activeCalls: [calc-workflow-start, fetch-trips-http, fetch-rates-http, fetch-provider-rates-http, persist-results]
+        revealNodes: [conductor, settlement-ep, trip-ops-api, pricing-api, provider-api, settlement-db]
+        duration: 7000
+      - id: workflow-step-2
+        title: "Cross-Context HTTP Client Resilience"
+        narrative: >
+          Settlement maintains {color:green|4 cross-context HTTP clients}, all registered with identical
+          Polly resilience configuration (`Infrastructure/DependencyInjection.cs`):
+
+
+          1. **IPricingClient** → `PricingHttpClient` — target: `http://pricing-api:8080`, timeout 30s (10s
+          per-request). Fetches `ContractRateDto` for BC calculation.
+
+
+          2. **ISettlementTripClient** → `SettlementTripHttpClient` — target: `http://trip-operations-api:8080`,
+          timeout 60s (30s per-request). Fetches `BookedTripDto[]` for billing period.
+
+
+          3. **IProviderNetworkClient** → `ProviderNetworkHttpClient` — target:
+          `http://provider-network-api:8080`, timeout 30s (10s per-request). Fetches `ProviderRateDto` and
+          `MonitorRateDto`.
+
+
+          4. **ICommunicationsClient** → `CommunicationsHttpClient` or **FailingCommunicationsClient** —
+          configurable base URL. {color:red|When `Services:Communications:UseStub=true` or URL empty, falls
+          back to FailingCommunicationsClient which silently drops all notification requests}.
+
+
+          All 4 clients include **TenantIdDelegatingHandler** (propagates `tenant_id` from JWT/scope) and
+          **CorrelationIdDelegatingHandler** (propagates correlation ID for distributed tracing). Polly policy:
+          retry 3x with exponential backoff + jitter, circuit breaker opens after 5 consecutive failures in 30s
+          window. {color:green|This matches the platform-wide HTTP client resilience standard established in R076}.
+        activeCalls: [fetch-trips-http, fetch-rates-http, fetch-provider-rates-http, notify-compensation]
+        revealNodes: [comms-api]
+        revealCalls: [calc-workflow-start, persist-results]
+        duration: 6000
+      - id: workflow-step-3
+        title: "Compensation & Reversal Sagas"
+        narrative: >
+          When settlement calculation fails or produces incorrect results, two additional Conductor workflows
+          handle financial recovery:
+
+
+          **settlement-compensation-workflow** (`src/workflows/settlement-compensation/settlement-compensation-workflow.json`)
+          is a 4-step saga:
+
+          1. **DetectSettlementFailureTask** — analyzes failed batches, identifies affected drivers, monitors, and clients
+
+          2. **CalculateCompensationTask** — calculates compensation amounts based on the failure type
+
+          3. **RequestCompensationApprovalTask** — creates an approval request for amounts exceeding $10K threshold
+
+          4. **ProcessCompensationPaymentTask** — processes compensation payments with {color:green|idempotency keys}
+          to prevent double-payment
+
+
+          **settlement-compensation-reversal-workflow** (`src/workflows/settlement-compensation/settlement-compensation-reversal-workflow.json`)
+          provides saga compensation: **ReverseCompensationTask** reverses payments when a downstream step fails.
+          This ensures {color:green|financial consistency} — if compensation approval is granted but payment
+          processing fails, the reversal workflow rolls back the approval and any partial payments.
+
+
+          {color:red|Risk: the CompensationRecord entity is declared as DbSet in SettlementDbContext but
+          the domain entity file was not found under Domain/Entities/ — it may be defined in shared infrastructure
+          or has a missing file}.
+
+
+          All 10 Conductor workers are registered in `EventProcessor/Program.cs` and use the platform's
+          **AsyncWorkerHost** pattern (bypasses Conductor SDK's synchronous threading model to prevent
+          thread pool starvation) with **WorkerIdempotencyService** for exactly-once processing.
+        activeCalls: [compensation-workflow, reversal-workflow, notify-compensation]
+        revealCalls: [fetch-trips-http, fetch-rates-http, fetch-provider-rates-http]
+        duration: 6000
+      - id: workflow-step-4
+        title: "Testing & Validation Coverage"
+        narrative: >
+          Settlement has comprehensive test coverage: **741 test methods** across **50 test files** in two
+          test projects:
+
+
+          **Catalyst.Settlement.Domain.Tests** (5 files, ~141 tests): `SettlementBatchTests` (27 tests covering
+          all state transitions), `ClientInvoiceTests`, `DriverPaymentTests`, `SettlementAdjustmentTests`,
+          `SettlementDisputeTests` — pure domain logic with no dependencies.
+
+
+          **Catalyst.Settlement.Tests** (~45 files, ~600 tests): 14 command handler tests (~135 tests),
+          6 query handler tests (~34 tests), 4 calculation engine tests (~154 tests covering BC, PD, PM, and
+          SpecialScenarios), 6 Conductor task worker tests (~83 tests), 6 integration tests (~112 tests),
+          1 cross-context test (PricingHttpClient, 15 tests), 1 serialization test (EnumSerialization, 14 tests).
+
+
+          {color:green|The 154 calculation engine tests are the most critical} — they validate the BC/PD/PM
+          formulas across all 6 `TripSettlementStatus` values (Completed, NoShow, Cancelled, RescueTrip,
+          SplitTrip, SameDayChange) with edge cases like minimum charge enforcement, overtime thresholds,
+          split-trip proportional distribution, and rescue driver portion splits.
+
+
+          {color:red|The service-readiness-audit rated Settlement as STUB — this is outdated. With 30 HTTP
+          endpoints, 15 command handlers, 7 query handlers, 911-line calculation service, 10 Conductor workers,
+          transactional outbox, and 741 tests, Settlement is functionally PRODUCTION-ready. The only gap is the
+          Communications stub fallback}.
+        activeCalls: []
+        revealCalls: [compensation-workflow, reversal-workflow, notify-compensation]
+        duration: 5000

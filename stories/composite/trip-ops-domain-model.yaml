@@ -1,0 +1,586 @@
+id: trip-ops-domain-model
+title: "Trip Operations — Domain Model & Execution Paths"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  The internal architecture of Trip Operations' domain layer — 5 aggregates,
+  3 state machines, 30+ events — traced through three service-flow perspectives:
+  aggregate topology (how data flows between aggregates), the revenue
+  denormalization pipeline (how settlement data propagates), and the dual CQRS +
+  Conductor execution model (sync vs async).
+
+sections:
+  # ── Section 1: Aggregate Topology ─────────────────────────────────────
+  - renderer: service-flow
+    title: "Aggregate Topology"
+    accentColor: "#059669"
+    layout: sequence
+
+    services:
+      - id: sgr
+        name: "ScheduledGenerationRun"
+        type: workflow
+        technology: "5-state machine"
+        status: healthy
+      - id: sr
+        name: "SubscriptionRun"
+        type: api
+        technology: "Recurring Route Template"
+        status: healthy
+        version: "v1"
+      - id: st
+        name: "SubscriptionTrip"
+        type: worker
+        technology: "Entity (child of SR)"
+        status: healthy
+      - id: vr
+        name: "VehicleRun"
+        type: api
+        technology: "16-State Machine"
+        status: healthy
+        version: "v1"
+        tags:
+          states: "16"
+          events: "12"
+      - id: pt
+        name: "PassengerTrip"
+        type: api
+        technology: "16-State Machine"
+        status: healthy
+        version: "v1"
+        tags:
+          states: "16"
+          events: "8"
+      - id: stop-vo
+        name: "Stop (Value Object)"
+        type: worker
+        technology: "Immutable record"
+        status: healthy
+      - id: gps
+        name: "GpsLocation"
+        type: database
+        technology: "PostGIS Point SRID 4326"
+        status: healthy
+      - id: incident
+        name: "TripIncident"
+        type: external
+        technology: "4-state lifecycle"
+        status: healthy
+
+    zones:
+      - id: generation
+        label: "Generation Domain"
+        members: [sgr, sr, st]
+        color: "rgba(245, 158, 11, 0.06)"
+      - id: operations
+        label: "Operations Domain"
+        members: [vr, pt, stop-vo, gps]
+        color: "rgba(34, 197, 94, 0.06)"
+      - id: safety
+        label: "Safety Domain"
+        members: [incident]
+        color: "rgba(239, 68, 68, 0.06)"
+
+    calls:
+      - id: sgr-reads-sr
+        type: sync
+        from: sgr
+        to: sr
+        method: QUERY
+        path: "GetActiveForDate(targetDate) + DaysOfWeekBitmask"
+        duration: 50
+        description: "SGR pipeline reads active SubscriptionRuns matching target date's day-of-week"
+      - id: sr-owns-st
+        type: sync
+        from: sr
+        to: st
+        method: OWNS
+        path: "OwnsMany — N SubscriptionTrips per SR"
+        duration: 1
+        description: "Each SR contains pickup/dropoff templates for recurring students"
+      - id: sgr-creates-vr
+        type: sync
+        from: sgr
+        to: vr
+        method: CREATE
+        path: "1:1 from SR — VR in NEW state"
+        duration: 100
+        description: "Each active SR produces exactly one VR with placeholder stops"
+      - id: sgr-creates-pt
+        type: sync
+        from: sgr
+        to: pt
+        method: CREATE
+        path: "N per VR from STs — TripOrigin.ScheduledGeneration"
+        duration: 200
+        description: "Each SubscriptionTrip becomes a PassengerTrip linked to the VR"
+      - id: vr-owns-stops
+        type: sync
+        from: vr
+        to: stop-vo
+        method: OWNS
+        path: "JSONB collection — WithPassengerTripId() back-patching"
+        duration: 1
+        description: "VR contains an ordered list of Stop VOs (immutable records, 8-state micro-machine)"
+      - id: pt-links-stop
+        type: sync
+        from: pt
+        to: stop-vo
+        method: LINKS
+        path: "Stop.PassengerTripId → PT.Id"
+        duration: 1
+        description: "Each Stop references its corresponding PT for state synchronization"
+      - id: vr-tracks-gps
+        type: async
+        from: vr
+        to: gps
+        messageType: "GpsLocationInsert"
+        payload:
+          method: INSERT
+          path: "30s GPS cadence — geometry(Point, 4326)"
+          description: "GPS telemetry persisted to PostGIS with GIST index during active route"
+      - id: vr-reports-incident
+        type: async
+        from: vr
+        to: incident
+        messageType: "TripIncidentReportedEvent"
+        payload:
+          method: CREATE
+          path: "ReportIncidentCommand — ACCIDENT, MECHANICAL, MEDICAL, BEHAVIORAL"
+          description: "In-transit safety events linked to the active VR"
+
+    steps:
+      - id: topo-templates
+        title: "Generation Domain — Templates"
+        narrative: >
+          **ScheduledGenerationRun** (5-state machine: `Queued`→`Running`→`Completed`/`Failed`/`Cancelled`)
+          orchestrates the nightly pipeline. **SubscriptionRun** holds the recurring route
+          template with `DaysOfWeekBitmask` (M=1, T=2, W=4, Th=8, F=16). Each
+          **SubscriptionTrip** within the SR defines a single student's pickup/dropoff
+          coordinates.
+        activeCalls: [sgr-reads-sr, sr-owns-st]
+        revealNodes: [sgr, sr, st]
+        focusNodes: [sgr, sr, st]
+        duration: 4500
+
+      - id: topo-creation
+        title: "Templates → Trips"
+        narrative: >
+          The SGR pipeline reads active SRs, creates **VehicleRuns** (1:1 from SRs) and
+          **PassengerTrips** from STs (N per VR). Each VR enters `NEW` state with
+          placeholder stops. Each PT enters `NEW` with `TripOrigin.ScheduledGeneration`.
+          This is the birth of every trip in the system.
+        activeCalls: [sgr-creates-vr, sgr-creates-pt]
+        revealNodes: [vr, pt]
+        focusNodes: [sgr, vr, pt]
+        revealCalls: [sgr-reads-sr, sr-owns-st]
+        duration: 4500
+
+      - id: topo-operations
+        title: "Operations Domain — VR/PT Composition"
+        narrative: >
+          **VehicleRun** contains a JSONB collection of **Stop** value objects — immutable
+          records with an 8-state micro-machine (`SCHEDULED`→`TOPU`→`ATPU`→`TODO`→`ATDO`→
+          `COMPLETED`|`NOSHOW`|`CANCELLED`). Each Stop links to a **PassengerTrip** via
+          `Stop.PassengerTripId`. **GpsLocation** telemetry flows to PostGIS every 30 seconds
+          during the active route phase.
+        activeCalls: [vr-owns-stops, pt-links-stop, vr-tracks-gps]
+        revealNodes: [stop-vo, gps]
+        focusNodes: [vr, stop-vo, pt]
+        revealCalls: [sgr-creates-vr, sgr-creates-pt]
+        duration: 5000
+
+      - id: topo-safety
+        title: "Safety Domain & Complete Graph"
+        narrative: >
+          **TripIncident** captures in-transit safety events: `ACCIDENT`, `MECHANICAL`,
+          `MEDICAL`, `BEHAVIORAL`. `CRITICAL` severity triggers PagerDuty. GPS captured
+          at the incident location. The complete graph spans 3 sub-domains — generation,
+          operations, and safety. 5 aggregates, 6 entities, 4 value objects, 3 state machines,
+          15 enums — the largest domain model in Catalyst.
+        activeCalls: [vr-reports-incident]
+        revealNodes: [incident]
+        focusNodes: [vr, incident]
+        revealCalls: [vr-owns-stops, pt-links-stop, vr-tracks-gps]
+        duration: 4500
+
+      - id: topo-bridge
+        title: "Data That Makes Money"
+        narrative: >
+          The aggregate topology shows structure. But one data flow matters more than any
+          other: how `DriverId`, `ServiceProviderId`, and `MonitorId` propagate from VR
+          assignment through PT denormalization to the **PtDroppedOffEvent** that triggers
+          settlement.
+        activeCalls: []
+        focusNodes: [vr, pt]
+        duration: 3000
+
+  # ── Section 2: Revenue Denormalization Pipeline ────────────────────────
+  - renderer: service-flow
+    title: "Revenue Denormalization"
+    accentColor: "#F59E0B"
+    layout: sequence
+
+    services:
+      - id: assignment-bc
+        name: "Assignment BC"
+        type: external
+        technology: "Upstream"
+        status: healthy
+      - id: trip-ops-ep
+        name: "Trip Operations EP"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: vr-agg
+        name: "VehicleRun Aggregate"
+        type: api
+        technology: "ReserveVr()"
+        status: healthy
+        version: "v1"
+      - id: pt-agg
+        name: "PassengerTrip Aggregate"
+        type: api
+        technology: "UpdateSettlementData()"
+        status: healthy
+        version: "v1"
+      - id: trip-db
+        name: "trip_operations DB"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: outbox
+        name: "outbox_messages"
+        type: database
+        technology: "Same transaction"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "trip-operations topic"
+        status: healthy
+      - id: settlement-ep
+        name: "Settlement EP"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+
+    zones:
+      - id: denorm-zone
+        label: "Denormalization Path"
+        members: [trip-ops-ep, vr-agg, pt-agg, trip-db]
+        color: "rgba(245, 158, 11, 0.06)"
+      - id: delivery-zone
+        label: "Guaranteed Delivery"
+        members: [outbox, asb, settlement-ep]
+        color: "rgba(234, 179, 8, 0.06)"
+
+    calls:
+      - id: assign-event
+        type: subscribe
+        from: assignment-bc
+        to: trip-ops-ep
+        messageType: "TripAssignedEvent"
+        action: "DriverId + ServiceProviderId + MonitorId arrive from Assignment"
+      - id: reserve-vr
+        type: sync
+        from: trip-ops-ep
+        to: vr-agg
+        method: INVOKE
+        path: "ReserveVr(driverId, vehicleId, monitorId)"
+        duration: 10
+        description: "VR stores DriverId, ServiceProviderId, MonitorId at assignment time"
+      - id: copy-to-pt
+        type: sync
+        from: trip-ops-ep
+        to: pt-agg
+        method: INVOKE
+        path: "UpdateSettlementData() — copies from parent VR"
+        duration: 5
+        description: "Each PT denormalizes DriverId, ServiceProviderId, MonitorId from its VR"
+      - id: persist-denorm
+        type: sync
+        from: trip-ops-ep
+        to: trip-db
+        method: COMMIT
+        path: "VR + PTs with denormalized settlement IDs"
+        duration: 15
+        description: "Atomic persist of denormalized data across VR and all child PTs"
+      - id: dropoff-fires
+        type: sync
+        from: pt-agg
+        to: outbox
+        method: INSERT
+        path: "PtDroppedOffEvent(DriverId, ServiceProviderId, MonitorId)"
+        duration: 2
+        description: "Revenue-critical event written in same transaction as PT state change"
+      - id: relay-asb
+        type: publish
+        from: outbox
+        to: asb
+        messageType: "PtDroppedOffEvent"
+        payload:
+          data: "Self-contained: DriverId + ServiceProviderId + MonitorId + StudentId + times + GPS"
+      - id: settlement-calc
+        type: subscribe
+        from: asb
+        to: settlement-ep
+        messageType: "PtDroppedOffEvent"
+        action: "BC/PD/PM — zero cross-service queries needed"
+
+    steps:
+      - id: denorm-origin
+        title: "Settlement Data Arrives"
+        narrative: >
+          When Assignment BC pairs a driver to a VR, it publishes **TripAssignedEvent**
+          carrying `DriverId`, `ServiceProviderId`, and `MonitorId`. Trip Operations' EP
+          handler calls `VehicleRun.ReserveVr()` to store these identifiers on the
+          aggregate (`NEW`→`RESERVED`). This is the origin of all settlement data.
+        activeCalls: [assign-event, reserve-vr]
+        revealNodes: [assignment-bc, trip-ops-ep, vr-agg]
+        focusNodes: [assignment-bc, trip-ops-ep, vr-agg]
+        duration: 4500
+
+      - id: denorm-copy
+        title: "VR → PT Denormalization"
+        narrative: >
+          `UpdateSettlementData()` copies `DriverId`, `ServiceProviderId`, and `MonitorId`
+          from the parent VR to each child PT. This denormalization is intentional — when
+          the PT fires **PtDroppedOffEvent** hours later, it must carry all settlement
+          identifiers without querying the VR or any upstream BC. Atomic commit persists
+          VR + all PTs in a single PostgreSQL transaction.
+        activeCalls: [copy-to-pt, persist-denorm]
+        revealNodes: [pt-agg, trip-db]
+        focusNodes: [trip-ops-ep, pt-agg, trip-db]
+        revealCalls: [assign-event, reserve-vr]
+        duration: 5000
+
+      - id: denorm-fire
+        title: "The Revenue Event"
+        narrative: >
+          Hours later, `PassengerTrip.DropOffPassenger()` fires **PtDroppedOffEvent** with
+          denormalized `DriverId`, `ServiceProviderId`, `MonitorId`, plus `StudentId`,
+          times, and GPS. Written to `outbox_messages` in the same transaction as the PT
+          state change (`ATDO`→`POSTSERVICE`). {color:green|The event is now durable — it
+          survives crashes, restarts, and network partitions.}
+        activeCalls: [dropoff-fires, relay-asb]
+        revealNodes: [outbox, asb]
+        focusNodes: [pt-agg, outbox, asb]
+        revealCalls: [copy-to-pt, persist-denorm]
+        duration: 5000
+
+      - id: denorm-settle
+        title: "Settlement — Zero Cross-Service Queries"
+        narrative: >
+          Settlement EP receives **PtDroppedOffEvent** and calculates **BC/PD/PM** — Bill
+          Client (district invoice), Pay Driver (driver compensation), Pay Monitor (ride
+          monitor pay). Every identifier Settlement needs is in the event payload. No HTTP
+          call to Trip Operations, no database query to Assignment. {color:green|One atomic
+          event, complete settlement data, zero coupling.}
+        activeCalls: [settlement-calc]
+        revealNodes: [settlement-ep]
+        focusNodes: [asb, settlement-ep]
+        revealCalls: [dropoff-fires, relay-asb]
+        duration: 4500
+
+      - id: denorm-bridge
+        title: "Two Execution Models"
+        narrative: >
+          Settlement flows are reactive and event-driven. But Trip Operations also runs
+          proactive, long-running batch work — nightly SGR generation, compensation
+          workflows, multi-step rescue. ADR-008 resolves this tension: two execution paths,
+          chosen by a single decision rule.
+        activeCalls: []
+        focusNodes: [vr-agg, pt-agg]
+        duration: 3000
+
+  # ── Section 3: Dual CQRS + Conductor Execution ────────────────────────
+  - renderer: service-flow
+    title: "Dual Execution Model (ADR-008)"
+    accentColor: "#A855F7"
+    layout: sequence
+
+    services:
+      - id: driver-app
+        name: "Driver MDD"
+        type: external
+        technology: "Mobile"
+        status: healthy
+      - id: trip-api
+        name: "Trip Operations API"
+        type: api
+        technology: ".NET 10"
+        status: healthy
+        version: "v1"
+      - id: mediatr
+        name: "MediatR Pipeline"
+        type: worker
+        technology: "ICommandHandler<T>"
+        status: healthy
+      - id: domain-agg
+        name: "Domain Aggregate"
+        type: api
+        technology: "Guard → Mutate → Event"
+        status: healthy
+      - id: trip-db
+        name: "trip_operations DB"
+        type: database
+        technology: "PostgreSQL"
+        status: healthy
+      - id: conductor
+        name: "Conductor Server"
+        type: workflow
+        technology: "Orkes Conductor"
+        status: healthy
+        tags:
+          workers: "22"
+      - id: task-workers
+        name: "22 Task Workers"
+        type: worker
+        technology: "IWorkflowTask"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "trip-operations"
+        status: healthy
+
+    zones:
+      - id: sync-zone
+        label: "Sync Path — MediatR"
+        members: [driver-app, trip-api, mediatr, domain-agg, trip-db]
+        color: "rgba(34, 197, 94, 0.06)"
+      - id: async-zone
+        label: "Async Path — Conductor"
+        members: [conductor, task-workers]
+        color: "rgba(168, 85, 247, 0.06)"
+
+    calls:
+      - id: sync-request
+        type: sync
+        from: driver-app
+        to: trip-api
+        method: POST
+        path: "v1/pt/{id}/board (or /dropoff, /start, /arrive)"
+        protocol: http
+        duration: 35
+        status: 200
+        description: "Real-time state transition — driver needs instant confirmation"
+      - id: sync-dispatch
+        type: sync
+        from: trip-api
+        to: mediatr
+        method: DISPATCH
+        path: "BoardPtCommand / DropOffPtCommand / StartVrCommand"
+        duration: 1
+        description: "MediatR dispatches to the registered ICommandHandler<T>"
+      - id: sync-domain
+        type: sync
+        from: mediatr
+        to: domain-agg
+        method: INVOKE
+        path: "ValidateTransition() → Mutate → RaiseDomainEvent()"
+        duration: 1
+        description: "The canonical Guard → Mutate → Event pattern in the aggregate"
+      - id: sync-persist
+        type: sync
+        from: mediatr
+        to: trip-db
+        method: COMMIT
+        path: "State + outbox_messages (atomic)"
+        duration: 8
+        description: "SaveChangesAsync writes domain state and outbox events in one transaction"
+      - id: sync-publish
+        type: publish
+        from: trip-db
+        to: asb
+        messageType: "PtBoardedEvent / PtDroppedOffEvent / VrStartedEvent"
+        payload:
+          data: "Outbox relay publishes asynchronously"
+      - id: async-trigger
+        type: sync
+        from: trip-api
+        to: conductor
+        method: POST
+        path: "sgr-generation-workflow (returns workflow ID)"
+        protocol: http
+        duration: 100
+        status: 202
+        description: "HTTP 202 — workflow ID returned immediately, execution is async"
+      - id: async-orchestrate
+        type: sync
+        from: conductor
+        to: task-workers
+        method: POLL
+        path: "CreateSgrInstanceTask → GenerateSubscriptionTripsTask → CompleteSgrTask → PublishSgrCompletionTask"
+        duration: 600000
+        description: "4 sequential tasks, 22 registered workers, 5-10 min for 500K daily trips"
+      - id: async-publish
+        type: publish
+        from: task-workers
+        to: asb
+        messageType: "SgrCompletedEvent + VrCreatedEvent + PtCreatedEvent"
+        payload:
+          data: "Batch events published on completion"
+
+    steps:
+      - id: dual-decision
+        title: "The Decision Rule"
+        narrative: >
+          Use **MediatR** when ALL apply: completes within HTTP timeout (~30s), immediate
+          response required, rollback is database-only. Use **Conductor** when ANY apply:
+          may exceed timeout, multi-step with compensation, progress visibility required.
+          This decision rule governs every command handler in Trip Operations.
+        activeCalls: []
+        revealNodes: [trip-api]
+        focusNodes: [trip-api]
+        duration: 4000
+
+      - id: dual-sync-request
+        title: "Sync Path — HTTP Request"
+        narrative: >
+          Driver boards a student: `POST v1/pt/{id}/board`. MediatR dispatches
+          `BoardPtCommand` to the registered handler. The handler loads the
+          **PassengerTrip** aggregate from the repository.
+        activeCalls: [sync-request, sync-dispatch]
+        revealNodes: [driver-app, mediatr]
+        focusNodes: [driver-app, trip-api, mediatr]
+        duration: 3500
+
+      - id: dual-sync-domain
+        title: "Sync Path — Guard → Mutate → Event"
+        narrative: >
+          `BoardPassenger()` validates `ATPU`→`ONBOARD` via `PtStateMachine`, sets status,
+          raises **PtBoardedEvent**. `SaveChangesAsync` writes state + outbox atomically.
+          HTTP 200 returns. The driver's MDD shows instant confirmation. ~35ms total.
+        activeCalls: [sync-domain, sync-persist, sync-publish]
+        revealNodes: [domain-agg, trip-db, asb]
+        focusNodes: [mediatr, domain-agg, trip-db]
+        revealCalls: [sync-request, sync-dispatch]
+        duration: 4500
+
+      - id: dual-async
+        title: "Async Path — Conductor Batch"
+        narrative: >
+          Nightly SGR generation: `POST v1/sgr/trigger` returns HTTP 202 with a workflow ID.
+          Conductor dispatches 4 sequential tasks to 22 workers. For 500K daily trips, this
+          runs 5-10 minutes. Progress visible in Conductor UI. On failure, compensation
+          transitions SGR to `Failed` and fires **SgrFailedEvent** →
+          {color:red|Monitoring P1 alert.}
+        activeCalls: [async-trigger, async-orchestrate, async-publish]
+        revealNodes: [conductor, task-workers]
+        focusNodes: [trip-api, conductor, task-workers]
+        revealCalls: [sync-request, sync-dispatch, sync-domain, sync-persist, sync-publish]
+        duration: 5500
+
+      - id: dual-complete
+        title: "Both Patterns, One BC"
+        narrative: >
+          During the day: hundreds of MediatR commands per minute. At night: Conductor
+          creates tomorrow's trips. The real-time path is never delayed by batch workload.
+          This dual pattern is validated by ADR-008 and standard across Trip Operations,
+          Rescue Orchestration, and Identity & Access.
+        activeCalls: [sync-request, sync-domain, sync-persist, async-trigger, async-orchestrate]
+        focusNodes: [trip-api, mediatr, conductor]
+        revealCalls: [sync-request, sync-dispatch, sync-domain, sync-persist, sync-publish]
+        duration: 4500

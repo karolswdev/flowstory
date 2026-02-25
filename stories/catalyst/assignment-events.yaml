@@ -1,0 +1,422 @@
+id: assignment-events
+title: "Assignment — Event-Driven Integration"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  Inbound event triggers that feed the assignment engine (TripPricedEvent,
+  SgrCompletedEvent, provider status changes) and outbound events that drive
+  Trip Operations VR reservation, override/reassign/swap workflows, and
+  the transactional outbox guarantee.
+
+sections:
+  # ── Section 1: Inbound Event Triggers ───────────────────────────────────────
+  - renderer: service-flow
+    title: "Inbound Event Triggers"
+    accentColor: "#A855F7"
+    layout: sequence
+
+    services:
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+      - id: assignment-ep
+        name: "Assignment Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: assignment-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: assignment-api
+        name: "Assignment API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: redis
+        name: "Redis"
+        type: cache
+        technology: "Redis 7"
+        status: healthy
+      - id: conductor
+        name: "Conductor"
+        type: workflow
+        technology: "Orkes Conductor"
+        status: healthy
+
+    zones:
+      - id: event-sources
+        label: "3 ASB Topic Subscriptions"
+        members: [asb]
+        color: "rgba(168, 85, 247, 0.06)"
+      - id: assignment-core
+        label: "Assignment BC"
+        members: [assignment-ep, assignment-api, assignment-db, redis]
+        color: "rgba(59, 130, 246, 0.06)"
+      - id: orchestration
+        label: "Orchestration"
+        members: [conductor]
+        color: "rgba(34, 197, 94, 0.06)"
+
+    calls:
+      - id: trip-priced-event
+        type: subscribe
+        from: asb
+        to: assignment-ep
+        messageType: "TripPricedEvent"
+        action: "routing-and-pricing topic / assignment-routing-subscriber — triggers auto-assignment"
+      - id: sgr-completed-event
+        type: subscribe
+        from: asb
+        to: conductor
+        messageType: "SgrCompletedEvent"
+        action: "trip-operations topic — triggers daily-trip-assignment-workflow"
+      - id: provider-verified
+        type: subscribe
+        from: asb
+        to: assignment-ep
+        messageType: "ProviderVerifiedEvent"
+        action: "provider-network-and-assignment / assignment-event-processor — creates/updates EligibleProvider projection"
+      - id: vehicle-registered
+        type: subscribe
+        from: asb
+        to: assignment-ep
+        messageType: "VehicleRegisteredEvent"
+        action: "Creates/updates AssignableVehicle projection with capacity, wheelchair, driver assignment"
+      - id: credential-expired
+        type: subscribe
+        from: asb
+        to: assignment-ep
+        messageType: "CredentialExpiredEvent"
+        action: "Marks EligibleProvider.IsEligible = false — immediately removes from matching pool"
+      - id: provider-terminated
+        type: subscribe
+        from: asb
+        to: assignment-ep
+        messageType: "ServiceProviderTerminatedEvent"
+        action: "R076 handler — marks provider ineligible, triggers reassignment of active assignments"
+      - id: vehicle-decommissioned
+        type: subscribe
+        from: asb
+        to: assignment-ep
+        messageType: "VehicleDecommissionedEvent"
+        action: "R076 handler — marks vehicle unavailable in AssignableVehicle projection"
+      - id: availability-changed
+        type: subscribe
+        from: asb
+        to: assignment-ep
+        messageType: "AvailabilityChangedEvent"
+        action: "R076 handler — updates provider availability window"
+      - id: driver-verified
+        type: subscribe
+        from: asb
+        to: assignment-ep
+        messageType: "DriverVerifiedEvent"
+        action: "compliance-and-eligibility / assignment-compliance-subscriber — refreshes driver eligibility"
+      - id: dispatch-command
+        type: sync
+        from: assignment-ep
+        to: assignment-api
+        method: POST
+        path: "MediatR dispatch — AssignTripCommand"
+        protocol: http
+        duration: 150
+        description: "TripPricedEventHandler dispatches AssignTripCommand through MediatR pipeline"
+      - id: update-projection
+        type: sync
+        from: assignment-ep
+        to: assignment-db
+        method: POST
+        path: "eligible_providers / assignable_vehicles — upsert projection"
+        duration: 20
+        description: "Event handlers maintain local read model projections for matching engine"
+      - id: batch-workflow
+        type: sync
+        from: conductor
+        to: assignment-api
+        method: POST
+        path: /v1/assignments/batch
+        protocol: http
+        duration: 200
+        status: 200
+        description: "daily-trip-assignment-workflow creates batch operation"
+        response:
+          status: 200
+          label: "Batch initiated"
+
+    steps:
+      - id: inbound-step-1
+        title: "Auto-Assignment Trigger: TripPricedEvent"
+        narrative: >
+          **TripPricedEvent** arrives on the `routing-and-pricing` topic via the
+          `assignment-routing-subscriber` subscription. This is the primary trigger
+          for single-trip auto-assignment. **TripPricedEventHandler** extracts the
+          tripId and pricing data, then dispatches **AssignTripCommand** through MediatR.
+          Idempotency is handled at the command level — if a TripAssignment already
+          exists for the tripId, the handler returns without side effects. The
+          `auto-assignment-enabled` LaunchDarkly feature flag gates per-tenant rollout.
+          When disabled, the trip enters the unassigned queue for manual dispatch.
+        activeCalls: [trip-priced-event, dispatch-command]
+        revealNodes: [asb, assignment-ep, assignment-api]
+        duration: 5000
+      - id: inbound-step-2
+        title: "Batch Trigger: SgrCompletedEvent"
+        narrative: >
+          **SgrCompletedEvent** from Trip Operations signals that nightly SGR generation
+          is complete — VRs and PTs are created, ready for driver matching.
+          Conductor's `daily-trip-assignment-workflow` activates with 13 task workers:
+          **CreateAssignmentBatchTask**, **LoadUnassignedTripsTask**,
+          **LoadAvailableProvidersTask**, **MatchTripsToProvidersTask**,
+          **OptimizeRoutesTask**, **CreateVehicleRunsTask**, **AssignTripsToVrsTask**,
+          **NotifyDriversParallelTask**, **EscalateUnassignedTripsTask**,
+          **NotifyDispatchUnassignedTask**, **EscalateNoProvidersTask**,
+          **FinalizeBatchTask**, **PublishBatchCompletionEventTask**. Compensation
+          workflow handles rollback if the pipeline fails mid-execution.
+        activeCalls: [sgr-completed-event, batch-workflow]
+        revealNodes: [conductor]
+        revealCalls: [trip-priced-event, dispatch-command]
+        duration: 5000
+      - id: inbound-step-3
+        title: "Provider Projection Maintenance"
+        narrative: >
+          Six event handlers maintain local read model projections that the matching
+          engine queries instead of making cross-service HTTP calls. **ProviderVerifiedEvent**
+          creates/updates **EligibleProvider** (259L entity with service area coverage,
+          credential validity, provider type). **VehicleRegisteredEvent** and
+          **VehicleAssignedToDriverEvent** maintain **AssignableVehicle** (329L entity
+          with capacity, wheelchair accessibility, driver assignment windows).
+          **CredentialExpiredEvent** immediately sets `IsEligible = false` — the provider
+          drops from the matching pool until re-verified. All handlers are decorated with
+          **DecorateEventHandlerWithMetrics** for Prometheus observability.
+        activeCalls: [provider-verified, vehicle-registered, credential-expired, update-projection]
+        revealNodes: [assignment-db]
+        revealCalls: [sgr-completed-event, batch-workflow]
+        duration: 6000
+      - id: inbound-step-4
+        title: "R076 Real-Time Constraint Refresh"
+        narrative: >
+          Four R076 handlers react to provider lifecycle changes in real time.
+          **ServiceProviderActivatedEvent** adds a new provider to the eligible pool.
+          **ServiceProviderTerminatedEvent** marks the provider ineligible and triggers
+          bulk reassignment of their active assignments via **ReassignFromProviderCommand**.
+          **VehicleDecommissionedEvent** marks the vehicle unavailable in the
+          **AssignableVehicle** projection. **AvailabilityChangedEvent** updates the
+          provider's availability window — affecting future matching but not existing
+          confirmed assignments. **DriverVerifiedEvent** (from `compliance-and-eligibility`
+          topic) refreshes driver eligibility after background check completion. These
+          11 inbound handlers across 3 ASB topic subscriptions keep the local projections
+          consistent without direct database coupling to Provider Network or Compliance BCs.
+        activeCalls: [provider-terminated, vehicle-decommissioned, availability-changed, driver-verified]
+        revealNodes: [redis]
+        revealCalls: [provider-verified, vehicle-registered, credential-expired, update-projection]
+        duration: 5000
+
+  # ── Section 2: Outbound Events & Trip Operations Integration ────────────────
+  - renderer: service-flow
+    title: "Outbound Events & Trip Operations Integration"
+    accentColor: "#EF4444"
+    layout: sequence
+
+    services:
+      - id: assignment-api
+        name: "Assignment API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: assignment-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+      - id: trip-ops-ep
+        name: "Trip Operations EP"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: comms-ep
+        name: "Communications EP"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: monitoring-ep
+        name: "Monitoring EP"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: settlement-ep
+        name: "Settlement EP"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: compliance-ep
+        name: "Compliance EP"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+
+    zones:
+      - id: assignment-core
+        label: "Assignment BC (Outbox Publisher)"
+        members: [assignment-api, assignment-db]
+        color: "rgba(239, 68, 68, 0.06)"
+      - id: event-fanout
+        label: "Event Fanout"
+        members: [asb]
+        color: "rgba(168, 85, 247, 0.06)"
+      - id: consumers
+        label: "5 Downstream Consumers"
+        members: [trip-ops-ep, comms-ep, monitoring-ep, settlement-ep, compliance-ep]
+        color: "rgba(34, 197, 94, 0.06)"
+
+    calls:
+      - id: outbox-write
+        type: sync
+        from: assignment-api
+        to: assignment-db
+        method: POST
+        path: "assignment.outbox_messages — domain events in same transaction"
+        duration: 30
+        description: "Transactional outbox: events written BEFORE SaveChangesAsync in same DB transaction"
+      - id: outbox-relay
+        type: publish
+        from: assignment-db
+        to: asb
+        messageType: "11 domain event types via outbox relay"
+        payload:
+          description: "Poll 5s, batch 100, 5 retries, 7-day retention. Published to provider-network-and-assignment topic."
+      - id: trip-assigned-consume
+        type: subscribe
+        from: asb
+        to: trip-ops-ep
+        messageType: "TripAssignedEvent"
+        action: "Reserve VR — POST /v1/vr/{id}/reserve with driverId, vehicleId, monitorId"
+      - id: confirmed-consume
+        type: subscribe
+        from: asb
+        to: trip-ops-ep
+        messageType: "AssignmentConfirmedEvent"
+        action: "Update VR status — confirm driver/vehicle pairing on the VehicleRun"
+      - id: dispatched-consume
+        type: subscribe
+        from: asb
+        to: trip-ops-ep
+        messageType: "AssignmentDispatchedEvent"
+        action: "Dispatch VR — triggers offer workflow (RESERVED -> OFFERQUEUED -> OFFERSENT)"
+      - id: reassigned-consume
+        type: subscribe
+        from: asb
+        to: trip-ops-ep
+        messageType: "AssignmentReassignedEvent"
+        action: "Update VR — swap driver/vehicle on existing VehicleRun"
+      - id: swapped-consume
+        type: subscribe
+        from: asb
+        to: trip-ops-ep
+        messageType: "AssignmentsSwappedEvent"
+        action: "Update both VRs — cross-swap driver/vehicle pairs"
+      - id: comms-notify
+        type: subscribe
+        from: asb
+        to: comms-ep
+        messageType: "TripAssignedEvent + AssignmentConfirmedEvent + AssignmentReassignedEvent"
+        action: "Notify provider (push), parent (SMS) — different templates per event type"
+      - id: monitoring-track
+        type: subscribe
+        from: asb
+        to: monitoring-ep
+        messageType: "AssignmentRejectedEvent + BatchAssignmentCompletedEvent"
+        action: "Track rejection rates, batch success metrics, create exceptions for failures"
+      - id: compliance-audit
+        type: subscribe
+        from: asb
+        to: compliance-ep
+        messageType: "AssignmentOverriddenEvent"
+        action: "Audit trail — records which constraints were bypassed and by whom"
+      - id: settlement-complete
+        type: subscribe
+        from: asb
+        to: settlement-ep
+        messageType: "AssignmentCompletedEvent"
+        action: "Trigger BC/PD/PM settlement calculation for completed assignment"
+      - id: override-persist
+        type: sync
+        from: assignment-api
+        to: assignment-db
+        method: POST
+        path: "trip_assignments — OverrideRecord VO stored as JSON, PreviousAssignmentId chain"
+        duration: 25
+        description: "Override/reassign/swap create OverrideRecord with Type, Reason, BypassedConstraints, before/after IDs"
+      - id: reassign-cmd
+        type: sync
+        from: assignment-api
+        to: assignment-db
+        method: POST
+        path: "ReassignAssignmentCommand — creates NEW TripAssignment, links via PreviousAssignmentId"
+        duration: 40
+        description: "Reassignment always creates a new assignment (audit trail). Old assignment -> Reassigned, new -> Proposed."
+
+    steps:
+      - id: outbound-step-1
+        title: "Transactional Outbox & 11 Event Types"
+        narrative: >
+          Assignment BC publishes 11 domain event types through the **transactional outbox**
+          pattern. **AssignmentDbContext** implements `IOutboxDbContext` — domain events are
+          written to `assignment.outbox_messages` in the same PostgreSQL transaction as the
+          aggregate state change. The outbox relay polls every 5 seconds, processes batches
+          of 100, retries up to 5 times, and retains messages for 7 days. Events published
+          to the `provider-network-and-assignment` ASB topic: **TripAssignedEvent** (on creation),
+          **AssignmentConfirmedEvent** (Proposed -> Confirmed), **AssignmentDispatchedEvent**
+          (Confirmed -> Dispatched), **AssignmentCompletedEvent** (Dispatched -> Completed),
+          **AssignmentReassignedEvent**, **AssignmentRejectedEvent**, **AssignmentOverriddenEvent**,
+          **AssignmentsSwappedEvent**, **BatchAssignmentCompletedEvent**,
+          **BatchConfirmationCompletedEvent**, **DailyAssignmentBatchCompletedEvent**.
+          {color:red|Note: TripAssignment.Cancel() does NOT raise a domain event — cancellation is passive.}
+        activeCalls: [outbox-write, outbox-relay]
+        revealNodes: [assignment-api, assignment-db, asb]
+        duration: 5000
+      - id: outbound-step-2
+        title: "Trip Operations VR Reservation Chain"
+        narrative: >
+          Trip Operations is the primary consumer of assignment events — 5 event types
+          drive VR lifecycle transitions. **TripAssignedEvent** triggers VR reservation
+          (`POST /v1/vr/{id}/reserve` with driverId, vehicleId, monitorId — VR transitions
+          `NEW` -> `RESERVED`). **AssignmentConfirmedEvent** confirms the pairing.
+          **AssignmentDispatchedEvent** triggers the offer workflow (`RESERVED` ->
+          `OFFERQUEUED` -> `OFFERSENT`). **AssignmentReassignedEvent** swaps the
+          driver/vehicle on an existing VR. **AssignmentsSwappedEvent** cross-updates
+          both VRs involved in the swap. This event-driven chain means Assignment BC
+          never directly calls Trip Operations API — all integration flows through ASB,
+          maintaining bounded context autonomy.
+        activeCalls: [trip-assigned-consume, confirmed-consume, dispatched-consume, reassigned-consume, swapped-consume]
+        revealNodes: [trip-ops-ep]
+        revealCalls: [outbox-write, outbox-relay]
+        duration: 6000
+      - id: outbound-step-3
+        title: "Override/Reassign/Swap Audit Trail"
+        narrative: >
+          Three mutation workflows create audit-grade records via the **OverrideRecord**
+          value object. **OverrideAssignmentCommand** (`POST /v1/assignments/{id}/override`)
+          bypasses hard constraints — stores which constraints were bypassed in
+          `BypassedConstraints[]`. Only allowed in `Proposed` or `Confirmed` states.
+          **ReassignAssignmentCommand** (`POST /v1/assignments/{id}/reassign`) always creates
+          a NEW TripAssignment linked via `PreviousAssignmentId` — the old assignment
+          transitions to `Reassigned`, the new one starts as `Proposed` with
+          `AssignmentType.Manual`. **SwapAssignmentsCommand** (`POST /v1/assignments/{id}/swap`)
+          requires same tenant, different assignments, compatible monitor requirements.
+          The `ReassignmentCount` increments on each reassignment. The full chain is
+          queryable via `GET /v1/assignments/{id}/override-history` — returns the
+          complete **OverrideRecord** chain from original to current assignment.
+        activeCalls: [override-persist, reassign-cmd, comms-notify, monitoring-track, compliance-audit, settlement-complete]
+        revealNodes: [comms-ep, monitoring-ep, compliance-ep, settlement-ep]
+        revealCalls: [trip-assigned-consume, confirmed-consume, dispatched-consume, reassigned-consume, swapped-consume]
+        duration: 5000

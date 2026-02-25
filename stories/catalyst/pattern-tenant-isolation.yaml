@@ -1,0 +1,287 @@
+id: pattern-tenant-isolation
+title: "Defense-in-Depth Isolation — Three Independent Barriers"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  Two perspectives on tenant isolation: the three independent layers (API boundary,
+  EF Core global query filters, PostgreSQL Row-Level Security) that each independently
+  prevent cross-tenant data access, and the fail-closed behavior when tenant context
+  is missing or corrupted.
+
+sections:
+  # ── Section 1: Three Independent Barriers ───────────────────────────────
+  - renderer: service-flow
+    title: "Three Independent Barriers"
+    accentColor: "#3B82F6"
+    layout: sequence
+
+    services:
+      - id: client
+        name: "HTTP Client"
+        type: external
+        technology: "Browser / MDD"
+        status: healthy
+      - id: jwt-layer
+        name: "Layer 1: API Boundary"
+        type: gateway
+        technology: "JWT + Middleware"
+        status: healthy
+      - id: ef-layer
+        name: "Layer 2: EF Core"
+        type: api
+        technology: "Global Query Filters"
+        status: healthy
+      - id: rls-layer
+        name: "Layer 3: PostgreSQL RLS"
+        type: database
+        technology: "Row-Level Security"
+        status: healthy
+      - id: data
+        name: "Tenant Data"
+        type: database
+        technology: "Isolated Results"
+        status: healthy
+
+    zones:
+      - id: api-boundary
+        label: "API Boundary"
+        members: [client, jwt-layer]
+        color: "rgba(239, 68, 68, 0.06)"
+      - id: orm-boundary
+        label: "ORM Boundary"
+        members: [ef-layer]
+        color: "rgba(245, 158, 11, 0.06)"
+      - id: db-boundary
+        label: "Database Boundary"
+        members: [rls-layer, data]
+        color: "rgba(5, 150, 105, 0.06)"
+
+    calls:
+      - id: send-request
+        type: sync
+        from: client
+        to: jwt-layer
+        method: GET
+        path: "Authorization: Bearer {JWT with tenant_id claim}"
+        protocol: http
+        duration: 5
+        description: "Every request carries a JWT with the tenant_id claim"
+      - id: extract-tenant
+        type: sync
+        from: jwt-layer
+        to: jwt-layer
+        method: VALIDATE
+        path: "TenantIdClaimTransformer → extract tenant_id → TenantIsolationFilter → reject if missing"
+        duration: 2
+        description: "Layer 1: extract and validate tenant identity from JWT"
+      - id: ef-filter
+        type: sync
+        from: jwt-layer
+        to: ef-layer
+        method: INVOKE
+        path: "HasQueryFilter(e => e.TenantId == currentTenantId)"
+        duration: 1
+        description: "Layer 2: every LINQ query auto-appends WHERE tenant_id = @tid"
+      - id: ef-query
+        type: sync
+        from: ef-layer
+        to: rls-layer
+        method: GET
+        path: "SET app.current_tenant = '{guid}' on connection open"
+        duration: 1
+        description: "Layer 3: TenantContextInterceptor sets session variable before any query"
+      - id: rls-enforce
+        type: sync
+        from: rls-layer
+        to: data
+        method: GET
+        path: "RLS policy: tenant_id = current_setting('app.current_tenant')::uuid"
+        duration: 10
+        description: "PostgreSQL enforces tenant isolation at the storage engine level"
+
+    steps:
+      - id: barrier-step-1
+        title: "Layer 1: API Boundary"
+        narrative: >
+          Every HTTP request carries a JWT with a `tenant_id` claim. **TenantIdClaimTransformer**
+          extracts the claim and stores it in `HttpContext.Items["TenantId"]`. **TenantIsolationFilter**
+          runs on every request — if `tenant_id` is missing or invalid, the request is rejected
+          with HTTP 403 before reaching any controller code. This layer answers: *who is the tenant?*
+          A request without a valid tenant identity never reaches the application layer.
+        activeCalls: [send-request, extract-tenant]
+        revealNodes: [client, jwt-layer]
+        duration: 5000
+      - id: barrier-step-2
+        title: "Layer 2: EF Core Global Query Filters"
+        narrative: >
+          Every entity in every `DbContext.OnModelCreating()` has a **global query filter**:
+          `.HasQueryFilter(e => e.TenantId == tenantId)`. This means every LINQ query — including
+          navigation property loads, `Include()` chains, and raw `FromSqlRaw()` calls — automatically
+          appends `WHERE tenant_id = @tid`. A developer writing `_context.VehicleRuns.ToListAsync()`
+          gets only their tenant's vehicle runs. They cannot accidentally query across tenants
+          because the filter is applied by the ORM, not by the developer. Even if Layer 1 is
+          bypassed, this layer prevents cross-tenant data from being loaded into memory.
+        activeCalls: [ef-filter]
+        revealNodes: [ef-layer]
+        revealCalls: [send-request, extract-tenant]
+        duration: 6000
+      - id: barrier-step-3
+        title: "Layer 3: PostgreSQL Row-Level Security"
+        narrative: >
+          **TenantContextInterceptor** runs on every database connection open, executing
+          `SET app.current_tenant = '{guid}'`. The PostgreSQL RLS policy on every table enforces
+          `tenant_id = current_setting('app.current_tenant')::uuid`. This operates at the
+          **storage engine level** — even raw SQL executed outside EF Core, database admin tools,
+          or migration scripts are bound by RLS. If the session variable is not set, the RLS
+          policy returns zero rows. Three layers. Each one alone is sufficient to prevent
+          cross-tenant access. Together, they make data leakage a structural impossibility.
+        activeCalls: [ef-query, rls-enforce]
+        revealNodes: [rls-layer, data]
+        revealCalls: [ef-filter]
+        duration: 6000
+
+  # ── Section 2: Fail-Closed by Design ────────────────────────────────────
+  - renderer: service-flow
+    title: "Fail-Closed by Design"
+    accentColor: "#059669"
+    layout: sequence
+
+    services:
+      - id: attacker
+        name: "Missing Tenant Context"
+        type: external
+        technology: "Invalid/Missing JWT"
+        status: degraded
+      - id: api-gate
+        name: "API Layer"
+        type: gateway
+        technology: "TenantIsolationFilter"
+        status: healthy
+      - id: ef-gate
+        name: "EF Core Layer"
+        type: api
+        technology: "Global Query Filter"
+        status: healthy
+      - id: rls-gate
+        name: "PostgreSQL RLS"
+        type: database
+        technology: "Row-Level Security"
+        status: healthy
+      - id: result-api
+        name: "HTTP 403"
+        type: external
+        technology: "Forbidden"
+        status: degraded
+      - id: result-ef
+        name: "Empty ResultSet"
+        type: external
+        technology: "Zero Rows"
+        status: degraded
+      - id: result-rls
+        name: "Zero Rows"
+        type: external
+        technology: "RLS Blocks"
+        status: degraded
+
+    zones:
+      - id: attack-surface
+        label: "Missing Tenant Context"
+        members: [attacker]
+        color: "rgba(239, 68, 68, 0.06)"
+      - id: defenses
+        label: "Three Independent Defenses"
+        members: [api-gate, ef-gate, rls-gate]
+        color: "rgba(5, 150, 105, 0.06)"
+      - id: outcomes
+        label: "Fail-Closed Outcomes"
+        members: [result-api, result-ef, result-rls]
+        color: "rgba(239, 68, 68, 0.10)"
+
+    calls:
+      - id: no-tenant-api
+        type: sync
+        from: attacker
+        to: api-gate
+        method: GET
+        path: "Request without tenant_id claim"
+        duration: 1
+        description: "No tenant context in JWT"
+      - id: api-rejects
+        type: sync
+        from: api-gate
+        to: result-api
+        method: RESPONSE
+        status: 403
+        duration: 1
+        description: "TenantIsolationFilter → HTTP 403 Forbidden. Request never reaches controller."
+      - id: no-tenant-ef
+        type: sync
+        from: attacker
+        to: ef-gate
+        method: GET
+        path: "Query with null/empty TenantId"
+        duration: 1
+        description: "If API layer is bypassed, EF Core filter activates"
+      - id: ef-empty
+        type: sync
+        from: ef-gate
+        to: result-ef
+        method: RESPONSE
+        duration: 1
+        description: "WHERE tenant_id = NULL → matches nothing → empty result set"
+      - id: no-tenant-rls
+        type: sync
+        from: attacker
+        to: rls-gate
+        method: GET
+        path: "SQL query without app.current_tenant set"
+        duration: 1
+        description: "If both API and EF layers are bypassed, RLS activates"
+      - id: rls-blocks
+        type: sync
+        from: rls-gate
+        to: result-rls
+        method: RESPONSE
+        duration: 1
+        description: "current_setting('app.current_tenant') is NULL → RLS policy blocks all rows"
+
+    steps:
+      - id: fail-step-1
+        title: "Layer 1 Fails Closed"
+        narrative: >
+          A request arrives without a valid `tenant_id` claim — expired JWT, missing claim,
+          or forged token. **TenantIsolationFilter** detects the missing tenant context and
+          returns **HTTP 403 Forbidden**. The request never reaches a controller. No query is
+          executed. No data is accessed. The API layer fails closed: no tenant identity means
+          no access.
+        activeCalls: [no-tenant-api, api-rejects]
+        revealNodes: [attacker, api-gate, result-api]
+        duration: 4000
+      - id: fail-step-2
+        title: "Layer 2 Fails Closed"
+        narrative: >
+          Hypothetical: the API layer is somehow bypassed (misconfigured middleware, internal
+          service call without tenant propagation). The EF Core global query filter compares
+          `TenantId` against a null or empty value. `WHERE tenant_id = NULL` matches **zero rows**
+          in PostgreSQL. The query returns an empty result set. No data is exposed. The ORM
+          layer fails closed: an empty tenant context produces empty results, never all-tenant
+          results.
+        activeCalls: [no-tenant-ef, ef-empty]
+        revealNodes: [ef-gate, result-ef]
+        revealCalls: [no-tenant-api, api-rejects]
+        duration: 5000
+      - id: fail-step-3
+        title: "Layer 3 Fails Closed"
+        narrative: >
+          Hypothetical: both the API and EF Core layers are bypassed (raw SQL executed directly
+          against the database). The PostgreSQL RLS policy checks
+          `current_setting('app.current_tenant')::uuid`. If the session variable was never set,
+          `current_setting()` returns NULL, and the RLS policy blocks **all rows**. No data is
+          returned. The database layer fails closed independently. Three layers. Three independent
+          fail-closed behaviors. Any single layer prevents cross-tenant access even if the other
+          two are completely compromised. This is **defense in depth** for FERPA-mandated student
+          data isolation.
+        activeCalls: [no-tenant-rls, rls-blocks]
+        revealNodes: [rls-gate, result-rls]
+        revealCalls: [no-tenant-ef, ef-empty]
+        duration: 5000

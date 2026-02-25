@@ -91,10 +91,10 @@
 /* ============================================
    Service Node - Individual service/component
    ============================================ */
-.service-node {
+.team-ownership-canvas .service-node {
   min-width: 100px;
   max-width: 140px;
-  background: white;
+  background: var(--color-bg-elevated);
   border: var(--node-border-width) solid var(--edge-default);
   border-radius: var(--radius-lg);
   padding: var(--space-2) var(--space-3);
@@ -106,33 +106,33 @@
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
-.service-node:hover {
+.team-ownership-canvas .service-node:hover {
   border-color: var(--node-system-border);
   box-shadow: var(--shadow-md);
 }
 
-.service-node.node-active {
+.team-ownership-canvas .service-node.node-active {
   border-color: var(--node-system-border);
   z-index: 100;
 }
 
-.service-node.node-selected {
+.team-ownership-canvas .service-node.node-selected {
   outline: 2px solid var(--node-system-border);
   outline-offset: 2px;
 }
 
 /* Ownership Gap Styling */
-.service-node.service-gap {
+.team-ownership-canvas .service-node.service-gap {
   border: var(--node-border-width) dashed var(--edge-error);
   background: var(--node-state-error-bg);
 }
 
-.service-node.service-gap .service-icon {
+.team-ownership-canvas .service-node.service-gap .service-icon {
   opacity: 0.7;
 }
 
 /* Shared Service Styling */
-.service-node.service-shared {
+.team-ownership-canvas .service-node.service-shared {
   border-style: dashed;
   border-color: var(--node-actor-border);
 }
@@ -293,7 +293,7 @@
   color: var(--color-text-secondary);
 }
 
-[data-theme="dark"] .service-node {
+[data-theme="dark"] .team-ownership-canvas .service-node {
   background: var(--color-bg-secondary);
   border-color: var(--color-border);
 }
@@ -307,7 +307,7 @@
   color: var(--color-text-secondary);
 }
 
-[data-theme="dark"] .service-node.service-gap {
+[data-theme="dark"] .team-ownership-canvas .service-node.service-gap {
   background: var(--color-error-light);
 }
 

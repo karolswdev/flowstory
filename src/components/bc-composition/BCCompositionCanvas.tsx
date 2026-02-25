@@ -21,7 +21,7 @@ import {
   type Edge,
 } from '@xyflow/react';
 import { motion } from 'motion/react';
-import { StepOverlay } from '../shared';
+import { StepOverlay, EdgeReadinessGate } from '../shared';
 import type {
   BCCompositionStory,
   Step as CompositionStep,
@@ -37,6 +37,7 @@ interface BCCompositionCanvasProps {
   story: BCCompositionStory;
   currentStepIndex: number;
   onStepChange?: (step: number) => void;
+  hideOverlay?: boolean;
 }
 
 // Node type components (will create separately)
@@ -209,11 +210,15 @@ function BCCompositionCameraController({ activeNodeIds }: { activeNodeIds: strin
 export function BCCompositionCanvas({
   story,
   currentStepIndex,
-  onStepChange
+  onStepChange,
+  hideOverlay = false,
 }: BCCompositionCanvasProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
+  const [edgesReady, setEdgesReady] = useState(false);
+  const onEdgesReady = useCallback(() => setEdgesReady(true), []);
+  useEffect(() => { setEdgesReady(false); }, [story.id]);
 
   // Track which nodes have been revealed (cumulative across steps)
   const [revealedNodes, setRevealedNodes] = useState<Set<string>>(new Set());
@@ -477,7 +482,7 @@ export function BCCompositionCanvas({
     <div className="bc-composition-canvas" style={{ width: '100%', height: '100%', minHeight: '600px' }}>
       <ReactFlow
         nodes={nodes}
-        edges={edges}
+        edges={edgesReady ? edges : []}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         nodeTypes={nodeTypes}
@@ -489,6 +494,7 @@ export function BCCompositionCanvas({
       >
         <Background color="#e2e8f0" gap={20} />
         <Controls position="bottom-left" />
+        <EdgeReadinessGate onReady={onEdgesReady} />
         <MiniMap
           nodeColor={(node) => {
             if (node.type === 'core') return story.core.color || '#4CAF50';
@@ -502,7 +508,7 @@ export function BCCompositionCanvas({
         <BCCompositionCameraController activeNodeIds={focusNodeIdsArray} />
       </ReactFlow>
 
-      {currentStep && (
+      {!hideOverlay && currentStep && (
         <StepOverlay
           stepIndex={currentStepIndex}
           totalSteps={story.steps.length}

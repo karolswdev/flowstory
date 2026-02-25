@@ -1,0 +1,393 @@
+id: rescue-orchestration-events
+title: "Rescue Orchestration — Event Architecture & Cross-BC Coordination"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  The event mesh surrounding Rescue Orchestration. Section 1 traces the 16 inbound
+  event handlers (8 cross-context triggers from Monitoring and Provider Network, 8
+  internal SignalR broadcast relays) and the real-time notification path through
+  RescueNotificationsHub. Section 2 maps the 12 outbound domain events, trip
+  reassignment coordination with Trip Operations, settlement impact propagation,
+  and SLA breach tracking via the RescueSla value object.
+
+sections:
+  # -- Section 1: Inbound Safety Events & SignalR Broadcast --------------------
+  - renderer: service-flow
+    title: "Inbound Safety Events & Real-Time Broadcast"
+    accentColor: "#A855F7"
+    layout: sequence
+
+    services:
+      - id: monitoring-ep
+        name: "Monitoring Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: provider-ep
+        name: "Provider Network EP"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+      - id: rescue-ep
+        name: "Rescue Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: redis
+        name: "Redis"
+        type: cache
+        technology: "Redis 7"
+        status: healthy
+      - id: rescue-api
+        name: "Rescue Orchestration API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: signalr-hub
+        name: "RescueNotificationsHub"
+        type: api
+        technology: "SignalR"
+        status: healthy
+      - id: trip-hq
+        name: "Trip HQ"
+        type: external
+        technology: "Next.js 15"
+        status: healthy
+
+    zones:
+      - id: event-sources
+        label: "Event Sources (Cross-BC)"
+        members: [monitoring-ep, provider-ep, asb]
+        color: "rgba(168, 85, 247, 0.06)"
+      - id: rescue-processing
+        label: "Rescue Processing"
+        members: [rescue-ep, redis, rescue-api]
+        color: "rgba(239, 68, 68, 0.06)"
+      - id: realtime-zone
+        label: "Real-Time Layer"
+        members: [signalr-hub, trip-hq]
+        color: "rgba(34, 197, 94, 0.06)"
+
+    calls:
+      - id: monitoring-publish
+        type: publish
+        from: monitoring-ep
+        to: asb
+        messageType: "DriverNoShowDetectedEvent | VehicleBreakdownDetectedEvent | PassengerNoShowDetectedEvent | LatePickupDetectedEvent | RouteDeviationDetectedEvent | DriverEmergencyDetectedEvent | StaleVrDetectedEvent"
+        payload:
+          description: "7 event types from monitoring-and-exceptions topic. Each maps to a RescueType enum value. StaleVrDetectedEvent added in R076."
+      - id: provider-publish
+        type: publish
+        from: provider-ep
+        to: asb
+        messageType: "ProviderSuspendedEvent"
+        payload:
+          description: "From provider-network-and-assignment topic. Triggers rescue for all active VRs assigned to suspended provider."
+      - id: consume-monitoring
+        type: subscribe
+        from: asb
+        to: rescue-ep
+        messageType: "DriverNoShowDetectedEvent"
+        action: "DriverNoShowEventHandler -> InitiateRescueCommand (RescueType.DriverNoShow)"
+      - id: consume-breakdown
+        type: subscribe
+        from: asb
+        to: rescue-ep
+        messageType: "VehicleBreakdownDetectedEvent"
+        action: "VehicleBreakdownEventHandler -> InitiateRescueCommand (RescueType.VehicleBreakdown)"
+      - id: consume-provider-suspended
+        type: subscribe
+        from: asb
+        to: rescue-ep
+        messageType: "ProviderSuspendedEvent"
+        action: "ProviderSuspendedEventHandler -> InitiateRescueCommand (RescueType.ProviderSuspended)"
+      - id: idempotency
+        type: sync
+        from: rescue-ep
+        to: redis
+        method: GET
+        path: "GET CatalystRescue:{eventId}"
+        duration: 5
+        description: "Redis idempotency check. 1-hour TTL. All 8 cross-context handlers check before dispatching command."
+      - id: internal-broadcast
+        type: subscribe
+        from: asb
+        to: rescue-ep
+        messageType: "RescueInitiatedEvent | ProviderMatchedEvent | RescueDispatchedEvent | RescueResolvedEvent | RescueCancelledEvent | RescueEscalatedEvent | SlaBreachedEvent | RescueProviderLocationUpdatedEvent"
+        action: "8 broadcast handlers relay domain events to SignalR hub groups"
+      - id: signalr-push
+        type: async
+        from: rescue-api
+        to: signalr-hub
+        messageType: "RescueStatusChangedDto"
+        payload:
+          description: "SignalR hub at /hubs/rescue-notifications. 9 broadcast DTOs: RescueInitiatedDto, ProviderMatchedDto, RescueDispatchedDto, RescueResolvedDto, RescueCancelledDto, RescueStatusChangedDto, RescueProviderLocationDto, RescueEscalatedDto, SlaBreachedDto."
+      - id: ws-push
+        type: async
+        from: signalr-hub
+        to: trip-hq
+        messageType: "WebSocket frame"
+        payload:
+          description: "Real-time push to connected dispatchers. Groups: rescue-{rescueId} (per-rescue), district-{tenantId} (per-tenant, tenant isolation enforced via JWT)."
+
+    steps:
+      - id: inbound-step-1
+        title: "Cross-Context Event Ingestion"
+        narrative: >
+          Rescue EP subscribes to two ASB topics: `monitoring-and-exceptions`
+          (subscription: `rescue-monitoring-subscriber`) and
+          `provider-network-and-assignment` (subscription: `rescue-provider-network-subscriber`).
+          Seven event types arrive from Monitoring: **DriverNoShowDetectedEvent**,
+          **VehicleBreakdownDetectedEvent**, **PassengerNoShowDetectedEvent**,
+          **LatePickupDetectedEvent**, **RouteDeviationDetectedEvent**,
+          **DriverEmergencyDetectedEvent**, and **StaleVrDetectedEvent** (R076).
+          One event from Provider Network: **ProviderSuspendedEvent** -- triggers rescue
+          for every active VR assigned to the suspended provider. Each event type has
+          a dedicated handler class in the EP.
+        activeCalls: [monitoring-publish, provider-publish]
+        revealNodes: [monitoring-ep, provider-ep, asb]
+        duration: 5000
+      - id: inbound-step-2
+        title: "Idempotent Handler Dispatch"
+        narrative: >
+          All 8 cross-context handlers follow the same pattern: (1) Redis idempotency
+          check via `CatalystRescue:{eventId}` key with 1-hour TTL. (2) Extract
+          `TenantId` from event payload, set via `CompositeTenantProvider.SetScopedTenantId()`.
+          (3) Map event type to `RescueType` enum (e.g., `DriverNoShowDetectedEvent`
+          -> `RescueType.DriverNoShow`). (4) Dispatch `InitiateRescueCommand` via MediatR.
+          (5) Mark processed in Redis. All handlers are decorated with
+          `DecorateEventHandlerWithMetrics<T>()` for `catalyst_rescue_ep_events_processed_total`
+          Prometheus counter. Handler list: `DriverNoShowEventHandler`,
+          `VehicleBreakdownEventHandler`, `PassengerNoShowEventHandler`,
+          `LatePickupEventHandler`, `RouteDeviationEventHandler`,
+          `DriverEmergencyEventHandler`, `ProviderSuspendedEventHandler`,
+          `StaleVrDetectedEventHandler`.
+        activeCalls: [consume-monitoring, consume-breakdown, consume-provider-suspended, idempotency]
+        revealNodes: [rescue-ep, redis]
+        duration: 6000
+      - id: inbound-step-3
+        title: "Internal Broadcast Relay (SignalR)"
+        narrative: >
+          8 internal broadcast handlers subscribe to the `rescue-orchestration` topic
+          (self-subscribe pattern). Each handler maps a domain event to a SignalR broadcast:
+          **RescueInitiatedBroadcastHandler** -> `RescueInitiated`,
+          **ProviderMatchedBroadcastHandler** -> `ProviderMatched`,
+          **RescueDispatchedBroadcastHandler** -> `RescueDispatched`,
+          **RescueResolvedBroadcastHandler** -> `RescueResolved`,
+          **RescueCancelledBroadcastHandler** -> `RescueCancelled`,
+          **RescueProviderLocationBroadcastHandler** -> `ProviderLocationUpdated`,
+          **RescueEscalatedBroadcastHandler** -> `RescueEscalated`,
+          **SlaBreachedBroadcastHandler** -> `SlaBreached`.
+          The `RescueNotificationsHub` (route: `/hubs/rescue-notifications`, JWT auth)
+          supports 3 client methods: `SubscribeToRescue(rescueId)`,
+          `SubscribeToDistrict(tenantId)`, `UnsubscribeFromRescue(rescueId)`.
+          Multi-tenancy enforced: district group membership validated against JWT `tenant_id`.
+        activeCalls: [internal-broadcast, signalr-push]
+        revealNodes: [rescue-api, signalr-hub]
+        revealCalls: [consume-monitoring, consume-breakdown, consume-provider-suspended, idempotency]
+        duration: 6000
+      - id: inbound-step-4
+        title: "Dispatcher Real-Time Experience"
+        narrative: >
+          Trip HQ connects to `RescueNotificationsHub` via WebSocket. When a rescue
+          initiates, dispatchers in the matching `district-{tenantId}` group receive
+          **RescueInitiatedDto** in real time -- the rescue dashboard lights up without
+          polling. As the saga progresses, **ProviderMatchedDto** shows the matched provider,
+          **RescueDispatchedDto** confirms dispatch, **RescueProviderLocationDto** streams
+          the replacement driver's GPS position. **SlaBreachedDto** fires when response
+          (Normal: 15 min) or escalation (Normal: 30 min) SLA thresholds are exceeded.
+          9 distinct SignalR broadcast DTOs provide a complete real-time picture. The
+          dashboard endpoints (`GET /v1/rescue-dashboard/active`, `GET .../metrics`,
+          `GET .../provider-availability`) supplement WebSocket with HTTP polling for
+          initial state hydration.
+        activeCalls: [ws-push]
+        revealNodes: [trip-hq]
+        revealCalls: [internal-broadcast, signalr-push]
+        duration: 5000
+
+  # -- Section 2: Outbound Events & Cross-BC Coordination ---------------------
+  - renderer: service-flow
+    title: "Outbound Events & Cross-BC Coordination"
+    accentColor: "#3B82F6"
+    layout: sequence
+
+    services:
+      - id: rescue-api
+        name: "Rescue Orchestration API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: rescue-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+      - id: trip-ops-ep
+        name: "Trip Operations EP"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: settlement-ep
+        name: "Settlement Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: comms-ep
+        name: "Communications Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: monitoring-ep
+        name: "Monitoring Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: incidents-ep
+        name: "Incidents Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+
+    zones:
+      - id: rescue-outbound
+        label: "Rescue Outbound"
+        members: [rescue-api, rescue-db, asb]
+        color: "rgba(59, 130, 246, 0.06)"
+      - id: downstream-consumers
+        label: "Downstream Consumers"
+        members: [trip-ops-ep, settlement-ep, comms-ep, monitoring-ep, incidents-ep]
+        color: "rgba(168, 85, 247, 0.06)"
+
+    calls:
+      - id: outbox-write
+        type: sync
+        from: rescue-api
+        to: rescue-db
+        method: POST
+        path: "rescue.rescue_requests + rescue.outbox_messages"
+        duration: 30
+        description: "Atomic: aggregate state + domain event in outbox_messages. Polling: 5s, batch: 100, max retries: 5, retention: 7 days."
+      - id: outbox-relay
+        type: publish
+        from: rescue-db
+        to: asb
+        messageType: "12 domain events via outbox relay"
+        payload:
+          description: "Published to rescue-orchestration topic. Events: RescueInitiatedEvent, ProviderMatchedEvent, RescueDispatchedEvent, RescueResolvedEvent, RescueCancelledEvent, RescueOfferSentEvent, RescueAcceptedEvent, RescueRejectedEvent, RescueCompletedEvent, SlaBreachedEvent, RescueEscalatedEvent, RescueProviderLocationUpdatedEvent."
+      - id: trip-ops-consume
+        type: subscribe
+        from: asb
+        to: trip-ops-ep
+        messageType: "RescueDispatchedEvent"
+        action: "Update PT assignments for rescue VR. Mark original VR as rescue-replaced."
+      - id: settlement-consume
+        type: subscribe
+        from: asb
+        to: settlement-ep
+        messageType: "RescueResolvedEvent"
+        action: "Recalculate BC/PD/PM for reassigned PTs. Original provider partial settlement; rescue provider compensated."
+      - id: comms-consume
+        type: subscribe
+        from: asb
+        to: comms-ep
+        messageType: "RescueInitiatedEvent | RescueDispatchedEvent | RescueResolvedEvent | SlaBreachedEvent"
+        action: "Multi-channel notifications: SMS (Twilio), Push (Firebase), Email (SendGrid). Parent, school, dispatch recipients."
+      - id: monitoring-consume
+        type: subscribe
+        from: asb
+        to: monitoring-ep
+        messageType: "RescueInitiatedEvent | SlaBreachedEvent"
+        action: "Create OperationalException for rescue event. SLA breach triggers Alert with PagerDuty integration."
+      - id: incidents-consume
+        type: subscribe
+        from: asb
+        to: incidents-ep
+        messageType: "RescueResolvedEvent (DriverEmergency type)"
+        action: "Auto-create investigation for safety-critical rescue scenarios. DriverEmergency triggers CreateCriticalIncidentWorker."
+      - id: sla-check
+        type: sync
+        from: rescue-api
+        to: rescue-db
+        method: GET
+        path: "rescue.rescue_requests WHERE sla breach check"
+        duration: 15
+        description: "Periodic SLA evaluation: CheckResponseSlaBreach(now) during matching, CheckEscalationSlaBreach(now) during full lifecycle. Raises SlaBreachedEvent on first breach."
+
+    steps:
+      - id: outbound-step-1
+        title: "Transactional Outbox & Event Publishing"
+        narrative: >
+          All 12 domain events are published via the transactional outbox pattern.
+          `RescueDbContext` implements `IOutboxDbContext` -- `SaveChangesAsync()` writes
+          domain events to `rescue.outbox_messages` in the same PostgreSQL transaction
+          as aggregate state changes. The outbox relay polls every 5 seconds, processing
+          batches of 100, with 5 max retries and 7-day retention. Events publish to the
+          `rescue-orchestration` ASB topic. The 12 events: **RescueInitiatedEvent** (from
+          `Create()`), **ProviderMatchedEvent** (from `MatchProvider()`),
+          **RescueDispatchedEvent** (from `Dispatch()` or `AcceptByProvider()`),
+          **RescueResolvedEvent** (from `Resolve()` or `CompleteByProvider()`),
+          **RescueCancelledEvent** (from `Cancel()`), **RescueOfferSentEvent** (from
+          `SendOffer()`), **RescueAcceptedEvent** (from `AcceptByProvider()`),
+          **RescueRejectedEvent** (from `RejectByProvider()`), **RescueCompletedEvent**
+          (from `CompleteByProvider()`), **SlaBreachedEvent** (from SLA check methods),
+          **RescueEscalatedEvent** (from `Escalate()`),
+          **RescueProviderLocationUpdatedEvent** (from EP broadcast handler).
+        activeCalls: [outbox-write, outbox-relay]
+        revealNodes: [rescue-api, rescue-db, asb]
+        duration: 6000
+      - id: outbound-step-2
+        title: "Cross-BC Consumer Coordination"
+        narrative: >
+          Five bounded contexts consume rescue events: (1) **Trip Operations EP** --
+          receives `RescueDispatchedEvent`, updates PT assignments for the rescue VR,
+          marks the original VR as rescue-replaced. The reassignment is the critical
+          path: `AffectedPassengerTripIds` are moved from the failed VR to the rescue
+          VR. (2) **Settlement EP** -- receives `RescueResolvedEvent`, recalculates
+          BC/PD/PM for reassigned PTs. The original provider receives partial settlement
+          for completed stops; the rescue provider is compensated for the rescue leg.
+          (3) **Communications EP** -- receives `RescueInitiatedEvent`,
+          `RescueDispatchedEvent`, `RescueResolvedEvent`, and `SlaBreachedEvent`.
+          Multi-channel dispatch: SMS via Twilio, Push via Firebase, Email via SendGrid.
+          Recipients: parents (safety-critical), schools (operational), dispatchers
+          (coordination). (4) **Monitoring EP** -- receives `RescueInitiatedEvent` and
+          `SlaBreachedEvent`. Creates `OperationalException` for dashboard visibility;
+          SLA breach triggers `Alert` with PagerDuty integration.
+          (5) **Incidents EP** -- receives `RescueResolvedEvent` for `DriverEmergency`
+          type. Auto-creates investigation via `CreateCriticalIncidentWorker`.
+        activeCalls: [trip-ops-consume, settlement-consume, comms-consume, monitoring-consume, incidents-consume]
+        revealNodes: [trip-ops-ep, settlement-ep, comms-ep, monitoring-ep, incidents-ep]
+        revealCalls: [outbox-write, outbox-relay]
+        duration: 6000
+      - id: outbound-step-3
+        title: "SLA Tracking & Breach Propagation"
+        narrative: >
+          The **RescueSla** value object encodes time-based service guarantees per
+          priority: Normal (15 min response, 30 min escalation), High (10/20), Critical
+          (5/10). The aggregate exposes `CheckResponseSlaBreach(currentTime)` and
+          `CheckEscalationSlaBreach(currentTime)` -- called periodically during the
+          saga lifecycle. On first breach, `ResponseSlaBreached` or `EscalationSlaBreached`
+          flags are set, timestamps recorded, and **SlaBreachedEvent** raised with
+          `SlaType.Response` or `SlaType.Escalation`. Computed properties provide
+          real-time visibility: `IsAnySlaBreached`, `GetMinutesUntilResponseBreach()`,
+          `GetMinutesUntilEscalationBreach()`. The SLA breach propagates to 3 consumers:
+          (1) SignalR broadcast via `SlaBreachedBroadcastHandler` -> `SlaBreached` method
+          on connected dispatchers. (2) Monitoring EP creates an `Alert` with PagerDuty
+          escalation. (3) Communications EP sends urgent SMS to operations supervisors.
+          {color:red|SLA breach is safety-critical: it means a student is waiting beyond
+          acceptable limits for transportation.}
+        activeCalls: [sla-check]
+        revealNodes: []
+        revealCalls: [trip-ops-consume, settlement-consume, comms-consume, monitoring-consume, incidents-consume]
+        duration: 5000

@@ -1,0 +1,323 @@
+id: order-deep-dive
+title: "Order System Deep Dive"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  A multi-perspective deep dive into the Order System —
+  from the C4 context landscape, through microservice choreography,
+  to the order entity lifecycle state machine.
+
+sections:
+  # ── Section 1: C4 Context ──────────────────────────────────────────────
+  - renderer: c4-context
+    title: "System Landscape"
+    accentColor: "#3B82F6"
+    organization: Acme Commerce
+    system:
+      id: order-system
+      name: Order System
+      description: "Core order management — creation, fulfillment, tracking"
+      icon: "\U0001F4E6"
+      color: "#3B82F6"
+      capabilities:
+        - Order creation
+        - Payment processing
+        - Inventory reservation
+        - Shipment tracking
+      technology: "React, .NET 8, PostgreSQL, Kafka"
+    people:
+      - id: customer
+        name: Customer
+        description: "Places and tracks orders"
+        icon: "\U0001F464"
+        external: true
+        role: Shopper
+      - id: support-agent
+        name: Support Agent
+        description: "Handles order issues and refunds"
+        icon: "\U0001F3A7"
+        external: false
+        role: Internal
+    externalSystems:
+      - id: payment-gateway
+        name: Payment Gateway
+        description: "Processes payments via Stripe"
+        icon: "\U0001F4B3"
+        vendor: Stripe
+        type: saas
+        critical: true
+      - id: warehouse
+        name: Warehouse System
+        description: "Manages inventory and shipments"
+        icon: "\U0001F3ED"
+        vendor: Internal
+        type: api
+        critical: true
+      - id: notification-service
+        name: Notification Service
+        description: "Sends email and SMS notifications"
+        icon: "\U0001F4E7"
+        vendor: Internal
+        type: api
+    relationships:
+      - from: customer
+        to: order-system
+        type: uses
+        description: "Places orders"
+        technology: "HTTPS"
+      - from: support-agent
+        to: order-system
+        type: manages
+        description: "Manages orders"
+        technology: "HTTPS"
+      - from: order-system
+        to: payment-gateway
+        type: calls
+        description: "Processes payments"
+        technology: "REST API"
+        critical: true
+      - from: order-system
+        to: warehouse
+        type: calls
+        description: "Reserves inventory"
+        technology: "gRPC"
+        critical: true
+      - from: order-system
+        to: notification-service
+        type: sends
+        description: "Triggers notifications"
+        technology: "Kafka"
+        sync: false
+    steps:
+      - title: "The Order System"
+        description: "Our Order System sits at the heart of commerce — connecting customers, support, payments, and fulfillment."
+        focusNode: order-system
+        zoomLevel: 1
+        duration: 5000
+      - title: "Critical Dependencies"
+        description: "Payment Gateway and Warehouse are critical-path dependencies. An outage in either blocks order creation."
+        highlightNodes:
+          - payment-gateway
+          - warehouse
+        filterRelationType: calls
+        duration: 5000
+      # BRIDGE STEP — spotlights the system we're about to zoom into
+      - title: "Inside the Order System"
+        description: "Let's zoom into the Order System to see how its internal microservices collaborate to process an order."
+        highlightNodes:
+          - order-system
+        duration: 3000
+
+  # ── Section 2: Service Flow ────────────────────────────────────────────
+  - renderer: service-flow
+    title: "Order Creation Flow"
+    accentColor: "#22C55E"
+    layout: sequence
+    services:
+      - id: gateway
+        name: API Gateway
+        type: gateway
+        technology: Kong
+        status: healthy
+      - id: orders
+        name: Order Service
+        type: api
+        technology: ".NET 8"
+        status: healthy
+      - id: payments
+        name: Payment Service
+        type: api
+        technology: ".NET 8"
+        status: healthy
+      - id: inventory
+        name: Inventory Service
+        type: worker
+        technology: ".NET 8"
+        status: healthy
+      - id: order-db
+        name: Order DB
+        type: database
+        technology: PostgreSQL
+        status: healthy
+    queues:
+      - id: order-events
+        name: order-events
+        type: topic
+        broker: kafka
+    calls:
+      - id: submit-order
+        type: sync
+        from: gateway
+        to: orders
+        method: POST
+        path: /orders
+        protocol: http
+        duration: 150
+        status: 201
+      - id: charge-payment
+        type: sync
+        from: orders
+        to: payments
+        method: POST
+        path: /charges
+        protocol: http
+        duration: 300
+        status: 200
+      - id: reserve-stock
+        type: sync
+        from: orders
+        to: inventory
+        method: POST
+        path: /reservations
+        protocol: http
+        duration: 100
+        status: 200
+      - id: persist-order
+        type: sync
+        from: orders
+        to: order-db
+        method: INSERT
+        path: orders
+        protocol: http
+        duration: 50
+      - id: emit-created
+        type: publish
+        from: orders
+        to: order-events
+        method: PUBLISH
+        path: order.created
+    steps:
+      - id: step-1
+        title: "API Request"
+        narrative: "Customer submits order through the API Gateway."
+        activeCalls:
+          - submit-order
+        duration: 4000
+      - id: step-2
+        title: "Payment & Inventory"
+        narrative: "Order Service charges payment and reserves inventory in parallel."
+        activeCalls:
+          - charge-payment
+          - reserve-stock
+        duration: 4000
+      - id: step-3
+        title: "Persist & Publish"
+        narrative: "Order is persisted to the database and an order.created event is published to Kafka."
+        activeCalls:
+          - persist-order
+          - emit-created
+        duration: 4000
+      # BRIDGE STEP — focuses on the Order Service before switching to its state machine
+      - id: step-4
+        title: "Order Entity Lifecycle"
+        narrative: "Each order moves through a state machine. Let's trace the lifecycle from PENDING to DELIVERED."
+        focusNodes:
+          - orders
+        duration: 3000
+
+  # ── Section 3: State Diagram ───────────────────────────────────────────
+  - renderer: state-diagram
+    title: "Order Lifecycle"
+    accentColor: "#A855F7"
+    direction: LR
+    phases:
+      - id: creation
+        label: Creation
+        color: "rgba(59, 130, 246, 0.06)"
+        order: 1
+      - id: fulfillment
+        label: Fulfillment
+        color: "rgba(34, 197, 94, 0.06)"
+        order: 2
+      - id: terminal
+        label: Terminal
+        color: "rgba(168, 85, 247, 0.06)"
+        order: 3
+    states:
+      - id: pending
+        label: PENDING
+        type: initial
+        phase: creation
+        description: "Order submitted, awaiting payment"
+      - id: confirmed
+        label: CONFIRMED
+        type: normal
+        variant: success
+        phase: creation
+        description: "Payment charged, inventory reserved"
+      - id: processing
+        label: PROCESSING
+        type: normal
+        variant: info
+        phase: fulfillment
+        description: "Warehouse picking and packing"
+      - id: shipped
+        label: SHIPPED
+        type: normal
+        variant: info
+        phase: fulfillment
+        description: "Handed to carrier, in transit"
+      - id: delivered
+        label: DELIVERED
+        type: terminal
+        variant: success
+        phase: terminal
+        description: "Customer received the order"
+      - id: cancelled
+        label: CANCELLED
+        type: terminal
+        variant: error
+        phase: terminal
+        description: "Order cancelled before shipment"
+    transitions:
+      - id: pending-to-confirmed
+        from: pending
+        to: confirmed
+        label: "payment_success"
+      - id: pending-to-cancelled
+        from: pending
+        to: cancelled
+        label: "cancel / payment_fail"
+      - id: confirmed-to-processing
+        from: confirmed
+        to: processing
+        label: "warehouse_pick"
+      - id: confirmed-to-cancelled
+        from: confirmed
+        to: cancelled
+        label: "cancel"
+      - id: processing-to-shipped
+        from: processing
+        to: shipped
+        label: "carrier_handoff"
+      - id: shipped-to-delivered
+        from: shipped
+        to: delivered
+        label: "delivery_confirmed"
+    steps:
+      - title: "Order Created"
+        narrative: "A new order starts in PENDING state, waiting for payment confirmation."
+        activeStates:
+          - pending
+        duration: 4000
+      - title: "Confirmed & Fulfilling"
+        narrative: "After payment succeeds, the order moves through CONFIRMED → PROCESSING → SHIPPED."
+        activeStates:
+          - confirmed
+          - processing
+          - shipped
+        activeTransitions:
+          - pending-to-confirmed
+          - confirmed-to-processing
+          - processing-to-shipped
+        duration: 5000
+      - title: "Terminal States"
+        narrative: "Orders end as DELIVERED (happy path) or CANCELLED (at any pre-ship stage)."
+        activeStates:
+          - delivered
+          - cancelled
+        activeTransitions:
+          - shipped-to-delivered
+          - pending-to-cancelled
+          - confirmed-to-cancelled
+        duration: 5000

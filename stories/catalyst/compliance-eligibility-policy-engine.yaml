@@ -1,0 +1,436 @@
+id: compliance-eligibility-policy-engine
+title: "Compliance & Eligibility — Policy Engine & Credential Tracking"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  The Compliance & Eligibility bounded context implements ADR-013's hybrid pattern:
+  Specification/Strategy for stateless rule evaluation and CQRS for stateful policy lifecycle.
+  Four IEligibilityRule implementations (Distance, Income, IEP, McKinneyVento) evaluate student
+  eligibility against district-configured policies. The EligibilityVerificationService orchestrates
+  rule selection and composite evaluation — ALL applicable rules must pass. Every verification
+  is persisted for compliance auditing. A Conductor credential-expiration-workflow with 6 task
+  workers tracks provider credentials through detection, notification, suspension, and reinstatement.
+
+sections:
+  # -- Section 1: Policy Lifecycle & Specification Evaluation --------------------------
+  - renderer: service-flow
+    title: "Policy Lifecycle & Eligibility Evaluation (ADR-013 Hybrid)"
+    accentColor: "#8B5CF6"
+    layout: sequence
+
+    services:
+      - id: compliance-api
+        name: "Compliance & Eligibility API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: compliance-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: redis
+        name: "Redis Cache"
+        type: cache
+        technology: "Redis"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+
+    zones:
+      - id: compliance-core
+        label: "Compliance & Eligibility"
+        members: [compliance-api, compliance-db, redis]
+        color: "rgba(139, 92, 246, 0.06)"
+      - id: messaging
+        label: "Event Backbone"
+        members: [asb]
+        color: "rgba(245, 158, 11, 0.06)"
+
+    calls:
+      - id: create-policy
+        type: sync
+        from: compliance-api
+        to: compliance-db
+        method: POST
+        path: /v1/districts/{districtId}/eligibility-policies
+        protocol: http
+        duration: 120
+        status: 201
+        description: "CreateEligibilityPolicyCommand — EligibilityPolicy aggregate created in Inactive state with PolicyType, PolicyName, EffectiveDate"
+        response:
+          status: 201
+          label: "Policy created (Inactive)"
+      - id: configure-distance
+        type: sync
+        from: compliance-api
+        to: compliance-db
+        method: PUT
+        path: /v1/districts/{districtId}/distance-policy
+        protocol: http
+        duration: 80
+        status: 200
+        description: "UpdateDistancePolicyCommand — ConfigureDistancePolicy() sets MinimumDistanceMiles and GradeOverrides dictionary (K-5, 6-8, 9-12 ranges)"
+        response:
+          status: 200
+          label: "Distance config saved"
+      - id: configure-income
+        type: sync
+        from: compliance-api
+        to: compliance-db
+        method: PUT
+        path: /v1/districts/{districtId}/income-policy
+        protocol: http
+        duration: 80
+        status: 200
+        description: "UpdateIncomePolicyCommand — ConfigureIncomePolicy() sets MaxIncomePercentOfPoverty, PolicyYear, PovertyLevelByHouseholdSize"
+        response:
+          status: 200
+          label: "Income config saved"
+      - id: activate-policy
+        type: sync
+        from: compliance-api
+        to: compliance-db
+        method: POST
+        path: /v1/eligibility-policies/{policyId}/activate
+        protocol: http
+        duration: 100
+        status: 200
+        description: "ActivatePolicyCommand — Validates type-specific config (Distance: MinimumDistanceMiles > 0; Income: percent + year + poverty levels set; IEP/McKinneyVento: no config needed). Enforces one active policy per type per district. Raises EligibilityPolicyActivatedEvent."
+        response:
+          status: 200
+          label: "Policy activated"
+      - id: verify-eligibility
+        type: sync
+        from: compliance-api
+        to: compliance-db
+        method: POST
+        path: /v1/eligibility/verify
+        protocol: http
+        duration: 200
+        status: 200
+        description: "CheckEligibilityCommand → EligibilityVerificationService.VerifyEligibilityAsync() — builds EligibilityVerificationContext, selects applicable IEligibilityRule implementations, evaluates composite result, persists audit trail"
+        response:
+          status: 200
+          label: "EligibilityVerificationResult"
+      - id: batch-verify
+        type: sync
+        from: compliance-api
+        to: compliance-db
+        method: POST
+        path: /v1/eligibility/verify/batch
+        protocol: http
+        duration: 800
+        status: 200
+        description: "BatchCheckEligibilityCommand — Evaluates multiple students against district policies in a single request"
+        response:
+          status: 200
+          label: "BatchCheckEligibilityResult"
+      - id: publish-policy-event
+        type: publish
+        from: compliance-api
+        to: asb
+        messageType: "EligibilityPolicyActivatedEvent"
+        payload:
+          description: "PolicyId, TenantId, DistrictId, PolicyType, ActivatedAt — published via transactional outbox to compliance-and-eligibility topic"
+
+    steps:
+      - id: policy-step-1
+        title: "Policy Creation & Type-Specific Configuration"
+        narrative: >
+          The CQRS side of the ADR-013 hybrid pattern manages stateful policy lifecycle.
+          `POST /v1/districts/{districtId}/eligibility-policies` invokes **CreateEligibilityPolicyCommand**
+          which calls `EligibilityPolicy.Create()` — a static factory on the aggregate root
+          (`Domain/Aggregates/EligibilityPolicy.cs`, ~505 lines). The policy is created in `Inactive`
+          state with a `PolicyType` from the **EligibilityType** enum: `Distance=0`, `IEP=1`,
+          `McKinneyVento=2`, `Other=3`. {color:red|Income-based eligibility is mapped to EligibilityType.Other
+          rather than having its own enum value (Risk 10.4).} Type-specific configuration follows:
+          **UpdateDistancePolicyCommand** calls `ConfigureDistancePolicy()` setting `MinimumDistanceMiles`
+          (default 2.0) and `GradeOverrides` — a `Dictionary<string,decimal>` supporting grade ranges
+          like "K-5", "6-8", "9-12". **DistancePolicy** (`Domain/Policies/DistancePolicy.cs`, ~158 lines)
+          uses `init` properties (immutable after creation) and `GetMinimumDistanceForGrade()` resolves
+          grade level via exact match then range match, mapping "K" to grade 0. **UpdateIncomePolicyCommand**
+          calls `ConfigureIncomePolicy()` setting `MaxIncomePercentOfPoverty`, `PolicyYear`, and
+          `PovertyLevelByHouseholdSize` — **IncomePolicy** (`Domain/Policies/IncomePolicy.cs`, ~106 lines)
+          extrapolates large households using $4,720 federal increment.
+          {color:green|Version field provides optimistic concurrency — incremented on every mutation.}
+        activeCalls: [create-policy, configure-distance, configure-income]
+        revealNodes: [compliance-api, compliance-db]
+        duration: 6000
+      - id: policy-step-2
+        title: "Policy Activation & Domain Event Publishing"
+        narrative: >
+          **ActivatePolicyCommand** via `ActivatePolicyCommandHandler.cs` enforces type-specific
+          validation before calling `EligibilityPolicy.Activate()`. Distance policies require
+          `MinimumDistanceMiles > 0`. Income policies (mapped to `EligibilityType.Other`) require
+          all three: `MaxIncomePercentOfPoverty`, `PolicyYear`, and `PovertyLevelByHouseholdSize`.
+          IEP and McKinneyVento policies need no additional configuration. The application layer
+          enforces the constraint: {color:green|only one active policy per type per district.}
+          Successful activation raises **EligibilityPolicyActivatedEvent** — domain events are
+          written to the `outbox_messages` table atomically with entity changes via
+          **ComplianceDbContext.SaveChangesAsync()**, then dispatched by the OutboxProcessor to the
+          `compliance-and-eligibility` ASB topic. {color:red|Risk 10.3: EligibilityPolicy manages
+          its own _domainEvents list rather than inheriting Entity<Guid> — verify outbox publishing
+          actually works for these aggregates.} Downstream consumers: Reporting (audit trail) and
+          Enrollment (enable enforcement). Deactivation via `POST /v1/eligibility-policies/{policyId}/deactivate`
+          follows the same pattern, raising **EligibilityPolicyDeactivatedEvent**.
+        activeCalls: [activate-policy, publish-policy-event]
+        revealNodes: [asb]
+        revealCalls: [create-policy, configure-distance, configure-income]
+        duration: 5000
+      - id: policy-step-3
+        title: "Specification Pattern: Rule Evaluation Engine"
+        narrative: >
+          The Specification side of the ADR-013 hybrid handles stateless eligibility evaluation.
+          `POST /v1/eligibility/verify` invokes **CheckEligibilityCommand** which delegates to
+          **EligibilityVerificationService** (`Application/Services/EligibilityVerificationService.cs`,
+          ~281 lines). The service builds an **EligibilityVerificationContext** record carrying
+          TenantId, CepId, StudentId, DistrictId, **EligibilityCriteria** VO, **IepRequirements** VO,
+          HomeAddress, SchoolAddress, HouseholdIncome, HouseholdSize, GradeLevel, and
+          `DistanceToSchoolMiles` (pre-computed per ADR-012). Rule selection follows the type:
+          Distance -> **DistanceEligibilityRule** only. IEP -> **IepEligibilityRule** only.
+          McKinneyVento -> **McKinneyVentoEligibilityRule** only. Other -> ALL rules evaluated.
+          Each rule implements the **IEligibilityRule** interface and returns an
+          **EligibilityRuleResult** record (IsEligible, RuleType, Reason, Metadata, Warnings).
+          Rules are injected as `IEnumerable<IEligibilityRule>` and filtered by `EligibilityType`.
+          {color:green|IepEligibilityRule and McKinneyVentoEligibilityRule are synchronous with no
+          dependencies — pure specification evaluation.} **DistanceEligibilityRule**
+          (`Domain/Rules/DistanceEligibilityRule.cs`) depends on **IDistancePolicyRepository** to
+          load the active district policy and compare `DistanceToSchoolMiles` against grade-specific
+          thresholds. **IncomeEligibilityRule** (`Domain/Rules/IncomeEligibilityRule.cs`) depends on
+          **IIncomePolicyRepository** and calculates `CalculateIncomePercentOfPoverty()`.
+        activeCalls: [verify-eligibility]
+        revealCalls: [activate-policy, publish-policy-event]
+        duration: 6000
+      - id: policy-step-4
+        title: "Composite Result & Compliance Audit Trail"
+        narrative: >
+          The composite evaluation follows a strict rule: {color:green|ALL applicable rules must pass
+          for overall eligibility.} The **EligibilityVerificationResult** record aggregates individual
+          **EligibilityRuleResult** entries into a composite with `IsEligible` (boolean AND of all
+          rule results), `VerificationType`, `RuleResults` list, `VerifiedAt`, `VerifiedBy`, `Warnings`
+          (aggregated from all rules), and a computed `Summary`. Every verification — pass or fail —
+          is persisted to the `EligibilityVerifications` DbSet via **SqlEligibilityVerificationRepository**
+          for compliance auditing. The **EligibilityCriteria** value object
+          (`Domain/ValueObjects/EligibilityCriteria.cs`, ~238 lines) validates inputs: Distance type
+          requires `DistanceFromSchool > 0`, `ForDistance()` requires >= 2.0 miles, `ForOther()` requires
+          notes. **IepRequirements** VO (`Domain/ValueObjects/IepRequirements.cs`, ~230 lines) provides
+          a `None` singleton for non-IEP students and auto-generates accommodation codes ("WC", "AIDE",
+          "CARSEAT", "MED") from boolean flags. Batch verification via `POST /v1/eligibility/verify/batch`
+          through **BatchCheckEligibilityCommand** evaluates multiple students in a single request.
+          {color:blue|Cross-ref: ADR-012 Distance Eligibility Precomputation — distance is pre-computed
+          at TRF processing time, not calculated at verification time.}
+        activeCalls: [batch-verify]
+        revealCalls: [verify-eligibility]
+        duration: 5000
+
+  # -- Section 2: Credential Tracking Pipeline (Conductor) -----------------------------
+  - renderer: service-flow
+    title: "Credential Tracking Pipeline (Conductor Workflow)"
+    accentColor: "#F59E0B"
+    layout: sequence
+
+    services:
+      - id: conductor
+        name: "Conductor"
+        type: workflow
+        technology: "Orkes Conductor"
+        status: healthy
+      - id: compliance-api
+        name: "Compliance & Eligibility API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: provider-api
+        name: "Provider Network API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: comms-api
+        name: "Communications API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: assignment-api
+        name: "Assignment API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: credential-fakes
+        name: "Credential Validation Fakes"
+        type: external
+        technology: "DMV / FMCSA / Background Check"
+        status: degraded
+
+    zones:
+      - id: orchestration
+        label: "Conductor Orchestration"
+        members: [conductor]
+        color: "rgba(245, 158, 11, 0.06)"
+      - id: compliance-svc
+        label: "Compliance & Eligibility"
+        members: [compliance-api, credential-fakes]
+        color: "rgba(139, 92, 246, 0.06)"
+      - id: cross-context
+        label: "Cross-Context Services"
+        members: [provider-api, comms-api, assignment-api]
+        color: "rgba(34, 197, 94, 0.06)"
+
+    calls:
+      - id: detect-expiring
+        type: sync
+        from: conductor
+        to: compliance-api
+        method: POST
+        path: "DetectExpiringCredentialsTask"
+        protocol: http
+        duration: 300
+        description: "Conductor task worker validates credential via ICredentialValidationService and retrieves provider contact info via IProviderCredentialService (HTTP client to provider-network)"
+      - id: validate-credential
+        type: sync
+        from: compliance-api
+        to: credential-fakes
+        method: POST
+        path: "CredentialValidationService → FakeDmvValidationProvider / FakeFmcsaValidationProvider / FakeBackgroundCheckProvider"
+        protocol: http
+        duration: 150
+        description: "Orchestrates fake validation providers — DMV for driver's license, FMCSA for CDL, background check providers. Fail-open pattern: deferred validation if registry unavailable."
+      - id: fetch-provider
+        type: sync
+        from: compliance-api
+        to: provider-api
+        method: GET
+        path: "IProviderCredentialService → catalyst-provider-network-api:8080"
+        protocol: http
+        duration: 100
+        description: "ProviderCredentialHttpClient with Polly: retry 3x exp backoff, circuit breaker 50%/30s, 15s timeout. TenantIdDelegatingHandler + CorrelationIdDelegatingHandler."
+      - id: notify-expiration
+        type: sync
+        from: conductor
+        to: comms-api
+        method: POST
+        path: "NotifyCredentialExpirationTask → catalyst-communications-api:8080"
+        protocol: http
+        duration: 200
+        description: "NotificationHttpClient sends expiration warning to provider. Polly: retry 3x, circuit breaker 50%/30s, 15s timeout."
+      - id: check-renewal
+        type: sync
+        from: conductor
+        to: compliance-api
+        method: POST
+        path: "CheckRenewalStatusTask"
+        protocol: http
+        duration: 150
+        description: "Re-validates credential to check if provider renewed before suspension deadline"
+      - id: suspend-provider
+        type: sync
+        from: conductor
+        to: provider-api
+        method: POST
+        path: "SuspendProviderTask → catalyst-provider-network-api:8080"
+        protocol: http
+        duration: 200
+        description: "Suspends non-compliant provider in Provider Network BC"
+      - id: reassign-trips
+        type: sync
+        from: conductor
+        to: assignment-api
+        method: POST
+        path: "ReassignProviderTripsTask → catalyst-assignment-api:8080"
+        protocol: http
+        duration: 400
+        description: "TripReassignmentHttpClient reassigns trips from suspended providers. Polly: retry 3x, circuit breaker 50%/30s, 30s timeout."
+      - id: reinstate-provider
+        type: sync
+        from: conductor
+        to: provider-api
+        method: POST
+        path: "ReinstateProviderTask → catalyst-provider-network-api:8080"
+        protocol: http
+        duration: 150
+        description: "Reinstates provider after credential renewal is confirmed"
+
+    steps:
+      - id: cred-step-1
+        title: "Credential Detection & External Validation"
+        narrative: >
+          The `credential-expiration-workflow` in Conductor (health-checked in `Program.cs`) drives
+          the credential tracking pipeline with 6 registered task workers. Stage 1:
+          **DetectExpiringCredentialsTask** (`Application/Tasks/DetectExpiringCredentialsTask.cs`)
+          validates the credential via **ICredentialValidationService** and retrieves provider contact
+          information via **IProviderCredentialService**. The **CredentialValidationService**
+          (`Infrastructure/CrossContext/CredentialValidationService.cs`) orchestrates three external
+          registry providers — **FakeDmvValidationProvider** (driver's license), **FakeFmcsaValidationProvider**
+          (CDL), and **FakeBackgroundCheckProvider** (background checks). The `ValidateCredentialAsync()`
+          method supports 10 **CredentialType** values including `DriversLicense`, `CommercialDriversLicense`,
+          `BackgroundCheck`, `DrugTest`, `CprFirstAid`, `SchoolBusEndorsement`. Results use
+          **CredentialValidationStatus**: `Valid`, `Invalid`, `ExpiringWithin30Days`, `Deferred`,
+          `NotFound`, `IdentityMismatch`, `Error`. {color:red|Risk 10.5: FakeDmvValidationProvider,
+          FakeFmcsaValidationProvider, and FakeBackgroundCheckProvider are registered as singletons
+          even in production DI. Real Checkr/DMV/FMCSA integrations not yet implemented.}
+          {color:green|Fail-open pattern: deferred validation if registry unavailable, retried asynchronously.}
+        activeCalls: [detect-expiring, validate-credential, fetch-provider]
+        revealNodes: [conductor, compliance-api, credential-fakes, provider-api]
+        duration: 6000
+      - id: cred-step-2
+        title: "Expiration Notification & Renewal Check"
+        narrative: >
+          Stage 2: **NotifyCredentialExpirationTask** sends expiration warnings to the provider
+          via **INotificationService** — implemented by **NotificationHttpClient** targeting
+          `catalyst-communications-api:8080` with Polly resilience (retry 3x exponential backoff,
+          circuit breaker 50%/30s, 15s timeout). All 3 cross-context HTTP clients propagate
+          `TenantIdDelegatingHandler` + `CorrelationIdDelegatingHandler` for multi-tenancy and
+          distributed tracing. Stage 3: **CheckRenewalStatusTask** re-validates the credential
+          to determine if the provider renewed before the suspension deadline. If the credential
+          status returns `Valid`, the workflow terminates successfully — no suspension needed.
+          If still `Invalid` or `ExpiringWithin30Days`, the workflow proceeds to suspension.
+          {color:blue|Cross-ref: Communications BC handles the actual notification delivery via
+          Twilio (SMS+Voice), SendGrid (Email), Firebase (Push).}
+        activeCalls: [notify-expiration, check-renewal]
+        revealNodes: [comms-api]
+        revealCalls: [detect-expiring, validate-credential, fetch-provider]
+        duration: 5000
+      - id: cred-step-3
+        title: "Provider Suspension & Trip Reassignment"
+        narrative: >
+          Stage 4: **SuspendProviderTask** suspends the non-compliant provider in the Provider
+          Network BC via **IProviderCredentialService** (HTTP client to `catalyst-provider-network-api:8080`).
+          Stage 6: **ReassignProviderTripsTask** triggers trip reassignment via **ITripReassignmentService**
+          — implemented by **TripReassignmentHttpClient** targeting `catalyst-assignment-api:8080`
+          with the longest timeout (30s) reflecting the computational cost of reassignment.
+          Both HTTP clients use identical Polly configuration: retry 3x with exponential backoff,
+          circuit breaker at 50% failure rate with 30s recovery window. The Conductor workflow
+          provides saga-style compensation: if suspension succeeds but reassignment fails, the
+          compensation workflow can reinstate the provider. {color:green|Each task worker is
+          independently testable — 5 test files cover DetectExpiringCredentialsTask,
+          SuspendProviderTask, ReinstateProviderTask, ReassignProviderTripsTask, and
+          CheckRenewalStatusTask.}
+        activeCalls: [suspend-provider, reassign-trips]
+        revealNodes: [assignment-api]
+        revealCalls: [notify-expiration, check-renewal]
+        duration: 5000
+      - id: cred-step-4
+        title: "Provider Reinstatement"
+        narrative: >
+          Stage 5: **ReinstateProviderTask** reinstates the provider after credential renewal is
+          confirmed — completing the full credential lifecycle. The workflow may loop: after
+          reinstatement, CheckRenewalStatusTask can re-verify to confirm the new credential is
+          valid. The Redis cache (`CatalystCompliance:` instance prefix) provides fast lookup
+          for credential status during the verification cycle. The entire pipeline is observable
+          via OpenTelemetry distributed tracing (`AddCatalystTelemetry("Compliance")`) and
+          Prometheus metrics (`AddCatalystEpMetrics("catalyst-compliance")`). Health checks at
+          `/health/ready` validate PostgreSQL connectivity, standard health, and Conductor workflow
+          availability. {color:blue|Cross-ref: Provider Network BC owns the Credential aggregate —
+          Compliance BC has no Credential aggregate of its own (Risk 10.2). All credential data
+          flows from Provider Network via HTTP clients.}
+        activeCalls: [reinstate-provider]
+        revealCalls: [suspend-provider, reassign-trips]
+        duration: 4000

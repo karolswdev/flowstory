@@ -1,0 +1,390 @@
+id: routing-pricing-pipeline
+title: "Routing & Pricing -- Geocoding, Route Optimization & CTTC Pricing Engine"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  The dual pipeline that turns raw addresses into optimized routes and dollar amounts.
+  Section 1 traces the geocoding cascade (Google Maps primary, Haversine fallback) through
+  route calculation with algorithm selection based on waypoint count. Section 2 follows the
+  CTTC pricing engine: contract rate lookup, priority-ordered rule evaluation, and the
+  formula that produces every trip cost in the platform.
+
+sections:
+  # -- Section 1: Geocoding & Route Optimization --------------------------------
+  - renderer: service-flow
+    title: "Geocoding & Route Optimization"
+    accentColor: "#3B82F6"
+    layout: sequence
+
+    services:
+      - id: routing-api
+        name: "Routing API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: routing-db
+        name: "PostgreSQL 16 + PostGIS"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: google-maps
+        name: "Google Maps Platform"
+        type: external
+        technology: "Geocoding + Directions + Distance Matrix"
+        status: healthy
+      - id: redis
+        name: "Redis"
+        type: cache
+        technology: "Redis 7"
+        status: healthy
+      - id: pricing-api
+        name: "Pricing API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+
+    zones:
+      - id: geocoding-zone
+        label: "Geocoding Pipeline"
+        members: [routing-api, google-maps, redis]
+        color: "rgba(59, 130, 246, 0.06)"
+      - id: persistence-zone
+        label: "Route Persistence"
+        members: [routing-db]
+        color: "rgba(34, 197, 94, 0.06)"
+
+    calls:
+      - id: geocode-address
+        type: sync
+        from: routing-api
+        to: google-maps
+        method: POST
+        path: /v1/geocoding/address
+        protocol: http
+        duration: 180
+        status: 200
+        description: "GeocodeAddressCommand -- CompositeGeocodingService cascade: Redis cache -> Google Maps -> Rhapsody legacy -> Haversine stub"
+        response:
+          status: 200
+          label: "Lat/lng + quality score returned"
+      - id: cache-geocode
+        type: async
+        from: routing-api
+        to: redis
+        messageType: "GeocodeResultCached"
+        payload:
+          path: "SET CatalystRouting:{addressHash}"
+          duration: 5
+          description: "Cache geocoding result with CatalystRouting: prefix to prevent redundant Google Maps API calls"
+      - id: check-cache
+        type: sync
+        from: routing-api
+        to: redis
+        method: GET
+        path: "CatalystRouting:{addressHash}"
+        protocol: http
+        duration: 3
+        status: 200
+        description: "IGeocodingCache lookup -- short-circuits the cascade if address was previously geocoded"
+        response:
+          status: 200
+          label: "Cache hit or miss"
+      - id: calculate-route
+        type: sync
+        from: routing-api
+        to: google-maps
+        method: POST
+        path: /v1/routes/calculate
+        protocol: http
+        duration: 350
+        status: 200
+        description: "CalculateRouteCommand -- algorithm selected by waypoint count: <10 Google Directions, 10-100 Distance Matrix + Nearest-Neighbor, fallback Haversine (25 mph)"
+        response:
+          status: 200
+          label: "OptimizedRoute with segments, distance, duration"
+      - id: persist-route
+        type: sync
+        from: routing-api
+        to: routing-db
+        method: POST
+        path: "routes + route_segments + outbox_messages (RouteCalculatedEvent)"
+        duration: 40
+        description: "Atomic: OptimizedRoute aggregate + RouteSegments + transactional outbox. Route transitions Created -> Optimized via MarkAsOptimized()."
+      - id: list-named-locations
+        type: sync
+        from: routing-api
+        to: routing-db
+        method: GET
+        path: /v1/named-locations
+        protocol: http
+        duration: 25
+        status: 200
+        description: "ListNamedLocationsQuery -- paginated, filterable by LocationType (BusStop, TransferHub, Landmark, DistrictOffice, CommonPickup, MedicalFacility) and IsActive"
+        response:
+          status: 200
+          label: "Paginated NamedLocation list"
+      - id: nearby-locations
+        type: sync
+        from: routing-api
+        to: routing-db
+        method: GET
+        path: /v1/named-locations/nearby
+        protocol: http
+        duration: 35
+        status: 200
+        description: "GetNearbyNamedLocationsQuery -- PostGIS ST_DWithin geospatial query for locations within radius"
+        response:
+          status: 200
+          label: "Nearby locations within radius"
+      - id: bridge-to-pricing
+        type: publish
+        from: routing-api
+        to: pricing-api
+        messageType: "RouteCalculatedEvent"
+        payload:
+          description: "RouteId, TotalDistanceMiles, TotalDurationMinutes, VehicleType, WaypointCount -- triggers CTTC pricing pipeline via Pricing EP subscription on routing-and-pricing topic"
+
+    steps:
+      - id: geocode-step-1
+        title: "Address Resolution Cascade"
+        narrative: >
+          Every address enters the **CompositeGeocodingService** four-tier cascade.
+          First: Redis cache lookup (`CatalystRouting:{addressHash}`) -- cache hits
+          bypass all external calls. Second: **Google Maps Geocoding API** (primary,
+          production). Third: **Rhapsody legacy geocoder** (secondary fallback for
+          addresses the legacy system already resolved). Fourth: **Haversine stub**
+          (development-only, returns approximate coordinates). A circuit breaker
+          prevents cascading failures if Google Maps is degraded. Pre-geocoded
+          coordinates (from the TRF submission) bypass the cascade entirely.
+          `POST /v1/geocoding/address` also supports batch mode (up to 100 addresses)
+          and candidate mode for ambiguous addresses.
+        activeCalls: [check-cache, geocode-address, cache-geocode]
+        revealNodes: [routing-api, redis, google-maps]
+        duration: 5000
+      - id: geocode-step-2
+        title: "Route Calculation & Algorithm Selection"
+        narrative: >
+          `POST /v1/routes/calculate` accepts an array of **Waypoints** (each with
+          lat/lng, type, time windows via EarliestArrival/LatestArrival, and 5-minute
+          default ServiceTime). The **RouteOptimizationService** selects the algorithm:
+          fewer than 10 waypoints uses **Google Directions API** (exact, traffic-aware
+          via TrafficModel enum: BestGuess, Pessimistic, Optimistic). 10-100 waypoints
+          uses **Distance Matrix + Nearest-Neighbor heuristic**. When Google Maps is
+          unavailable, the **Haversine fallback** computes straight-line distance at
+          25 mph average urban speed -- the worker returns COMPLETED even without the
+          external API. The OptimizedRoute aggregate enforces invariants: at least 2
+          waypoints, segments.Count == waypoints.Count - 1, segments properly sequenced.
+        activeCalls: [calculate-route, persist-route]
+        revealNodes: [routing-db]
+        revealCalls: [check-cache, geocode-address, cache-geocode]
+        duration: 6000
+      - id: geocode-step-3
+        title: "Named Location Management"
+        narrative: >
+          **NamedLocations** are reusable geocoded points: schools, bus stops, transfer
+          hubs, medical facilities. `GET /v1/named-locations` returns paginated results
+          filtered by **LocationType** (6 types: BusStop, TransferHub, Landmark,
+          DistrictOffice, CommonPickup, MedicalFacility) and active status.
+          `GET /v1/named-locations/nearby` runs a PostGIS **ST_DWithin** geospatial
+          query for locations within a specified radius. CRUD operations enforce that
+          LocationType is immutable after creation, addresses must be geocoded (lat/lng
+          present), and deactivation/reactivation raise domain events that downstream
+          BCs can consume for cache invalidation.
+        activeCalls: [list-named-locations, nearby-locations]
+        revealCalls: [calculate-route, persist-route]
+        duration: 5000
+      - id: geocode-step-4
+        title: "Bridge: Route to Price"
+        narrative: >
+          When `MarkAsOptimized()` fires on the **OptimizedRoute** aggregate, the
+          **RouteCalculatedEvent** is written to the transactional outbox in the same
+          PostgreSQL commit as the route data. The outbox relay publishes it to the
+          `routing-and-pricing` ASB topic. The **Pricing EP** subscribes via
+          `pricing-event-processor` and its **RouteCalculatedEventHandler** triggers
+          `CalculateTripPricingCommand` via MediatR. The event carries TotalDistanceMiles,
+          TotalDurationMinutes, and VehicleType -- everything the pricing engine needs
+          to calculate the trip cost. *This is the handoff from geometry to money.*
+        activeCalls: [bridge-to-pricing]
+        revealNodes: [pricing-api]
+        revealCalls: [list-named-locations, nearby-locations]
+        duration: 4000
+
+  # -- Section 2: CTTC Pricing Engine -------------------------------------------
+  - renderer: service-flow
+    title: "CTTC Pricing Engine"
+    accentColor: "#22C55E"
+    layout: sequence
+
+    services:
+      - id: pricing-api
+        name: "Pricing API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: pricing-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: redis
+        name: "Redis"
+        type: cache
+        technology: "Redis 7"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+      - id: settlement-ep
+        name: "Settlement Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+
+    zones:
+      - id: pricing-core
+        label: "Pricing Engine"
+        members: [pricing-api, pricing-db, redis]
+        color: "rgba(34, 197, 94, 0.06)"
+      - id: revenue-downstream
+        label: "Revenue Pipeline"
+        members: [asb, settlement-ep]
+        color: "rgba(234, 179, 8, 0.06)"
+
+    calls:
+      - id: lookup-cttc
+        type: sync
+        from: pricing-api
+        to: pricing-db
+        method: GET
+        path: "contract_rates WHERE tenant_id AND vehicle_type AND status = Active AND effective_date"
+        duration: 20
+        description: "Lookup Active ContractRate for (TenantId, VehicleType, EffectiveDate). Key invariant: one Active rate per TenantId+VehicleType."
+      - id: calculate-base
+        type: sync
+        from: pricing-api
+        to: pricing-db
+        method: POST
+        path: /v1/pricing/calculate
+        protocol: http
+        duration: 150
+        status: 200
+        description: "CalculateTripPricingCommand -- formula: baseRate + (distance * perMileRate) + (duration * perMinuteRate), floor at MinimumCharge"
+        response:
+          status: 200
+          label: "TripCost with base and final amounts"
+      - id: fetch-rules
+        type: sync
+        from: pricing-api
+        to: pricing-db
+        method: GET
+        path: "pricing_rules WHERE effective AND conditions match PricingContext"
+        duration: 15
+        description: "Fetch applicable PricingRules filtered by effective date range, sorted by Priority (lower = first)"
+      - id: evaluate-rules
+        type: sync
+        from: pricing-api
+        to: redis
+        method: GET
+        path: "CatalystPricing:{idempotencyKey}"
+        protocol: http
+        duration: 8
+        status: 200
+        description: "PricingRulesEngine evaluates RuleConditions (7 types: Always, TimeOfDay, DayOfWeek, VehicleType, DistanceThreshold, StudentType, ServiceArea) with AND/OR RuleGroup nesting"
+        response:
+          status: 200
+          label: "Idempotency check"
+      - id: persist-tripcost
+        type: sync
+        from: pricing-api
+        to: pricing-db
+        method: POST
+        path: "trip_costs + outbox_messages (TripCostCalculatedEvent)"
+        duration: 35
+        description: "Atomic: TripCost aggregate with AppliedPricingRules + transactional outbox. TripCost.CompleteWithAuditTrail() raises TripCostCalculatedEvent + RulesEvaluatedEvent."
+      - id: get-cttc
+        type: sync
+        from: pricing-api
+        to: pricing-db
+        method: GET
+        path: /v1/pricing/cttc
+        protocol: http
+        duration: 20
+        status: 200
+        description: "Search CTTC rate cards -- paginated, filterable. Policy-based auth: Pricing.ViewRates for reads, Pricing.ManageRates for mutations."
+        response:
+          status: 200
+          label: "Paginated ContractRate list"
+      - id: publish-tripcost
+        type: publish
+        from: pricing-api
+        to: asb
+        messageType: "TripCostCalculatedEvent"
+        payload:
+          description: "TripCostId, TripId, RouteId, BaseCost, FinalCost, DistanceMiles, DurationMinutes, AppliedRules[] -- self-contained for Settlement BC/PD/PM"
+      - id: settlement-consume
+        type: subscribe
+        from: asb
+        to: settlement-ep
+        messageType: "TripCostCalculatedEvent"
+        action: "Calculate BC/PD/PM -- Bill Client, Pay Driver, Pay Monitor"
+
+    steps:
+      - id: pricing-step-1
+        title: "Contract Rate Lookup & Base Cost"
+        narrative: >
+          The **CalculateTripPricingCommand** begins by resolving the Active
+          **ContractRate** (CTTC) for the tenant's vehicle type and effective date.
+          The CTTC lifecycle is Draft -> Active -> Archived, with the critical
+          invariant that Active rate cards are immutable -- you must archive first
+          to change rates. The **base cost formula**:
+          `baseRate + (distance * perMileRate) + (duration * perMinuteRate)`, floored
+          at **MinimumCharge**. For example, a Sedan CTTC with $5.00 base, $1.50/mile,
+          $0.25/min on a 12-mile, 28-minute trip yields $5.00 + $18.00 + $7.00 = $30.00.
+          A special needs business rule upgrades Sedan to Wheelchair vehicle type when
+          `hasSpecialNeeds` is true (CalculatePricingWorker lines 130-136). Default
+          VehicleType falls back to Sedan when not provided.
+        activeCalls: [lookup-cttc, calculate-base]
+        revealNodes: [pricing-api, pricing-db]
+        duration: 5000
+      - id: pricing-step-2
+        title: "Rule Evaluation & Audit Trail"
+        narrative: >
+          The **PricingRulesEngine** (367 lines) fetches all applicable **PricingRules**
+          for the effective date, sorts by **Priority** (lower number = evaluated first),
+          and evaluates each rule's **RuleConditions** against the **PricingContext**.
+          Seven condition types: `Always`, `TimeOfDay`, `DayOfWeek`, `VehicleType`,
+          `DistanceThreshold`, `StudentType`, `ServiceArea` -- composed into **RuleGroups**
+          with nested AND/OR logic. Three rule types: **Surcharge** (additive),
+          **Discount** (subtractive), **Override** (replaces). Percentage adjustments
+          are bounded between -100% and +500%. The final cost is floored at $0.00 --
+          a trip can never have a negative cost. Each rule can only be applied once
+          per TripCost (duplicate prevention via `_appliedRules` check).
+          `CompleteWithAuditTrail()` generates a **RulesEvaluatedEvent** with
+          TotalRulesEvaluated, RulesApplied, RulesSkipped, and EvaluationRecords.
+        activeCalls: [fetch-rules, evaluate-rules]
+        revealNodes: [redis]
+        revealCalls: [lookup-cttc, calculate-base]
+        duration: 6000
+      - id: pricing-step-3
+        title: "Persist & Publish to Settlement"
+        narrative: >
+          The **TripCost** aggregate is persisted with its **AppliedPricingRules**
+          collection and the **TripCostCalculatedEvent** is written to the transactional
+          outbox in the same PostgreSQL commit. The event carries denormalized BaseCost,
+          FinalCost, DistanceMiles, DurationMinutes, and the full AppliedRules array --
+          self-contained so Settlement BC can calculate **BC/PD/PM** (Bill Client, Pay
+          Driver, Pay Monitor) without cross-service queries. Recalculations archive the
+          previous TripCost (via `SupersededByTripCostId`) and raise
+          **TripCostRecalculatedEvent** with cost difference. Manual adjustments raise
+          **TripCostAdjustedEvent** with adjustment amount, type, reason, and
+          AuthorizedBy. {color:red|These three events drive every dollar in the settlement
+          pipeline -- if they are lost, billing and payments break.}
+        activeCalls: [persist-tripcost, publish-tripcost, settlement-consume]
+        revealNodes: [asb, settlement-ep]
+        revealCalls: [fetch-rules, evaluate-rules]
+        duration: 5000

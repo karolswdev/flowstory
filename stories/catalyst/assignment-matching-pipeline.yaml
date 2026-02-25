@@ -1,0 +1,384 @@
+id: assignment-matching-pipeline
+title: "Assignment — Matching Pipeline & Batch Optimization"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  Single-trip auto-assignment triggered by TripPricedEvent, and batch assignment
+  triggered by SgrCompletedEvent. Traces the constraint validation pipeline,
+  greedy nearest-neighbor matching, OR-Tools optimization, and the transactional
+  outbox publishing of TripAssignedEvent to downstream consumers.
+
+sections:
+  # ── Section 1: Single-Trip Assignment ───────────────────────────────────────
+  - renderer: service-flow
+    title: "Single-Trip Assignment"
+    accentColor: "#3B82F6"
+    layout: sequence
+
+    services:
+      - id: assignment-ep
+        name: "Assignment Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: assignment-api
+        name: "Assignment API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: assignment-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: provider-api
+        name: "Provider Network API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: redis
+        name: "Redis"
+        type: cache
+        technology: "Redis 7"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+
+    zones:
+      - id: matching-engine
+        label: "Assignment Matching Engine"
+        members: [assignment-ep, assignment-api, assignment-db, redis]
+        color: "rgba(59, 130, 246, 0.06)"
+      - id: external-data
+        label: "External Data Sources"
+        members: [provider-api]
+        color: "rgba(34, 197, 94, 0.06)"
+      - id: event-bus
+        label: "Event Bus"
+        members: [asb]
+        color: "rgba(168, 85, 247, 0.06)"
+
+    calls:
+      - id: consume-priced
+        type: subscribe
+        from: asb
+        to: assignment-ep
+        messageType: "TripPricedEvent"
+        action: "TripPricedEventHandler dispatches AssignTripCommand via MediatR"
+      - id: load-projections
+        type: sync
+        from: assignment-api
+        to: assignment-db
+        method: GET
+        path: "eligible_providers + assignable_vehicles WHERE tenant_id AND is_eligible"
+        duration: 25
+        description: "Load local projections — EligibleProvider and AssignableVehicle read models"
+      - id: check-availability
+        type: sync
+        from: assignment-api
+        to: provider-api
+        method: GET
+        path: /v1/providers/{id}/availability
+        protocol: http
+        duration: 80
+        status: 200
+        description: "Real-time availability check via ProviderApiHttpClient (Polly retry 3x, circuit breaker)"
+        response:
+          status: 200
+          label: "Provider available"
+      - id: validate-hard
+        type: sync
+        from: assignment-api
+        to: assignment-db
+        method: GET
+        path: "ConstraintValidationService — 5 validators in pipeline"
+        duration: 40
+        description: "7 hard constraints: ProviderEligible, VehicleLicensed, InsuranceValid, CapacityOk, WheelchairCapable, ServiceAreaMatch, TimeWindowFeasible"
+      - id: score-soft
+        type: sync
+        from: assignment-api
+        to: assignment-db
+        method: GET
+        path: "AssignmentMatchingService.FindBestMatch() — Haversine + weighted scoring"
+        duration: 35
+        description: "7 soft factors: Proximity (Haversine, 50mi max), OnTime 35%, Satisfaction 25%, Reliability 20%, Experience 20%, SkillBonus, SubscriptionPreference (40% weight if enabled)"
+      - id: create-assignment
+        type: sync
+        from: assignment-api
+        to: assignment-db
+        method: POST
+        path: "trip_assignments + outbox_messages (TripAssignedEvent)"
+        duration: 30
+        description: "TripAssignment created as Proposed, ConfidenceScore 0.0-1.0, constraints stored as JSON — ATOMIC with outbox"
+      - id: idempotency-check
+        type: sync
+        from: assignment-api
+        to: redis
+        method: GET
+        path: "CatalystAssignment:{eventId}"
+        duration: 5
+        description: "Duplicate check — TripPricedEventHandler catches 'already exists' exception"
+      - id: publish-assigned
+        type: publish
+        from: assignment-api
+        to: asb
+        messageType: "TripAssignedEvent"
+        payload:
+          description: "Published via transactional outbox relay (5s poll, batch 100). Consumers: Trip Operations, Communications, Compliance, Monitoring, Reporting"
+
+    steps:
+      - id: single-step-1
+        title: "TripPricedEvent Trigger"
+        narrative: >
+          **TripPricedEvent** arrives on the `routing-and-pricing` ASB topic.
+          Assignment EP's **TripPricedEventHandler** consumes it and dispatches
+          **AssignTripCommand** via MediatR. Idempotency is handled at the command
+          handler level — if a TripAssignment already exists for the tripId, the
+          handler catches the duplicate and returns without side effects. The
+          `auto-assignment-enabled` feature flag (per-tenant, LaunchDarkly) gates
+          whether auto-assignment fires or the trip queues for manual dispatch.
+        activeCalls: [consume-priced, idempotency-check]
+        revealNodes: [asb, assignment-ep, redis]
+        duration: 5000
+      - id: single-step-2
+        title: "Hard Constraint Validation"
+        narrative: >
+          **ConstraintValidationService** orchestrates 5 validators in a pipeline:
+          **AvailabilityConstraintValidator** (provider active, not terminated),
+          **CapacityConstraintValidator** (vehicle seats >= passenger count, wheelchair capacity if needed),
+          **ComplianceConstraintValidator** (license not expired, insurance valid, background check current),
+          **GeographicClusteringConstraintValidator** (provider service area covers pickup/dropoff),
+          **SpecialNeedsConstraintValidator** (IEP requirements met, required skills present).
+          These map to 7 hard constraint booleans on the **AssignmentConstraints** VO — if
+          `AllHardConstraintsMet` is false, the provider is eliminated. Local projections
+          (**EligibleProvider**, **AssignableVehicle**) are queried first to avoid unnecessary
+          cross-service calls. Real-time availability confirmed via **ProviderApiHttpClient**.
+        activeCalls: [load-projections, check-availability, validate-hard]
+        revealNodes: [assignment-api, assignment-db, provider-api]
+        revealCalls: [consume-priced, idempotency-check]
+        duration: 6000
+      - id: single-step-3
+        title: "Soft Constraint Scoring & Greedy Match"
+        narrative: >
+          **AssignmentMatchingService.FindBestMatch()** scores surviving providers across
+          7 weighted factors. **Proximity** uses Haversine formula with linear decay to 50-mile
+          max. **OnTime** history (35% weight), **Satisfaction** ratings (25%), **Reliability**
+          score (20%), **Experience** with student/school (20%). **SkillMatch** — required skills
+          are a hard gate (already filtered), preferred skills add bonus points.
+          **SubscriptionPreference** — when `PreferSubscriptionDriver` is enabled, the subscription
+          driver gets 40% weight, compressing all other scores to 60%. The
+          **AlgorithmOrchestrationService** selects Greedy for single-trip (< 10 trips). Circuit
+          breaker protects against algorithm timeouts. Top match becomes the **TripAssignment**
+          aggregate with `AssignmentType.Automatic` and `AssignmentStatus.Proposed`.
+        activeCalls: [score-soft, create-assignment]
+        revealNodes: []
+        revealCalls: [load-projections, check-availability, validate-hard]
+        duration: 5000
+      - id: single-step-4
+        title: "TripAssignedEvent & Downstream Fanout"
+        narrative: >
+          **TripAssignment** created in `Proposed` state with `ConfidenceScore` (0.0-1.0),
+          **AssignmentConstraints** stored as JSON column on `trip_assignments`. The
+          **TripAssignedEvent** is written to `assignment.outbox_messages` in the same
+          PostgreSQL transaction as the domain change. Outbox relay polls every 5 seconds
+          (batch 100, 5 retries, 7-day retention) and publishes to the
+          `provider-network-and-assignment` ASB topic. Five downstream consumers react:
+          **Trip Operations** reserves the VR, **Communications** notifies the provider,
+          **Compliance** logs the assignment for audit, **Monitoring** tracks assignment
+          metrics, **Reporting** updates dashboards. The assignment now awaits
+          `Confirm()` — either automatically via Conductor workflow or manually by a dispatcher.
+        activeCalls: [publish-assigned]
+        revealNodes: [asb]
+        revealCalls: [score-soft, create-assignment]
+        duration: 5000
+
+  # ── Section 2: Batch Assignment ─────────────────────────────────────────────
+  - renderer: service-flow
+    title: "Batch Assignment"
+    accentColor: "#22C55E"
+    layout: sequence
+
+    services:
+      - id: conductor
+        name: "Conductor"
+        type: workflow
+        technology: "Orkes Conductor"
+        status: healthy
+      - id: assignment-api
+        name: "Assignment API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: assignment-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: trip-ops-ep
+        name: "Trip Operations EP"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: redis
+        name: "Redis"
+        type: cache
+        technology: "Redis 7"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+
+    zones:
+      - id: batch-pipeline
+        label: "Daily Batch Pipeline"
+        members: [conductor, assignment-api, assignment-db, redis]
+        color: "rgba(34, 197, 94, 0.06)"
+      - id: downstream
+        label: "Downstream Consumers"
+        members: [asb, trip-ops-ep]
+        color: "rgba(59, 130, 246, 0.06)"
+
+    calls:
+      - id: sgr-trigger
+        type: subscribe
+        from: asb
+        to: conductor
+        messageType: "SgrCompletedEvent"
+        action: "Triggers daily-trip-assignment-workflow in Conductor"
+      - id: create-batch
+        type: sync
+        from: conductor
+        to: assignment-api
+        method: POST
+        path: /v1/assignments/batch
+        protocol: http
+        duration: 200
+        status: 200
+        description: "CreateAssignmentBatchTask — initializes BatchAssignmentOperation (Pending)"
+        response:
+          status: 200
+          label: "Batch created"
+      - id: load-unassigned
+        type: sync
+        from: assignment-api
+        to: assignment-db
+        method: GET
+        path: "GetUnassignedTripsQuery — unassigned trips for tenant"
+        duration: 40
+        description: "LoadUnassignedTripsTask queries trips without active assignments"
+      - id: load-providers
+        type: sync
+        from: assignment-api
+        to: assignment-db
+        method: GET
+        path: "eligible_providers WHERE is_eligible = true"
+        duration: 30
+        description: "LoadAvailableProvidersTask loads EligibleProvider projections"
+      - id: optimize-match
+        type: sync
+        from: assignment-api
+        to: assignment-db
+        method: POST
+        path: "OptimizedMatchingAlgorithm — multi-objective optimization"
+        duration: 500
+        description: "MatchTripsToProvidersTask + OptimizeRoutesTask — 4 objective calculators: Distance, Time, Utilization, Cost"
+      - id: idempotent-match
+        type: sync
+        from: assignment-api
+        to: redis
+        method: GET
+        path: "CatalystAssignment:batch:{batchId}"
+        duration: 5
+        description: "CalculateOptimalMatchTask idempotency via AddIdempotentConductorWorker"
+      - id: bulk-persist
+        type: sync
+        from: assignment-api
+        to: assignment-db
+        method: POST
+        path: "trip_assignments (N rows) + batch_assignment_operations + outbox_messages"
+        duration: 350
+        description: "ParallelBatchProcessor creates assignments in parallel, persists with outbox — ATOMIC"
+      - id: publish-batch-complete
+        type: publish
+        from: assignment-api
+        to: asb
+        messageType: "DailyAssignmentBatchCompletedEvent + TripAssignedEvent (per trip)"
+        payload:
+          description: "Bulk TripAssignedEvents + DailyAssignmentBatchCompletedEvent via transactional outbox"
+      - id: trip-ops-consume
+        type: subscribe
+        from: asb
+        to: trip-ops-ep
+        messageType: "TripAssignedEvent"
+        action: "Trip Operations reserves VRs for each assigned trip"
+      - id: finalize-batch
+        type: sync
+        from: conductor
+        to: assignment-api
+        method: POST
+        path: "FinalizeBatchTask — BatchOperationStatus update"
+        protocol: http
+        duration: 100
+        status: 200
+        description: "FinalizeBatchTask: Completed, PartiallyCompleted, or Failed. EscalateUnassignedTripsTask for failures."
+
+    steps:
+      - id: batch-step-1
+        title: "Conductor Workflow & Data Loading"
+        narrative: >
+          **SgrCompletedEvent** triggers the `daily-trip-assignment-workflow` in
+          Conductor. The workflow orchestrates 13 task workers in sequence.
+          **CreateAssignmentBatchTask** initializes a **BatchAssignmentOperation**
+          entity (`Pending` -> `Processing`). **LoadUnassignedTripsTask** queries all
+          trips without active assignments for the tenant. **LoadAvailableProvidersTask**
+          fetches **EligibleProvider** projections where `IsEligible = true`. The
+          **AlgorithmOrchestrationService** selects **OptimizedMatchingAlgorithm** for
+          batch operations (>= 10 trips) — this engages 4 multi-objective calculators:
+          **DistanceObjectiveCalculator**, **TimeObjectiveCalculator**,
+          **UtilizationObjectiveCalculator**, **CostObjectiveCalculator**.
+        activeCalls: [sgr-trigger, create-batch, load-unassigned, load-providers]
+        revealNodes: [asb, conductor, assignment-api, assignment-db]
+        duration: 5000
+      - id: batch-step-2
+        title: "Multi-Objective Optimization & Parallel Matching"
+        narrative: >
+          **MatchTripsToProvidersTask** runs the optimized matching algorithm across all
+          unassigned trips simultaneously. Unlike single-trip greedy matching, the batch
+          optimizer considers global utilization — balancing load across providers to
+          minimize total distance while maximizing on-time probability.
+          **OptimizeRoutesTask** refines the initial matching with route-level
+          optimization. **ParallelBatchProcessor** parallelizes the actual assignment
+          creation. Each match produces a **TripAssignment** with
+          `AssignmentType.Automatic` and `AssignmentStatus.Proposed`. Worker idempotency
+          via **AddIdempotentConductorWorker** (Redis-backed) prevents duplicate
+          assignments if Conductor retries a failed task. All assignments persisted in
+          a single transaction with outbox events — max 1000 per batch.
+        activeCalls: [optimize-match, idempotent-match, bulk-persist]
+        revealNodes: [redis]
+        revealCalls: [sgr-trigger, create-batch, load-unassigned, load-providers]
+        duration: 6000
+      - id: batch-step-3
+        title: "Bulk Event Publishing & Finalization"
+        narrative: >
+          Outbox relay publishes **TripAssignedEvent** per assigned trip plus a single
+          **DailyAssignmentBatchCompletedEvent** summarizing the batch. Trip Operations EP
+          receives each **TripAssignedEvent** and reserves VRs for matched trips.
+          **FinalizeBatchTask** updates the **BatchAssignmentOperation**: `Completed`
+          (all trips matched), `PartiallyCompleted` (some failures), or `Failed`.
+          **EscalateUnassignedTripsTask** creates monitoring exceptions for unmatched
+          trips. **NotifyDispatchUnassignedTask** alerts dispatchers. The compensation
+          workflow (`daily-trip-assignment-compensation-workflow`) handles rollback if
+          the pipeline fails mid-batch — cancelling partially-created assignments and
+          restoring the unassigned state.
+        activeCalls: [publish-batch-complete, trip-ops-consume, finalize-batch]
+        revealNodes: [asb, trip-ops-ep]
+        revealCalls: [optimize-match, idempotent-match, bulk-persist]
+        duration: 5000

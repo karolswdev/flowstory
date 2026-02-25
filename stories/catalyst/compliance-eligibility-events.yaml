@@ -1,0 +1,370 @@
+id: compliance-eligibility-events
+title: "Compliance & Eligibility — Event-Driven Integration & Compliance Status"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  The Compliance & Eligibility EventProcessor consumes events from two upstream bounded contexts
+  (Provider Network and Identity & Access) via Azure Service Bus subscriptions. Four inbound
+  handlers process ProviderVerifiedEvent, CredentialExpiredEvent, UserDeactivatedEvent, and
+  UserRoleChangedEvent — all with Redis-based idempotency (1-hour TTL). Outbound, 9 domain
+  events flow from EligibilityPolicy and EligibilityRule aggregates via transactional outbox
+  to Reporting and Enrollment consumers. This story traces both directions of the event-driven
+  architecture and highlights the stub handlers that represent known implementation gaps.
+
+sections:
+  # -- Section 1: Inbound Event Consumption (EventProcessor) ---------------------------
+  - renderer: service-flow
+    title: "Inbound Event Consumption (EventProcessor Handlers)"
+    accentColor: "#EF4444"
+    layout: sequence
+
+    services:
+      - id: provider-ep
+        name: "Provider Network"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: identity-ep
+        name: "Identity & Access"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+      - id: compliance-ep
+        name: "Compliance EventProcessor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: redis
+        name: "Redis Cache"
+        type: cache
+        technology: "Redis"
+        status: healthy
+      - id: compliance-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+
+    zones:
+      - id: upstream-producers
+        label: "Upstream Event Producers"
+        members: [provider-ep, identity-ep]
+        color: "rgba(59, 130, 246, 0.06)"
+      - id: event-backbone
+        label: "Event Backbone"
+        members: [asb]
+        color: "rgba(245, 158, 11, 0.06)"
+      - id: compliance-consumer
+        label: "Compliance & Eligibility"
+        members: [compliance-ep, redis, compliance-db]
+        color: "rgba(239, 68, 68, 0.06)"
+
+    calls:
+      - id: provider-verified-publish
+        type: publish
+        from: provider-ep
+        to: asb
+        messageType: "ProviderVerifiedEvent"
+        payload:
+          description: "ProviderId, TenantId, VerificationDate — published to provider-network-and-assignment topic when provider passes verification"
+      - id: credential-expired-publish
+        type: publish
+        from: provider-ep
+        to: asb
+        messageType: "CredentialExpiredEvent"
+        payload:
+          description: "ProviderId, CredentialId, TenantId, CredentialType, ExpiredAt — published to provider-network-and-assignment topic on credential expiration"
+      - id: user-deactivated-publish
+        type: publish
+        from: identity-ep
+        to: asb
+        messageType: "UserDeactivatedEvent"
+        payload:
+          description: "UserId, TenantId, DeactivatedAt — published to identity-and-access topic when user account is deactivated"
+      - id: user-role-changed-publish
+        type: publish
+        from: identity-ep
+        to: asb
+        messageType: "UserRoleChangedEvent"
+        payload:
+          description: "UserId, TenantId, OldRole, NewRole — published to identity-and-access topic on role change"
+      - id: provider-verified-consume
+        type: subscribe
+        from: asb
+        to: compliance-ep
+        messageType: "ProviderVerifiedEvent"
+        action: "ProviderVerifiedEventHandler — STUB: logs only, TODO persist compliance record"
+      - id: credential-expired-consume
+        type: subscribe
+        from: asb
+        to: compliance-ep
+        messageType: "CredentialExpiredEvent"
+        action: "CredentialExpiredEventHandler — STUB: logs + metrics only, TODO persist ComplianceViolation and trigger re-evaluation"
+      - id: user-deactivated-consume
+        type: subscribe
+        from: asb
+        to: compliance-ep
+        messageType: "UserDeactivatedEvent"
+        action: "UserDeactivatedEventHandler — PARTIAL: cache invalidation works, credential revocation is STUB"
+      - id: user-role-changed-consume
+        type: subscribe
+        from: asb
+        to: compliance-ep
+        messageType: "UserRoleChangedEvent"
+        action: "UserRoleChangedEventHandler — PARTIAL: cache invalidation works, requirement updates are STUB"
+      - id: idempotency-check
+        type: sync
+        from: compliance-ep
+        to: redis
+        method: GET
+        path: "compliance:{event-type}:{EventId}"
+        protocol: redis
+        duration: 5
+        description: "Redis distributed cache idempotency check — 1-hour TTL keyed by compliance:{event-type}:{EventId}"
+      - id: idempotency-set
+        type: sync
+        from: compliance-ep
+        to: redis
+        method: SET
+        path: "compliance:{event-type}:{EventId} (1h TTL)"
+        protocol: redis
+        duration: 5
+        description: "Mark event as processed in Redis after successful handling"
+      - id: metrics-record
+        type: sync
+        from: compliance-ep
+        to: compliance-ep
+        method: POST
+        path: "CatalystMetrics.RecordCredentialExpired() / RecordCredentialVerified()"
+        duration: 1
+        description: "EP metric recording via DecorateEventHandlerWithMetrics<> decorator — 4 handlers decorated"
+
+    steps:
+      - id: inbound-step-1
+        title: "Provider Network Events: Verification & Credential Expiration"
+        narrative: >
+          The Compliance EventProcessor (`Catalyst.Compliance.EventProcessor/Program.cs`) subscribes
+          to the `provider-network-and-assignment` ASB topic for two event types.
+          **ProviderVerifiedEventHandler** (`EventProcessor/Handlers/ProviderVerifiedEventHandler.cs`)
+          receives **ProviderVerifiedEvent** when a provider passes verification in the Provider Network
+          BC. {color:red|STUB: The handler currently logs the event and records
+          RecordCredentialVerified() metrics only. The TODO comment references UpdateComplianceRecordAsync()
+          which should persist a compliance record — but the ComplianceRecord/ComplianceProfile aggregate
+          does not exist yet (Risk 10.2).} **CredentialExpiredEventHandler**
+          (`EventProcessor/Handlers/CredentialExpiredEventHandler.cs`) receives **CredentialExpiredEvent**
+          when a provider credential expires. {color:red|STUB: Logs + RecordCredentialExpired() metrics
+          only. TODO references CreateComplianceViolationAsync() and TriggerEligibilityReevaluationAsync()
+          — but the ComplianceViolation aggregate does not exist yet (Risk 10.2). No compliance violations
+          are persisted. No provider eligibility re-evaluation occurs.} Both handlers use
+          **DecorateEventHandlerWithMetrics<>** decorator for Prometheus instrumentation.
+        activeCalls: [provider-verified-publish, credential-expired-publish, provider-verified-consume, credential-expired-consume, metrics-record]
+        revealNodes: [provider-ep, asb, compliance-ep]
+        duration: 6000
+      - id: inbound-step-2
+        title: "Identity & Access Events: User Deactivation & Role Changes"
+        narrative: >
+          The EventProcessor also subscribes to the `identity-and-access` ASB topic for two event types.
+          **UserDeactivatedEventHandler** (`EventProcessor/Handlers/UserDeactivatedEventHandler.cs`)
+          receives **UserDeactivatedEvent** when a user account is deactivated. {color:green|Cache
+          invalidation works correctly — the handler clears the user's compliance data from Redis.}
+          {color:red|However, RevokeUserCredentialsAsync() is STUB (log only) — active credentials
+          are not revoked when a user is deactivated (Risk 10.1).} **UserRoleChangedEventHandler**
+          (`EventProcessor/Handlers/UserRoleChangedEventHandler.cs`) receives **UserRoleChangedEvent**
+          when a user's role changes. {color:green|Cache invalidation works correctly.} {color:red|But
+          UpdateComplianceRequirementsAsync() is STUB (log only) — credential requirements are not
+          updated when roles change.} All 4 EP handlers share the same idempotency pattern: check
+          Redis key `compliance:{event-type}:{EventId}` before processing, set key with 1-hour TTL
+          after successful handling. This prevents duplicate processing if ASB redelivers messages.
+        activeCalls: [user-deactivated-publish, user-role-changed-publish, user-deactivated-consume, user-role-changed-consume, idempotency-check, idempotency-set]
+        revealNodes: [identity-ep, redis]
+        revealCalls: [provider-verified-publish, credential-expired-publish, provider-verified-consume, credential-expired-consume, metrics-record]
+        duration: 6000
+      - id: inbound-step-3
+        title: "Idempotency & Observability Infrastructure"
+        narrative: >
+          The EventProcessor infrastructure provides robust message handling guarantees.
+          {color:green|All 4 handlers use Redis distributed cache with 1-hour TTL for idempotency,
+          keyed by `compliance:{event-type}:{EventId}`.} The EP registers with
+          `AddCatalystEpMetrics("catalyst-compliance")` and all 4 handlers are decorated with
+          `DecorateEventHandlerWithMetrics<>()` for automatic Prometheus metric recording —
+          duration histograms, success/failure counters, and handler invocation rates. Structured
+          logging via Serilog (compact JSON, Seq sink) with `UseSerilogRequestLogging()` provides
+          request-level tracing. OpenTelemetry distributed tracing via `AddCatalystTelemetry("Compliance")`
+          enables end-to-end correlation across the event pipeline — from the originating Provider Network
+          or Identity BC through ASB to the Compliance EP. Health checks at `/health/ready` validate
+          PostgreSQL connectivity and Conductor workflow availability; `/health/live` always returns 200.
+          {color:blue|Cross-ref: The EP tenant context is set from event payload via
+          _compositeTenantProvider.SetScopedTenantId(@event.TenantId), ensuring global query filters
+          scope all database queries to the correct tenant.}
+        activeCalls: [idempotency-check, idempotency-set]
+        revealCalls: [user-deactivated-publish, user-role-changed-publish, user-deactivated-consume, user-role-changed-consume]
+        duration: 4000
+
+  # -- Section 2: Outbound Domain Events & Cross-Context Integration -------------------
+  - renderer: service-flow
+    title: "Outbound Domain Events & Cross-Context Integration"
+    accentColor: "#22C55E"
+    layout: sequence
+
+    services:
+      - id: compliance-api
+        name: "Compliance & Eligibility API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: compliance-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+      - id: reporting-ep
+        name: "Reporting Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: enrollment-ep
+        name: "Enrollment Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+
+    zones:
+      - id: compliance-publisher
+        label: "Compliance & Eligibility"
+        members: [compliance-api, compliance-db]
+        color: "rgba(34, 197, 94, 0.06)"
+      - id: event-bus
+        label: "Event Backbone"
+        members: [asb]
+        color: "rgba(245, 158, 11, 0.06)"
+      - id: downstream
+        label: "Downstream Consumers"
+        members: [reporting-ep, enrollment-ep]
+        color: "rgba(168, 85, 247, 0.06)"
+
+    calls:
+      - id: policy-save
+        type: sync
+        from: compliance-api
+        to: compliance-db
+        method: POST
+        path: "ComplianceDbContext.SaveChangesAsync() — atomic write to outbox_messages"
+        protocol: tcp
+        duration: 50
+        description: "Domain events from EligibilityPolicy/EligibilityRule aggregates written to outbox_messages table atomically with entity changes"
+      - id: outbox-dispatch
+        type: async
+        from: compliance-db
+        to: asb
+        messageType: "OutboxProcessor dispatch"
+        payload:
+          description: "OutboxProcessor reads unprocessed outbox_messages and publishes to compliance-and-eligibility ASB topic"
+      - id: publish-policy-created
+        type: publish
+        from: asb
+        to: asb
+        messageType: "EligibilityPolicyCreatedEvent"
+        payload:
+          description: "PolicyId, TenantId, DistrictId, PolicyType, PolicyName, CreatedAt, CreatedBy"
+      - id: publish-policy-activated
+        type: publish
+        from: asb
+        to: asb
+        messageType: "EligibilityPolicyActivatedEvent"
+        payload:
+          description: "PolicyId, TenantId, DistrictId, PolicyType, ActivatedAt — signals enforcement enablement"
+      - id: publish-rule-created
+        type: publish
+        from: asb
+        to: asb
+        messageType: "EligibilityRuleCreatedEvent"
+        payload:
+          description: "RuleId, TenantId, DistrictId, RuleType, RuleName, Priority, PolicyId"
+      - id: reporting-consume
+        type: subscribe
+        from: asb
+        to: reporting-ep
+        messageType: "EligibilityPolicy*Event / EligibilityRule*Event"
+        action: "Reporting BC consumes all 9 compliance events for audit trail and analytics"
+      - id: enrollment-consume
+        type: subscribe
+        from: asb
+        to: enrollment-ep
+        messageType: "EligibilityPolicyActivatedEvent / EligibilityPolicyDeactivatedEvent"
+        action: "Enrollment BC enables/disables eligibility enforcement based on policy activation status"
+
+    steps:
+      - id: outbound-step-1
+        title: "Transactional Outbox: Atomic Event Publishing"
+        narrative: >
+          The Compliance BC publishes 9 domain events across two aggregate roots. From
+          **EligibilityPolicy**: `EligibilityPolicyCreatedEvent`, `EligibilityPolicyUpdatedEvent`,
+          `EligibilityPolicyActivatedEvent`, `EligibilityPolicyDeactivatedEvent`. From
+          **EligibilityRule**: `EligibilityRuleCreatedEvent`, `EligibilityRuleUpdatedEvent`,
+          `EligibilityRulePriorityChangedEvent`, `EligibilityRuleEnabledEvent`,
+          `EligibilityRuleDisabledEvent`. All events flow through the transactional outbox:
+          **ComplianceDbContext** (`Infrastructure/Data/ComplianceDbContext.cs`) implements
+          `IOutboxDbContext` with an `OutboxMessages` DbSet. On `SaveChangesAsync()`, domain events
+          are written to the `outbox_messages` table atomically with entity changes (migration:
+          `AddOutboxMessages` 2026-02-19). The OutboxProcessor then reads unprocessed messages
+          and publishes to the `compliance-and-eligibility` ASB topic.
+          {color:red|Risk 10.3: EligibilityPolicy and EligibilityRule manage their own _domainEvents
+          list rather than inheriting from Entity<Guid>. ComplianceDbContext.SaveChangesAsync() queries
+          for Entity<Guid> entities with events — domain events from these aggregates may NOT be
+          published via outbox unless alternate dispatch wiring exists.}
+        activeCalls: [policy-save, outbox-dispatch]
+        revealNodes: [compliance-api, compliance-db, asb]
+        duration: 5000
+      - id: outbound-step-2
+        title: "Downstream Consumers: Reporting & Enrollment"
+        narrative: >
+          Two downstream bounded contexts subscribe to the `compliance-and-eligibility` ASB topic.
+          **Reporting & Analytics** consumes all 9 events for compliance audit trail — every policy
+          change, rule modification, activation, and deactivation is recorded for regulatory reporting.
+          This provides the full compliance history required for district audits and federal reporting
+          requirements. **Enrollment & Demand** consumes `EligibilityPolicyActivatedEvent` and
+          `EligibilityPolicyDeactivatedEvent` to enable or disable eligibility enforcement at TRF
+          processing time. When a district activates a Distance policy, subsequent TRF submissions
+          for that district are evaluated against the distance threshold during the Conductor
+          `trf-processing-workflow`. {color:green|The event-driven pattern ensures loose coupling:
+          Compliance owns policy lifecycle, Enrollment owns enforcement timing, and Reporting owns
+          audit persistence.} {color:blue|Cross-ref: EligibilityRule rules can optionally reference
+          a PolicyId (FK), linking CQRS rule aggregates to their parent policies. The
+          SetRulePriorityCommand exists but has no dedicated API endpoint (Risk 10.6) — priority
+          is set via UpdateEligibilityRuleCommand instead.}
+        activeCalls: [publish-policy-created, publish-policy-activated, publish-rule-created, reporting-consume, enrollment-consume]
+        revealNodes: [reporting-ep, enrollment-ep]
+        revealCalls: [policy-save, outbox-dispatch]
+        duration: 5000
+      - id: outbound-step-3
+        title: "Multi-Tenancy & Data Isolation in Event Pipeline"
+        narrative: >
+          Every event carries `TenantId` as a first-class field — this is the cornerstone of
+          Catalyst's three-layer defense model for data isolation. At the API layer,
+          **TenantIdClaimTransformer** extracts `tenant_id` from the JWT and
+          **TenantIsolationFilter** blocks requests without a valid tenant. At the EF Core layer,
+          global query filters on all 5 entity types (**DistancePolicy**, **IncomePolicy**,
+          **EligibilityVerificationResult**, **EligibilityPolicy**, **EligibilityRule**) auto-scope
+          every LINQ query by TenantId. At the database layer, PostgreSQL RLS via
+          **TenantContextInterceptor** sets `app.current_tenant`. For EP handlers, tenant context
+          flows from the event payload: `_compositeTenantProvider.SetScopedTenantId(@event.TenantId)`.
+          {color:green|This ensures a DPS (Denver Public Schools) policy change event processed by
+          the Reporting EP will only affect DPS reporting data — never Jefferson County or any other
+          district.} The `compliance` database schema (3 EF migrations: `InitialCreate` 2026-01-29,
+          `SyncModelSnapshot` 2026-02-12, `AddOutboxMessages` 2026-02-19) hosts all 5 DbSets plus
+          the outbox table. {color:green|372 tests across 37 test files validate the complete
+          compliance domain including multi-tenant isolation.}
+        activeCalls: [policy-save]
+        revealCalls: [publish-policy-created, publish-policy-activated, publish-rule-created, reporting-consume, enrollment-consume]
+        duration: 5000

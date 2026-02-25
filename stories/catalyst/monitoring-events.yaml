@@ -1,0 +1,385 @@
+id: monitoring-events
+title: "Monitoring & Exceptions — Event Architecture & Lifecycle"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  Inbound event consumption from 4 ASB topics (Trip Operations, Enrollment, Capacity Planning,
+  self-consumption), Redis-based VR snapshot caching, and the complete Exception/Alert state
+  machines with outbound event fanout to Rescue and Communications bounded contexts.
+
+sections:
+  # ── Section 1: Inbound Event Consumption ─────────────────────────────────
+  - renderer: service-flow
+    title: "Inbound Event Consumption"
+    accentColor: "#A855F7"
+    layout: sequence
+
+    services:
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+      - id: monitoring-ep
+        name: "Monitoring Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: redis
+        name: "Redis"
+        type: cache
+        technology: "Redis 7"
+        status: healthy
+      - id: monitoring-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: trip-ops-api
+        name: "Trip Operations API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: enrollment-api
+        name: "Enrollment & Demand API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: capacity-api
+        name: "Capacity Planning API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+
+    zones:
+      - id: inbound-topics
+        label: "ASB Topic Sources"
+        members: [asb, trip-ops-api, enrollment-api, capacity-api]
+        color: "rgba(168, 85, 247, 0.06)"
+      - id: ep-processing
+        label: "Event Processing"
+        members: [monitoring-ep, redis, monitoring-db]
+        color: "rgba(59, 130, 246, 0.06)"
+
+    calls:
+      - id: consume-trip-ops
+        type: subscribe
+        from: asb
+        to: monitoring-ep
+        messageType: "VehicleRunCreatedEvent"
+        action: "monitoring-trip-subscriber subscription on trip-operations topic"
+      - id: consume-enrollment
+        type: subscribe
+        from: asb
+        to: monitoring-ep
+        messageType: "SchoolBellScheduleUpdatedEvent"
+        action: "monitoring-enrollment-subscriber subscription on enrollment-and-demand topic"
+      - id: consume-capacity
+        type: subscribe
+        from: asb
+        to: monitoring-ep
+        messageType: "CapacityGapIdentifiedEventContract"
+        action: "monitoring-capacity-subscriber subscription on capacity-planning topic"
+      - id: consume-self
+        type: subscribe
+        from: asb
+        to: monitoring-ep
+        messageType: "StaleVrDetectedEvent"
+        action: "monitoring-event-processor subscription on monitoring-and-exceptions topic (self-consumption)"
+      - id: cache-vr-snapshot
+        type: async
+        from: monitoring-ep
+        to: redis
+        messageType: "VrSnapshotCache"
+        payload:
+          path: "SET monitoring:vr:{tenantId}:{vehicleRunId} EX 86400"
+          description: "VehicleRunMonitoringSnapshot as JSON — 24h TTL, baseline for detection algorithms"
+      - id: check-ep-idempotency
+        type: sync
+        from: monitoring-ep
+        to: redis
+        method: GET
+        path: "GET monitoring:{type}:{eventId}"
+        duration: 3
+        description: "Redis idempotency check (1-hour TTL) — stale-vr-detected and capacity-gap keys"
+      - id: persist-exception-from-event
+        type: sync
+        from: monitoring-ep
+        to: monitoring-db
+        method: POST
+        path: "monitoring.exceptions + monitoring.alerts"
+        duration: 30
+        description: "Create OperationalException and optional Alert from inbound events"
+      - id: cache-bell-schedule
+        type: async
+        from: monitoring-ep
+        to: redis
+        messageType: "BellScheduleCache"
+        payload:
+          path: "SET monitoring:bell-schedule:{schoolId}"
+          description: "Bell schedule snapshot for timing calculations in LatePickupDetector"
+
+    steps:
+      - id: inbound-step-1
+        title: "4 Topic Subscriptions"
+        narrative: >
+          The Monitoring Event Processor subscribes to 4 ASB topics with dedicated subscription
+          names: **trip-operations** (`monitoring-trip-subscriber`) — receives VehicleRunCreatedEvent
+          when SGR or ad-hoc VRs are generated. **enrollment-and-demand** (`monitoring-enrollment-subscriber`)
+          — receives SchoolBellScheduleUpdatedEvent for timing baseline updates. **capacity-planning**
+          (`monitoring-capacity-subscriber`) — receives CapacityGapIdentifiedEventContract when
+          supply/demand mismatches are detected. **monitoring-and-exceptions** (`monitoring-event-processor`)
+          — self-consumption of StaleVrDetectedEvent published by ExceptionDetectionJob. Each
+          subscription processes messages independently with at-least-once delivery semantics.
+        activeCalls: [consume-trip-ops, consume-enrollment, consume-capacity, consume-self]
+        revealNodes: [asb, monitoring-ep]
+        duration: 5000
+      - id: inbound-step-2
+        title: "VR Snapshot Caching"
+        narrative: >
+          **VehicleRunCreatedEventHandler** receives every new VR and builds a
+          **VehicleRunMonitoringSnapshot** — a denormalized read model containing scheduled times,
+          route waypoints, driver assignment, stop sequence, and passenger count. This snapshot is
+          cached in Redis as JSON with a 24-hour TTL (`monitoring:vr:{tenantId}:{vehicleRunId}`).
+          The ExceptionDetectionJob (Section 1 of the Detection Pipeline story) reads these snapshots
+          every 60 seconds as the baseline for anomaly detection. The cache prefix is
+          `CatalystMonitoring:` at the connection level. {color:orange|VR monitoring data is cache-only —
+          a TODO comment in the handler indicates PostgreSQL persistence is needed for durability
+          and historical analysis.} **SchoolBellScheduleUpdatedEventHandler** similarly caches bell
+          schedule snapshots used by the LatePickupDetector to calculate expected pickup times
+          relative to school start.
+        activeCalls: [cache-vr-snapshot, cache-bell-schedule]
+        revealNodes: [redis]
+        revealCalls: [consume-trip-ops, consume-enrollment]
+        duration: 5000
+      - id: inbound-step-3
+        title: "Capacity Gap & Stale VR Handling"
+        narrative: >
+          **CapacityGapIdentifiedEventHandler** consumes from the capacity-planning topic and creates
+          both an OperationalException (type `CapacityGap`) and an Alert in one transaction. Severity
+          mapping: Critical gap = PagerDuty + InApp alert, High = Email alert, Medium = InApp alert,
+          Low = exception record only (dashboard metric). Uses a hardcoded PagerDuty integration key
+          (`capacity-gap-alerts`) — a known risk flagged for configuration extraction.
+          **StaleVrDetectedEventHandler** consumes from the self-topic and creates OperationalException
+          records for VRs stuck in pre-dispatch states. Both handlers use Redis idempotency keys
+          (`monitoring:stale-vr-detected:{eventId}` and `monitoring:capacity-gap:{gapId}`, 1-hour
+          TTL) to prevent duplicate processing on ASB message redelivery.
+        activeCalls: [check-ep-idempotency, persist-exception-from-event]
+        revealNodes: [monitoring-db]
+        revealCalls: [cache-vr-snapshot, cache-bell-schedule, consume-capacity, consume-self]
+        duration: 5000
+      - id: inbound-step-4
+        title: "Bridge: Detection to Lifecycle"
+        narrative: >
+          With VR snapshots cached and inbound events processed, the Monitoring BC has two parallel
+          data paths feeding OperationalException creation: (1) **Proactive detection** via
+          ExceptionDetectionJob polling Trip Operations every 60 seconds (covered in the Detection
+          Pipeline story), and (2) **Reactive event handling** via EP handlers consuming cross-BC
+          events (this section). Both paths converge on the same domain model — OperationalException
+          and Alert aggregates in PostgreSQL. The next section traces these aggregates through their
+          complete lifecycle state machines and the outbound event fanout to Rescue and Communications.
+        activeCalls: []
+        focusNodes: [monitoring-ep]
+        revealCalls: [check-ep-idempotency, persist-exception-from-event]
+        duration: 4000
+
+  # ── Section 2: Exception & Alert Lifecycle ───────────────────────────────
+  - renderer: service-flow
+    title: "Exception & Alert Lifecycle"
+    accentColor: "#22C55E"
+    layout: sequence
+
+    services:
+      - id: monitoring-api
+        name: "Monitoring API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: monitoring-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+      - id: rescue-ep
+        name: "Rescue Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: comms-ep
+        name: "Communications Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: settlement-ep
+        name: "Settlement Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+
+    zones:
+      - id: lifecycle-core
+        label: "Monitoring API"
+        members: [monitoring-api, monitoring-db]
+        color: "rgba(34, 197, 94, 0.06)"
+      - id: downstream
+        label: "Downstream Consumers"
+        members: [asb, rescue-ep, comms-ep, settlement-ep]
+        color: "rgba(168, 85, 247, 0.06)"
+
+    calls:
+      - id: acknowledge-exception
+        type: sync
+        from: monitoring-api
+        to: monitoring-db
+        method: POST
+        path: "monitoring.exceptions SET status = Acknowledged"
+        duration: 20
+        description: "Acknowledge(userId) — only from Active. Records AcknowledgedAt/By"
+      - id: resolve-exception
+        type: sync
+        from: monitoring-api
+        to: monitoring-db
+        method: POST
+        path: "monitoring.exceptions SET status = Resolved"
+        duration: 20
+        description: "Resolve(userId, note?) — from Active or Acknowledged. Records ResolvedAt/By + ResolutionNotes"
+      - id: dismiss-exception
+        type: sync
+        from: monitoring-api
+        to: monitoring-db
+        method: POST
+        path: "monitoring.exceptions SET status = Dismissed"
+        duration: 20
+        description: "Dismiss(userId, reason) — false positive. Not from Resolved or Dismissed"
+      - id: escalate-severity
+        type: sync
+        from: monitoring-api
+        to: monitoring-db
+        method: POST
+        path: "monitoring.exceptions SET severity = {higher}"
+        duration: 20
+        description: "Escalate(newSeverity, reason) — newSeverity must be strictly higher than current"
+      - id: acknowledge-alert
+        type: sync
+        from: monitoring-api
+        to: monitoring-db
+        method: POST
+        path: "monitoring.alerts SET status = Acknowledged"
+        duration: 20
+        description: "Acknowledge(userId) — from Active or Escalated"
+      - id: escalate-alert
+        type: sync
+        from: monitoring-api
+        to: monitoring-db
+        method: POST
+        path: "monitoring.alerts SET status = Escalated"
+        duration: 20
+        description: "Escalate(externalReferenceId) — PagerDuty incident key. Not from Resolved or Silenced"
+      - id: silence-alert
+        type: sync
+        from: monitoring-api
+        to: monitoring-db
+        method: POST
+        path: "monitoring.alerts SET status = Silenced"
+        duration: 20
+        description: "Silence() — temporarily suppress. Not from Resolved"
+      - id: publish-driver-noshow
+        type: publish
+        from: asb
+        to: rescue-ep
+        messageType: "DriverNoShowDetectedEvent"
+        payload:
+          description: "v3 schema — VehicleRunId, AffectedPassengerTripIds, ProviderContractId. Triggers rescue-orchestration-workflow"
+      - id: publish-late-pickup
+        type: publish
+        from: asb
+        to: rescue-ep
+        messageType: "LatePickupDetectedEvent"
+        payload:
+          description: "Rescue evaluates if replacement provider needed based on IsCriticalDelay flag"
+      - id: notify-comms
+        type: subscribe
+        from: asb
+        to: comms-ep
+        messageType: "DriverNoShowDetectedEvent | LatePickupDetectedEvent | RouteDeviationDetectedEvent"
+        action: "Notify dispatcher, parent, and provider via configured channels (Twilio SMS, SendGrid email, Firebase push)"
+      - id: notify-settlement
+        type: subscribe
+        from: asb
+        to: settlement-ep
+        messageType: "DriverNoShowDetectedEvent | PassengerNoShowDetectedEvent"
+        action: "BC/PD decision — no-show events affect settlement calculation (driver may/may not be paid)"
+      - id: dashboard-query
+        type: sync
+        from: monitoring-api
+        to: monitoring-db
+        method: GET
+        path: "monitoring.exceptions + monitoring.alerts (aggregated)"
+        duration: 50
+        description: "DashboardService — ExceptionSummaryDto + AlertSummaryDto + TrendsDto with Hourly/Daily/Weekly granularity"
+
+    steps:
+      - id: lifecycle-step-1
+        title: "Exception State Machine"
+        narrative: >
+          The **OperationalException** aggregate (323 lines) implements a 4-state machine:
+          `Active` -> `Acknowledged` -> `Resolved` or `Dismissed`. Direct paths also exist:
+          `Active` -> `Resolved` (fast resolution) and `Active` -> `Dismissed` (false positive).
+          **Acknowledge(userId)** is only valid from Active — records operator investigating.
+          **Resolve(userId, note?)** is valid from Active or Acknowledged — records resolution with
+          optional note added to ResolutionNotes list. **Dismiss(userId, reason)** marks false
+          positives — not valid from Resolved or Dismissed. **Escalate(newSeverity, reason)** upgrades
+          severity — invariant enforces newSeverity > current (Info -> Warning -> Critical only).
+          **ShouldAutoEscalate()** checks `Classification.AutoEscalateAfterMinutes` against elapsed
+          time since DetectedAt — only fires for Active status. The API exposes 4 endpoints:
+          `GET /v1/exceptions` (paginated, filterable by type/status/severity/VR/driver/date),
+          `GET /v1/exceptions/{id}`, `POST /v1/exceptions/{id}/acknowledge`, `POST /v1/exceptions/{id}/resolve`.
+        activeCalls: [acknowledge-exception, resolve-exception, dismiss-exception, escalate-severity]
+        revealNodes: [monitoring-api, monitoring-db]
+        duration: 6000
+      - id: lifecycle-step-2
+        title: "Alert State Machine"
+        narrative: >
+          The **Alert** aggregate (296 lines) implements a 5-state machine: `Active` ->
+          `Acknowledged` -> `Resolved`, `Active` -> `Escalated` -> `Acknowledged` -> `Resolved`,
+          `Active` -> `Silenced`. **Acknowledge(userId)** is valid from Active or Escalated.
+          **Escalate(externalReferenceId)** sets the PagerDuty incident key — not valid from Resolved
+          or Silenced. **Silence()** temporarily suppresses the alert — not valid from Resolved.
+          **MarkEscalationPending(escalationId, reason)** and **CancelEscalation(cancellationReason)**
+          support the Conductor escalation saga's optimistic locking pattern. The DedupKey property
+          links to the RedisAlertDeduplicationService — preventing duplicate alerts within the 15-minute
+          window. The API exposes 4 endpoints: `GET /v1/alerts` (paginated, filterable by
+          status/severity/channel/VR/date), `GET /v1/alerts/{id}`, `POST /v1/alerts/{id}/acknowledge`,
+          `POST /v1/alerts/{id}/escalate`. The **DashboardController** provides `GET /v1/dashboard/summary`
+          (active counts by severity) and `GET /v1/dashboard/trends` (time-series with Hourly/Daily/Weekly
+          granularity).
+        activeCalls: [acknowledge-alert, escalate-alert, silence-alert, dashboard-query]
+        revealCalls: [acknowledge-exception, resolve-exception, dismiss-exception, escalate-severity]
+        duration: 6000
+      - id: lifecycle-step-3
+        title: "Outbound Event Fanout"
+        narrative: >
+          Detection events published to the `monitoring-and-exceptions` ASB topic fan out to 3
+          downstream bounded contexts. **Rescue BC** consumes DriverNoShowDetectedEvent (triggers
+          `rescue-orchestration-workflow` Conductor saga to find replacement provider and reassign
+          affected PTs listed in AffectedPassengerTripIds) and LatePickupDetectedEvent (evaluates
+          IsCriticalDelay flag for rescue trigger). **Communications BC** consumes all 3 detection
+          event types — dispatches notifications to dispatcher (InApp + Push), parent (SMS via Twilio),
+          and provider (Email via SendGrid) based on channel routing rules. **Settlement BC** consumes
+          DriverNoShowDetectedEvent and PassengerNoShowDetectedEvent — no-show events affect the
+          BC/PD/PM calculation (driver may not be paid for no-showed trips, district may not be
+          billed). {color:green|Three independent consumers, at-least-once delivery via ASB, zero
+          synchronous coupling between Monitoring and its downstream dependents.}
+        activeCalls: [publish-driver-noshow, publish-late-pickup, notify-comms, notify-settlement]
+        revealNodes: [asb, rescue-ep, comms-ep, settlement-ep]
+        revealCalls: [acknowledge-alert, escalate-alert, silence-alert, dashboard-query]
+        duration: 5000

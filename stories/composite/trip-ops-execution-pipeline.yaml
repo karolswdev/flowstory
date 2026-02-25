@@ -1,0 +1,707 @@
+id: trip-ops-execution-pipeline
+title: "Trip Operations — Real-Time & Integration API Surface"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  GPS telemetry pipeline → SignalR real-time broadcast → cross-BC event
+  integration — all traced through HTTP endpoints and service choreography.
+  Three service-flow sections map the synchronous ingestion path, the async
+  WebSocket broadcast, and the 29-event outbound / 5-handler inbound topology
+  that connects Trip Operations to 9 peer bounded contexts.
+
+sections:
+  # ── Section 1: GPS Telemetry Pipeline ────────────────────────────────
+  - renderer: service-flow
+    title: "GPS Telemetry Pipeline"
+    accentColor: "#3B82F6"
+    layout: sequence
+
+    services:
+      - id: mdd
+        name: "Driver MDD"
+        type: external
+        technology: "Android/iOS"
+
+      - id: nginx
+        name: "nginx Ingress"
+        type: gateway
+        technology: "nginx-ingress"
+        status: healthy
+
+      - id: trip-ops-api
+        name: "Trip Operations API"
+        type: api
+        technology: ".NET 10"
+        status: healthy
+        tags:
+          events: "29 outbound"
+
+      - id: postgis
+        name: "PostgreSQL + PostGIS"
+        type: database
+        technology: "PostgreSQL 16 + PostGIS"
+        status: healthy
+
+      - id: redis
+        name: "Redis"
+        type: cache
+        technology: "Redis 7"
+        status: healthy
+
+      - id: eta-engine
+        name: "ETA Engine"
+        type: worker
+        technology: "GpsSpeedBasedEtaService"
+        status: healthy
+
+    zones:
+      - id: sync-path
+        label: "Synchronous Path"
+        members: [nginx, trip-ops-api, postgis, redis, eta-engine]
+        color: "rgba(59, 130, 246, 0.06)"
+
+    calls:
+      - id: gps-post
+        type: sync
+        from: mdd
+        to: nginx
+        method: POST
+        path: "/trip-operations/v1/gps/locations"
+        protocol: http
+        duration: 35
+        status: 200
+        payload:
+          vehicleId: "guid"
+          lat: 39.7392
+          lng: -104.9903
+          heading: 185.2
+          speedMph: 28.4
+          accuracy: 4.7
+          timestamp: "2026-02-22T07:32:15Z"
+
+      - id: gateway-strip
+        type: sync
+        from: nginx
+        to: trip-ops-api
+        method: POST
+        path: "/v1/gps/locations"
+        protocol: http
+        duration: 1
+
+      - id: validate-reading
+        type: sync
+        from: trip-ops-api
+        to: trip-ops-api
+        method: VALIDATE
+        path: "GpsReading VO: accuracy < 50m, staleness < 30s, lat [-90,90], lng [-180,180]"
+        duration: 1
+
+      - id: persist-gps
+        type: sync
+        from: trip-ops-api
+        to: postgis
+        method: INSERT
+        path: "gps_locations (geometry(Point, 4326) + GIST index)"
+        duration: 8
+
+      - id: cache-pt-lookup
+        type: sync
+        from: trip-ops-api
+        to: redis
+        method: GET
+        path: "pt-cache:{tenantId}:{ptId}"
+        duration: 1
+
+      - id: calc-eta
+        type: sync
+        from: trip-ops-api
+        to: eta-engine
+        method: INVOKE
+        path: "ETA confidence interval: optimistic/likely/pessimistic + rush-hour + driver-behavior adjustments"
+        duration: 5
+
+      - id: outbox-write
+        type: sync
+        from: trip-ops-api
+        to: postgis
+        method: INSERT
+        path: "outbox_messages (GpsLocationUpdatedEvent + EtaUpdatedEvent)"
+        duration: 2
+
+      - id: http-200
+        type: sync
+        from: trip-ops-api
+        to: nginx
+        method: RESPONSE
+        status: 200
+        duration: 35
+        payload:
+          label: "200 OK"
+
+    steps:
+      - id: gps-step-1
+        title: "GPS Pulse Arrives"
+        narrative: >
+          Every 30 seconds, the driver's MDD sends a GPS fix to
+          `POST /trip-operations/v1/gps/locations`. The nginx ingress strips the
+          `/trip-operations` prefix. `IngestGpsLocationCommand` constructs a **GpsReading**
+          value object that self-validates: accuracy < 50m, staleness < 30s, lat/lng ranges.
+          Invalid readings are rejected with HTTP 400.
+        activeCalls: [gps-post, gateway-strip, validate-reading]
+        revealNodes: [mdd, nginx, trip-ops-api]
+        focusNodes: [mdd, nginx, trip-ops-api]
+        duration: 4500
+
+      - id: gps-step-2
+        title: "PostGIS Persistence"
+        narrative: >
+          The validated GPS fix is stored as a `Point` (SRID 4326) with a GIST spatial
+          index. 90-day retention enforced by nightly cleanup. Redis PT cache lookup
+          retrieves the active VR's **PassengerTrip** list without a database round-trip
+          on every GPS fix.
+        activeCalls: [persist-gps, cache-pt-lookup]
+        revealNodes: [postgis, redis]
+        focusNodes: [trip-ops-api, postgis, redis]
+        revealCalls: [gps-post, gateway-strip, validate-reading]
+        duration: 4000
+
+      - id: gps-step-3
+        title: "ETA Calculation"
+        narrative: >
+          `GpsSpeedBasedEtaService` computes a confidence interval — optimistic (free-flow),
+          likely (current conditions), and pessimistic (rush-hour + driver-behavior adjustments
+          from `EtaAccuracyRecord` history). Current limitation: uses fixed 30mph pending
+          Google Maps Directions API integration.
+        activeCalls: [calc-eta]
+        revealNodes: [eta-engine]
+        focusNodes: [trip-ops-api, eta-engine]
+        revealCalls: [persist-gps, cache-pt-lookup]
+        duration: 4000
+
+      - id: gps-step-4
+        title: "Atomic Commit & HTTP 200"
+        narrative: >
+          **GpsLocationUpdatedEvent** + **EtaUpdatedEvent** written to `outbox_messages`
+          in the same PostgreSQL transaction as the GPS insert — {color:green|atomic commit
+          guarantees no event is lost without its spatial record}. HTTP 200 returns.
+          Everything beyond this point is asynchronous — the outbox relay publishes to ASB.
+        activeCalls: [outbox-write, http-200]
+        focusNodes: [trip-ops-api, postgis, nginx]
+        revealCalls: [calc-eta]
+        duration: 4000
+
+  # ── Section 2: SignalR Real-Time Broadcast ───────────────────────────
+  - renderer: service-flow
+    title: "SignalR Real-Time Broadcast"
+    accentColor: "#22C55E"
+    layout: sequence
+
+    services:
+      - id: outbox-relay
+        name: "Outbox Relay"
+        type: worker
+        technology: "Background Service"
+        status: healthy
+
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "Premium tier"
+        status: healthy
+
+      - id: trip-ops-ep
+        name: "Trip Ops EventProcessor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+
+      - id: redis-idem
+        name: "Redis Idempotency"
+        type: cache
+        technology: "Redis 7"
+        status: healthy
+
+      - id: signalr-hub
+        name: "SignalR Hub"
+        type: api
+        technology: "/hubs/trip-operations"
+        status: healthy
+
+      - id: dispatch-board
+        name: "Trip HQ Dispatch Board"
+        type: external
+        technology: "Next.js 15 + React 19"
+
+      - id: parent-portal
+        name: "Parent Portal"
+        type: external
+        technology: "Next.js 15 + React 19"
+
+      - id: driver-portal
+        name: "Driver Portal"
+        type: external
+        technology: "Next.js 15 + React 19"
+
+    queues:
+      - id: trip-topic
+        name: "trip-operations"
+        type: topic
+        broker: servicebus
+        consumers: 7
+
+    zones:
+      - id: async-relay
+        label: "Async Relay"
+        members: [outbox-relay, asb, trip-ops-ep, redis-idem]
+        color: "rgba(34, 197, 94, 0.06)"
+
+      - id: signalr-broadcast
+        label: "SignalR Broadcast"
+        members: [signalr-hub, dispatch-board, parent-portal, driver-portal]
+        color: "rgba(34, 197, 94, 0.10)"
+
+    calls:
+      - id: outbox-poll
+        type: publish
+        from: outbox-relay
+        to: asb
+        messageType: "OutboxRelayBatch"
+        payload:
+          description: "Polls outbox_messages every 500ms; marks rows processed in same transaction"
+
+      - id: ep-subscribe-gps
+        type: subscribe
+        from: asb
+        to: trip-ops-ep
+        messageType: "GpsLocationUpdatedEvent"
+        action: "Self-consumption: EP in same BC receives its own events"
+
+      - id: ep-subscribe-vr-state
+        type: subscribe
+        from: asb
+        to: trip-ops-ep
+        messageType: "VrStateChangedEvent"
+        action: "VR state transitions"
+
+      - id: ep-subscribe-pt-state
+        type: subscribe
+        from: asb
+        to: trip-ops-ep
+        messageType: "PtStateChangedEvent"
+        action: "PT state transitions"
+
+      - id: idempotency-check
+        type: sync
+        from: trip-ops-ep
+        to: redis-idem
+        method: GET
+        path: "idem:{eventId}"
+        duration: 1
+
+      - id: signalr-vr-group
+        type: async
+        from: trip-ops-ep
+        to: signalr-hub
+        messageType: "SignalRGroupBroadcast"
+
+      - id: signalr-district-group
+        type: async
+        from: trip-ops-ep
+        to: signalr-hub
+        messageType: "DistrictGroupBroadcast"
+
+      - id: broadcast-state
+        type: async
+        from: trip-ops-ep
+        to: signalr-hub
+        messageType: "VrPtStateChangeBroadcast"
+
+      - id: ws-dispatch
+        type: async
+        from: signalr-hub
+        to: dispatch-board
+        messageType: "GpsLocationUpdated + EtaUpdated + VrStateChanged + PtStateChanged"
+
+      - id: ws-parent
+        type: async
+        from: signalr-hub
+        to: parent-portal
+        messageType: "EtaCountdownUpdate"
+
+      - id: ws-driver
+        type: async
+        from: signalr-hub
+        to: driver-portal
+        messageType: "RouteStatusUpdate"
+
+    steps:
+      - id: signalr-step-1
+        title: "Outbox Relay Publishes"
+        narrative: >
+          The outbox relay background service polls `outbox_messages` every 500ms, publishes
+          batched events to the `trip-operations` ASB topic, and marks rows processed in the
+          same transaction. Revenue-critical events retry with exponential backoff (1s→512s).
+          Dead-letter after 10 attempts triggers {color:red|PagerDuty P1 alert}.
+        activeCalls: [outbox-poll]
+        revealNodes: [outbox-relay, asb]
+        focusNodes: [outbox-relay, asb]
+        duration: 4500
+
+      - id: signalr-step-2
+        title: "EP Self-Consumption"
+        narrative: >
+          Trip Operations' EventProcessor subscribes to its own `trip-operations` ASB topic.
+          This **self-consumption pattern** decouples the synchronous HTTP path from broadcast.
+          Redis idempotency: 30s TTL for GPS events (allows corrections), 1h for state changes.
+          Three handlers: `GpsLocationUpdatedEventHandler`, `VrStateChangedEventHandler`,
+          `PtStateChangedEventHandler`.
+        activeCalls: [ep-subscribe-gps, ep-subscribe-vr-state, ep-subscribe-pt-state, idempotency-check]
+        revealNodes: [trip-ops-ep, redis-idem]
+        focusNodes: [asb, trip-ops-ep, redis-idem]
+        revealCalls: [outbox-poll]
+        duration: 5000
+
+      - id: signalr-step-3
+        title: "SignalR Group Broadcast"
+        narrative: >
+          Each event broadcasts to two SignalR groups: `vr-{vehicleRunId}` (per-run tracking)
+          and `district-{tenantId}` (fleet-wide view). JWT `tenant_id` enforced on group join —
+          cross-tenant broadcast is blocked at the hub level. GPS events push lat/lng/heading/speed.
+          State events push full status DTOs.
+        activeCalls: [signalr-vr-group, signalr-district-group, broadcast-state]
+        revealNodes: [signalr-hub]
+        focusNodes: [trip-ops-ep, signalr-hub]
+        revealCalls: [ep-subscribe-gps, ep-subscribe-vr-state, ep-subscribe-pt-state, idempotency-check]
+        duration: 4500
+
+      - id: signalr-step-4
+        title: "Three Consumer Portals"
+        narrative: >
+          **Dispatch board**: full fleet map with 30s GPS updates, color-coded status chips.
+          **Parent portal**: ETA countdown, boarded/arrived/dropped-off notifications,
+          student-scoped only. **Driver portal**: route status, next stop, PT checklist.
+          Two active SignalR connections in Trip HQ. ~150–250ms end-to-end latency.
+        activeCalls: [ws-dispatch, ws-parent, ws-driver]
+        revealNodes: [dispatch-board, parent-portal, driver-portal]
+        focusNodes: [signalr-hub, dispatch-board, parent-portal]
+        revealCalls: [signalr-vr-group, signalr-district-group, broadcast-state]
+        duration: 4500
+
+      - id: signalr-step-5
+        title: "Beyond Real-Time: Cross-BC Events"
+        narrative: >
+          The SignalR broadcast handles self-consumption. But Trip Operations also publishes
+          29 event types consumed by 6 downstream BCs — Settlement, Assignment, Rescue,
+          Communications, Monitoring, and Incidents & Safety. These cross-BC events are the
+          nervous system of the entire platform.
+        activeCalls: []
+        focusNodes: [asb]
+        duration: 3000
+
+  # ── Section 3: Cross-BC Event Integration ────────────────────────────
+  - renderer: service-flow
+    title: "Cross-BC Event Integration"
+    accentColor: "#A855F7"
+    layout: sequence
+
+    services:
+      - id: trip-ops
+        name: "Trip Operations"
+        type: api
+        technology: ".NET 10 LTS"
+        status: healthy
+        tags:
+          events: "29 outbound"
+
+      - id: trip-ops-ep
+        name: "Trip Operations EP"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+
+      - id: settlement
+        name: "Settlement BC"
+        type: api
+        technology: ".NET 10"
+        status: healthy
+
+      - id: assignment
+        name: "Assignment BC"
+        type: api
+        technology: ".NET 10"
+        status: healthy
+
+      - id: rescue
+        name: "Rescue BC"
+        type: api
+        technology: ".NET 10"
+        status: healthy
+
+      - id: comms
+        name: "Communications BC"
+        type: api
+        technology: ".NET 10"
+        status: healthy
+
+      - id: monitoring
+        name: "Monitoring BC"
+        type: api
+        technology: ".NET 10"
+        status: healthy
+
+      - id: incidents
+        name: "Incidents & Safety BC"
+        type: api
+        technology: ".NET 10"
+        status: healthy
+
+      - id: enrollment
+        name: "Enrollment & Demand"
+        type: api
+        technology: ".NET 10"
+        status: healthy
+
+      - id: routing
+        name: "Routing BC"
+        type: api
+        technology: ".NET 10"
+        status: healthy
+
+    queues:
+      - id: trip-topic
+        name: "trip-operations"
+        type: topic
+        broker: servicebus
+        consumers: 7
+
+      - id: assignment-topic
+        name: "provider-network-and-assignment"
+        type: topic
+        broker: servicebus
+
+      - id: enrollment-topic
+        name: "enrollment-and-demand"
+        type: topic
+        broker: servicebus
+
+      - id: routing-topic
+        name: "routing-and-pricing"
+        type: topic
+        broker: servicebus
+
+    zones:
+      - id: outbound
+        label: "Outbound Events (29 types)"
+        members: [trip-ops, trip-topic]
+        color: "rgba(168, 85, 247, 0.06)"
+
+      - id: downstream
+        label: "6 Downstream Consumers"
+        members: [settlement, assignment, rescue, comms, monitoring, incidents]
+        color: "rgba(168, 85, 247, 0.10)"
+
+      - id: upstream
+        label: "3 Upstream Sources"
+        members: [enrollment, routing, assignment]
+        color: "rgba(168, 85, 247, 0.04)"
+
+    calls:
+      - id: pub-dropped
+        type: publish
+        from: trip-ops
+        to: trip-topic
+        messageType: "PtDroppedOffEvent"
+        payload:
+          pattern: "transactional-outbox"
+          data: "DriverId + ServiceProviderId + MonitorId (denormalized for Settlement)"
+
+      - id: pub-vr-complete
+        type: publish
+        from: trip-ops
+        to: trip-topic
+        messageType: "VehicleRunCompletedEvent"
+        payload:
+          data: "TripCount, TotalMileage, DriverId, CompletedAt"
+
+      - id: pub-noshow
+        type: publish
+        from: trip-ops
+        to: trip-topic
+        messageType: "PassengerNoShowEvent"
+        payload:
+          data: "StudentId, GpsLocation, Timestamp, VehicleRunId"
+
+      - id: pub-sgr
+        type: publish
+        from: trip-ops
+        to: trip-topic
+        messageType: "SgrCompletedEvent"
+        payload:
+          data: "VrCount, PtCount, TargetDate, TenantId"
+
+      - id: pub-gps
+        type: publish
+        from: trip-ops
+        to: trip-topic
+        messageType: "GpsLocationUpdatedEvent"
+        payload:
+          pattern: "fire-and-forget"
+          data: "Next GPS fix supersedes — no retry needed"
+
+      - id: pub-incident
+        type: publish
+        from: trip-ops
+        to: trip-topic
+        messageType: "TripIncidentReportedEvent"
+        payload:
+          data: "IncidentType, Severity, VehicleRunId, DriverId, Location"
+
+      - id: sub-settlement
+        type: subscribe
+        from: trip-topic
+        to: settlement
+        messageType: "PtDroppedOffEvent + VehicleRunCompletedEvent"
+        action: "BC/PD/PM calculation"
+
+      - id: sub-assignment
+        type: subscribe
+        from: trip-topic
+        to: assignment
+        messageType: "SgrCompletedEvent + VrCancelledEvent"
+        action: "Batch matching + re-match on cancel"
+
+      - id: sub-rescue
+        type: subscribe
+        from: trip-topic
+        to: rescue
+        messageType: "DriverNoShowDetectedEvent + PassengerNoShowEvent"
+        action: "Rescue workflow via Conductor"
+
+      - id: sub-comms
+        type: subscribe
+        from: trip-topic
+        to: comms
+        messageType: "PtBoardedEvent + PtArrivedEvent + PtDroppedOffEvent + PassengerNoShowEvent"
+        action: "Parent SMS via Twilio"
+
+      - id: sub-monitoring
+        type: subscribe
+        from: trip-topic
+        to: monitoring
+        messageType: "All VR/PT state events + GpsLocationUpdatedEvent"
+        action: "Anomaly detection + PagerDuty"
+
+      - id: sub-incidents
+        type: subscribe
+        from: trip-topic
+        to: incidents
+        messageType: "TripIncidentReportedEvent"
+        action: "Investigation initiation"
+
+      - id: in-assigned
+        type: subscribe
+        from: assignment-topic
+        to: trip-ops-ep
+        messageType: "TripAssignedEvent"
+        action: "Create VR RESERVED, link PTs, copy settlement data"
+
+      - id: in-unassigned
+        type: subscribe
+        from: assignment-topic
+        to: trip-ops-ep
+        messageType: "TripUnassignedEvent"
+        action: "Cancel PT, cascade VR cancel if empty"
+
+      - id: in-discharged
+        type: subscribe
+        from: enrollment-topic
+        to: trip-ops-ep
+        messageType: "StudentDischargedEvent"
+        action: "Cancel all future PTs for discharged student"
+
+      - id: in-sequenced
+        type: subscribe
+        from: routing-topic
+        to: trip-ops-ep
+        messageType: "StopSequencedEvent"
+        action: "Reorder VR.Stops JSONB after route optimization"
+
+    steps:
+      - id: crossbc-step-1
+        title: "Revenue & Safety Events (Outbox)"
+        narrative: >
+          Four event types transit the **transactional outbox**: **PtDroppedOffEvent**,
+          **VehicleRunCompletedEvent**, **PassengerNoShowEvent**, **DriverNoShowDetectedEvent**.
+          Settlement subscribes to the first two for **BC/PD/PM** calculation.
+          {color:red|A lost event means unpaid drivers and unreconciled invoices.}
+        activeCalls: [pub-dropped, pub-vr-complete, sub-settlement]
+        revealNodes: [trip-ops, trip-topic, settlement]
+        focusNodes: [trip-ops, trip-topic, settlement]
+        duration: 5000
+
+      - id: crossbc-step-2
+        title: "Assignment & Rescue Events"
+        narrative: >
+          **SgrCompletedEvent** triggers Assignment batch matching — pairing drivers to VRs.
+          **PassengerNoShowEvent** fans out to Rescue (replacement driver via Conductor saga)
+          and Communications (parent notification). **VrCancelledEvent** triggers re-matching
+          for orphaned PTs.
+        activeCalls: [pub-noshow, pub-sgr, sub-assignment, sub-rescue]
+        revealNodes: [assignment, rescue]
+        focusNodes: [trip-topic, assignment, rescue]
+        revealCalls: [pub-dropped, pub-vr-complete, sub-settlement]
+        duration: 4500
+
+      - id: crossbc-step-3
+        title: "Communications, Monitoring & Safety"
+        narrative: >
+          Communications sends three SMS per trip: 'Driver arrived', 'Student picked up',
+          'Student dropped off'. Monitoring tracks all state changes for anomaly detection
+          and creates exceptions from **AtRiskDetectedEvent**. Incidents & Safety initiates
+          investigations from **TripIncidentReportedEvent**.
+        activeCalls: [pub-gps, pub-incident, sub-comms, sub-monitoring, sub-incidents]
+        revealNodes: [comms, monitoring, incidents]
+        focusNodes: [trip-topic, comms, monitoring, incidents]
+        revealCalls: [pub-noshow, pub-sgr, sub-assignment, sub-rescue]
+        duration: 5000
+
+      - id: crossbc-step-4
+        title: "Inbound: Cross-Context Reactions"
+        narrative: >
+          5 inbound handlers from 3 upstream topics. **TripAssignedEvent**: create VR
+          `RESERVED`, copy settlement data via `UpdateSettlementData()`. **TripUnassignedEvent**:
+          cancel PT, cascade VR if empty. **StudentDischargedEvent**: cancel all future PTs.
+          **StopSequencedEvent**: reorder VR stops after route optimization. All enforce
+          exactly-once via Redis idempotency (1h TTL).
+        activeCalls: [in-assigned, in-unassigned, in-discharged, in-sequenced]
+        revealNodes: [trip-ops-ep, enrollment, routing]
+        focusNodes: [trip-ops-ep, enrollment, routing]
+        revealCalls: [pub-gps, pub-incident, sub-comms, sub-monitoring, sub-incidents]
+        duration: 5500
+
+      - id: crossbc-step-5
+        title: "Complete Event Topology"
+        narrative: >
+          29 outbound event types to 6 downstream BCs. 4 self-consumption handlers for
+          SignalR. 5 inbound handlers from 3 upstream topics. 4 revenue-critical events
+          via transactional outbox; 25 fire-and-forget with eventual consistency. All
+          inbound handlers enforce exactly-once via Redis idempotency.
+        activeCalls:
+          - pub-dropped
+          - pub-vr-complete
+          - pub-noshow
+          - pub-sgr
+          - pub-gps
+          - pub-incident
+          - sub-settlement
+          - sub-assignment
+          - sub-rescue
+          - sub-comms
+          - sub-monitoring
+          - sub-incidents
+          - in-assigned
+          - in-unassigned
+          - in-discharged
+          - in-sequenced
+        focusNodes: [trip-topic, trip-ops, trip-ops-ep]
+        duration: 5000

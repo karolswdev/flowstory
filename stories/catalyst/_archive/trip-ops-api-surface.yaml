@@ -1,0 +1,625 @@
+id: trip-ops-api-surface
+title: "Trip Operations — API Surface Deep Dive"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  A multi-perspective deep dive into Trip Operations' API surface —
+  from the system context (who calls it and why), through the HTTP
+  request/response exchanges of its 12 controllers and 67 endpoints,
+  to the internal service choreography that a single request triggers.
+
+sections:
+  # ── Section 1: C4 Context — Who Talks to Trip Ops? ──────────────────
+  - renderer: c4-context
+    title: "System Context"
+    accentColor: "#059669"
+    organization: EverDriven
+    system:
+      id: trip-ops
+      name: Trip Operations
+      description: "Operational heartbeat — 12 controllers, 67 endpoints, 3 state machines, 29 outbound event types"
+      icon: "\U0001F690"
+      color: "#059669"
+      capabilities:
+        - VR/PT lifecycle management
+        - GPS telemetry ingestion
+        - SGR batch trip generation
+        - Real-time fleet visibility
+        - Driver offer workflow
+      technology: ".NET 10, PostgreSQL, PostGIS, Redis, SignalR"
+    people:
+      - id: dispatcher
+        name: Dispatcher
+        description: "Manages daily fleet operations via Trip HQ"
+        icon: "\U0001F3A7"
+        external: false
+        role: Operations
+      - id: driver
+        name: Driver
+        description: "Receives offers, reports GPS, executes trips"
+        icon: "\U0001F468\u200D\U0001F33E"
+        external: true
+        role: Field
+      - id: parent
+        name: Parent/Guardian
+        description: "Tracks student ETA, views trip status"
+        icon: "\U0001F468\u200D\U0001F469\u200D\U0001F467"
+        external: true
+        role: Consumer
+    externalSystems:
+      - id: trip-hq
+        name: Trip HQ
+        description: "Next.js 15 frontend — dispatch board, fleet map, parent portal"
+        icon: "\U0001F5A5\uFE0F"
+        vendor: Internal
+        type: saas
+        critical: true
+      - id: assignment-bc
+        name: Assignment BC
+        description: "Matches drivers to VRs, triggers TripAssignedEvent"
+        icon: "\U0001F517"
+        vendor: Internal
+        type: api
+        critical: true
+      - id: settlement-bc
+        name: Settlement BC
+        description: "Calculates BC/PD/PM from PtDroppedOffEvent"
+        icon: "\U0001F4B0"
+        vendor: Internal
+        type: api
+        critical: true
+      - id: monitoring-bc
+        name: Monitoring & Exceptions
+        description: "Consumes all state-change events for anomaly detection"
+        icon: "\U0001F6A8"
+        vendor: Internal
+        type: api
+      - id: conductor
+        name: Orkes Conductor
+        description: "Orchestrates SGR generation workflow (22 task workers)"
+        icon: "\U0001F3BC"
+        vendor: Orkes
+        type: saas
+        critical: true
+      - id: postgis
+        name: PostGIS
+        description: "Geospatial engine — GPS telemetry, geofence queries"
+        icon: "\U0001F30D"
+        vendor: PostgreSQL
+        type: database
+    relationships:
+      - from: dispatcher
+        to: trip-ops
+        type: manages
+        description: "VR lifecycle, dispatch, rescue triggers"
+        technology: "HTTPS + SignalR WebSocket"
+        critical: true
+      - from: driver
+        to: trip-ops
+        type: sends
+        description: "GPS telemetry every 30s, offer accept/reject"
+        technology: "HTTPS (v1/gps, v1/vr)"
+      - from: parent
+        to: trip-ops
+        type: reads
+        description: "Student trips, live ETA"
+        technology: "HTTPS (v1/parent-trips)"
+      - from: trip-hq
+        to: trip-ops
+        type: calls
+        description: "All 12 controllers via ingress"
+        technology: "HTTPS + SignalR"
+        critical: true
+      - from: assignment-bc
+        to: trip-ops
+        type: sends
+        description: "TripAssignedEvent, TripUnassignedEvent"
+        technology: "Azure Service Bus"
+        sync: false
+      - from: trip-ops
+        to: settlement-bc
+        type: sends
+        description: "PtDroppedOffEvent (revenue-critical)"
+        technology: "Transactional Outbox → ASB"
+        sync: false
+        critical: true
+      - from: trip-ops
+        to: monitoring-bc
+        type: sends
+        description: "29 event types — all state changes"
+        technology: "Azure Service Bus"
+        sync: false
+      - from: trip-ops
+        to: conductor
+        type: calls
+        description: "SGR generation workflow orchestration"
+        technology: "REST API"
+        critical: true
+      - from: trip-ops
+        to: postgis
+        type: stores
+        description: "GPS telemetry (90-day retention, GIST index)"
+        technology: "EF Core + NetTopologySuite"
+    steps:
+      - title: "The Operational Heartbeat"
+        description: "Trip Operations sits at the center of Catalyst — the largest BC with 12 controllers, 67 endpoints, and 3 state machines managing 50K+ daily student trips."
+        focusNode: trip-ops
+        zoomLevel: 1
+        duration: 5000
+        narration:
+          speaker: "Architect"
+          message: "Trip Operations is the most connected BC in the platform — every other service depends on its events."
+      - title: "Three Consumer Personas"
+        description: "Dispatchers manage fleet operations. Drivers report GPS and accept offers. Parents track their children's ETA — each with dedicated API controllers."
+        highlightNodes:
+          - dispatcher
+          - driver
+          - parent
+        duration: 5000
+      - title: "Revenue-Critical Data Path"
+        description: "The PtDroppedOffEvent flows through a transactional outbox to Settlement, triggering BC/PD/PM calculations. If this event is lost, drivers go unpaid and districts go unbilled."
+        highlightNodes:
+          - settlement-bc
+          - conductor
+        showCriticalPath: true
+        duration: 5000
+      # BRIDGE — zoom into the API surface
+      - title: "Inside the API Surface"
+        description: "Let's zoom into the 12 controllers and see the actual HTTP exchanges that drive these state machines."
+        highlightNodes:
+          - trip-ops
+        duration: 3000
+
+  # ── Section 2: HTTP Flow — Key API Exchanges ─────────────────────────
+  - renderer: http-flow
+    title: "API Exchanges"
+    accentColor: "#3B82F6"
+    layout: sequence
+
+    participants:
+      - id: trip-hq
+        name: Trip HQ
+        type: client
+        icon: "\U0001F5A5\uFE0F"
+      - id: ingress
+        name: nginx ingress
+        type: gateway
+        icon: "\U0001F6AA"
+        baseUrl: "http://api.catalyst.local"
+      - id: vr-ctrl
+        name: VehicleRunController
+        type: server
+        icon: "\U0001F690"
+        baseUrl: "v1/vr"
+      - id: pt-ctrl
+        name: PassengerTripController
+        type: server
+        icon: "\U0001F392"
+        baseUrl: "v1/pt"
+      - id: gps-ctrl
+        name: GpsController
+        type: server
+        icon: "\U0001F4E1"
+        baseUrl: "v1/gps"
+      - id: sgr-ctrl
+        name: SgrController
+        type: service
+        icon: "\u23F0"
+        baseUrl: "v1/sgr"
+      - id: driver-ctrl
+        name: DriverTripsController
+        type: service
+        icon: "\U0001F468\u200D\U0001F33E"
+        baseUrl: "v1/driver-trips"
+
+    exchanges:
+      # VR Lifecycle
+      - id: start-vr
+        request:
+          from: trip-hq
+          to: vr-ctrl
+          method: POST
+          path: /trip-operations/v1/vr/{id}/start
+          headers:
+            Authorization: "Bearer {jwt}"
+            Content-Type: application/json
+          auth:
+            type: bearer
+            token: "{fusionauth-jwt}"
+        response:
+          status: 200
+          statusText: OK
+          body: { vrId: "guid", status: "TOSTOP", startedAt: "2026-02-22T07:15:00Z" }
+          bodyType: json
+        timing:
+          total: 45
+          ttfb: 38
+
+      - id: complete-vr
+        request:
+          from: trip-hq
+          to: vr-ctrl
+          method: POST
+          path: /trip-operations/v1/vr/{id}/complete
+          headers:
+            Authorization: "Bearer {jwt}"
+          auth:
+            type: bearer
+        response:
+          status: 200
+          statusText: OK
+          body: { vrId: "guid", status: "POSTSERVICE" }
+        timing:
+          total: 52
+
+      # PT State Transitions
+      - id: board-pt
+        request:
+          from: trip-hq
+          to: pt-ctrl
+          method: POST
+          path: /trip-operations/v1/pt/{id}/board
+          headers:
+            Authorization: "Bearer {jwt}"
+          body: { studentIdScanned: true }
+          bodyType: json
+          auth:
+            type: bearer
+        response:
+          status: 200
+          statusText: OK
+          body: { ptId: "guid", status: "ONBOARD", boardedAt: "2026-02-22T07:22:00Z" }
+        timing:
+          total: 35
+          ttfb: 28
+
+      - id: dropoff-pt
+        request:
+          from: trip-hq
+          to: pt-ctrl
+          method: POST
+          path: /trip-operations/v1/pt/{id}/dropoff
+          headers:
+            Authorization: "Bearer {jwt}"
+          auth:
+            type: bearer
+        response:
+          status: 200
+          statusText: OK
+          body: { ptId: "guid", status: "POSTSERVICE", droppedOffAt: "2026-02-22T07:45:00Z" }
+        timing:
+          total: 48
+          ttfb: 40
+
+      # GPS Ingestion (highest throughput — 30s cadence per vehicle)
+      - id: ingest-gps
+        request:
+          from: trip-hq
+          to: gps-ctrl
+          method: POST
+          path: /trip-operations/v1/gps/ingest
+          headers:
+            Authorization: "Bearer {jwt}"
+            Content-Type: application/json
+          body: { vehicleId: "guid", latitude: 39.7392, longitude: -104.9903, heading: 180, speed: 28.5, accuracy: 12.3 }
+          bodyType: json
+          auth:
+            type: bearer
+        response:
+          status: 200
+          statusText: OK
+          body: { accepted: true, etaUpdated: true }
+        timing:
+          total: 35
+          ttfb: 28
+
+      # SGR Trigger
+      - id: trigger-sgr
+        request:
+          from: trip-hq
+          to: sgr-ctrl
+          method: POST
+          path: /trip-operations/v1/sgr/trigger
+          headers:
+            Authorization: "Bearer {jwt}"
+          body: { targetDate: "2026-02-23", tenantId: "guid" }
+          bodyType: json
+          auth:
+            type: bearer
+        response:
+          status: 202
+          statusText: Accepted
+          body: { sgrId: "guid", status: "Queued", workflowId: "conductor-wf-id" }
+        timing:
+          total: 120
+          ttfb: 95
+
+      # Driver-scoped queries
+      - id: driver-today
+        request:
+          from: trip-hq
+          to: driver-ctrl
+          method: GET
+          path: /trip-operations/v1/driver-trips/today
+          headers:
+            Authorization: "Bearer {jwt}"
+          auth:
+            type: bearer
+        response:
+          status: 200
+          statusText: OK
+          body: { runs: [{ vrId: "guid", stops: 8, scheduledStart: "07:00", status: "OFFERACCEPTED" }] }
+        timing:
+          total: 65
+
+    steps:
+      - id: http-overview
+        title: "12 Controllers, 67 Endpoints"
+        narrative: "Trip Operations exposes 12 REST controllers behind the nginx ingress at api.catalyst.local/trip-operations/v1/*. The ingress strips the /trip-operations prefix — controllers see only their resource paths."
+        activeExchanges: []
+        duration: 4000
+        narration:
+          speaker: "Architect"
+          message: "Every request requires a FusionAuth JWT with a tenant_id claim. Multi-tenancy is enforced at three layers."
+
+      - id: http-vr-lifecycle
+        title: "VR Lifecycle — Start & Complete"
+        narrative: "Dispatchers start a Vehicle Run (POST v1/vr/{id}/start → VR transitions from OFFERACCEPTED to TOSTOP) and complete it after all stops (POST v1/vr/{id}/complete → POSTSERVICE). These are the bookends of a driver's daily route."
+        activeExchanges:
+          - start-vr
+          - complete-vr
+        duration: 5000
+
+      - id: http-pt-transitions
+        title: "PT Transitions — Board & Drop-Off"
+        narrative: "Each student pickup triggers a board action (ATPU → ONBOARD) and each dropoff fires the revenue-critical PtDroppedOffEvent. The dropoff endpoint response takes ~48ms but triggers an async outbox write that ultimately reaches Settlement."
+        activeExchanges:
+          - board-pt
+          - dropoff-pt
+        duration: 5000
+
+      - id: http-gps-ingestion
+        title: "GPS Telemetry — 30-Second Cadence"
+        narrative: "Every vehicle reports GPS every 30 seconds. At peak (33 vehicles), that's ~66 requests per minute per tenant. The endpoint validates the GpsReading value object (accuracy < 50m, staleness < 30s), persists to PostGIS, recalculates ETA, and writes to the transactional outbox — all in ~35ms."
+        activeExchanges:
+          - ingest-gps
+        duration: 5000
+
+      - id: http-sgr-trigger
+        title: "SGR Trigger — Nightly Batch Generation"
+        narrative: "The SGR endpoint returns 202 Accepted immediately. It queues a Conductor workflow that runs the 6-step TripGenerationApplicationService pipeline — calendar exclusion gate, active SR filtering, VR creation, PT creation, stop-to-PT linkage, and conflict detection."
+        activeExchanges:
+          - trigger-sgr
+        duration: 5000
+
+      - id: http-driver-portal
+        title: "Driver Portal — Today's Schedule"
+        narrative: "Drivers see their day's schedule through a dedicated controller. The query returns VR details with stops, scheduled times, and student info — scoped by the driver's JWT identity."
+        activeExchanges:
+          - driver-today
+        duration: 4000
+
+      # BRIDGE — into the internal service flow
+      - id: http-bridge
+        title: "What Happens Inside"
+        narrative: "Behind each endpoint is a CQRS pipeline — commands mutate aggregates, raise domain events, and write to the transactional outbox. Let's trace a single GPS ingestion through the full internal flow."
+        activeExchanges:
+          - ingest-gps
+        duration: 3500
+
+  # ── Section 3: Service Flow — Internal Choreography ──────────────────
+  - renderer: service-flow
+    title: "Internal Flow"
+    accentColor: "#A855F7"
+    layout: sequence
+
+    services:
+      - id: api-pod
+        name: Trip Ops API
+        type: api
+        technology: ".NET 10"
+        status: healthy
+        instances: 2
+      - id: mediator
+        name: MediatR
+        type: worker
+        technology: "CQRS Pipeline"
+        status: healthy
+      - id: domain
+        name: Domain Layer
+        type: worker
+        technology: "Aggregates + VOs"
+        status: healthy
+      - id: trip-db
+        name: trip_operations DB
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: postgis-engine
+        name: PostGIS
+        type: database
+        technology: "geometry(Point,4326)"
+        status: healthy
+      - id: redis
+        name: Redis
+        type: cache
+        technology: "PT Cache + Idempotency"
+        status: healthy
+      - id: ep-pod
+        name: Trip Ops EP
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: signalr-hub
+        name: SignalR Hub
+        type: external
+        technology: "WebSocket"
+
+    queues:
+      - id: outbox
+        name: outbox_messages
+        type: queue
+        broker: redis
+        consumers: 1
+      - id: asb-topic
+        name: trip-operations
+        type: topic
+        broker: servicebus
+        consumers: 7
+
+    zones:
+      - id: api-zone
+        label: "API Pod (sync path)"
+        members: [api-pod, mediator, domain, trip-db, postgis-engine]
+        color: "rgba(59, 130, 246, 0.05)"
+      - id: ep-zone
+        label: "EventProcessor Pod (async path)"
+        members: [ep-pod, signalr-hub, redis]
+        color: "rgba(168, 85, 247, 0.05)"
+
+    calls:
+      - id: http-to-mediator
+        type: sync
+        from: api-pod
+        to: mediator
+        method: POST
+        path: IngestGpsLocationCommand
+        protocol: http
+        duration: 2
+
+      - id: mediator-to-domain
+        type: sync
+        from: mediator
+        to: domain
+        method: VALIDATE
+        path: GpsReading.Create()
+        duration: 1
+
+      - id: domain-to-postgis
+        type: sync
+        from: domain
+        to: postgis-engine
+        method: INSERT
+        path: "gps_locations (SRID 4326)"
+        duration: 8
+
+      - id: domain-to-eta
+        type: sync
+        from: domain
+        to: domain
+        method: CALCULATE
+        path: EstimatedTimeOfArrival.Compute()
+        duration: 5
+
+      - id: domain-to-db
+        type: sync
+        from: domain
+        to: trip-db
+        method: INSERT
+        path: outbox_messages + SaveChanges
+        duration: 12
+
+      - id: outbox-relay
+        type: publish
+        from: trip-db
+        to: outbox
+        method: RELAY
+        path: GpsLocationUpdatedEvent
+
+      - id: outbox-to-asb
+        type: publish
+        from: outbox
+        to: asb-topic
+        method: PUBLISH
+        path: GpsLocationUpdatedEvent
+
+      - id: asb-to-ep
+        type: subscribe
+        from: asb-topic
+        to: ep-pod
+        messageType: GpsLocationUpdatedEvent
+        action: GpsLocationUpdatedEventHandler
+
+      - id: ep-idempotency
+        type: sync
+        from: ep-pod
+        to: redis
+        method: CHECK
+        path: "idempotency:{eventId}"
+        duration: 1
+
+      - id: ep-to-signalr
+        type: sync
+        from: ep-pod
+        to: signalr-hub
+        method: BROADCAST
+        path: "Groups: vr-{vrId}, district-{tenantId}"
+        duration: 3
+
+      - id: pt-cache-invalidate
+        type: sync
+        from: ep-pod
+        to: redis
+        method: INVALIDATE
+        path: "pt-cache:{tenantId}:{ptId}"
+        duration: 1
+
+    steps:
+      - id: flow-entry
+        title: "Request Enters the API Pod"
+        narrative: "A GPS ingestion request hits the API pod. The controller delegates to MediatR, which routes to the IngestGpsLocationCommand handler."
+        activeCalls:
+          - http-to-mediator
+        duration: 4000
+        narration:
+          speaker: "Architect"
+          message: "The sync path completes in ~35ms. Everything after the HTTP response is async."
+
+      - id: flow-validate
+        title: "Domain Validation"
+        narrative: "The GpsReading value object validates invariants at construction — accuracy must be under 50 meters, staleness under 30 seconds. Invalid readings are rejected before any I/O occurs."
+        activeCalls:
+          - mediator-to-domain
+        duration: 4000
+
+      - id: flow-persist
+        title: "PostGIS + Outbox Atomic Commit"
+        narrative: "The GPS point is persisted as a PostGIS geometry(Point, 4326) with a GIST index. The ETA is recalculated. Domain events are written to outbox_messages. All in a single SaveChangesAsync transaction — ~20ms."
+        activeCalls:
+          - domain-to-postgis
+          - domain-to-eta
+          - domain-to-db
+        duration: 5000
+
+      - id: flow-outbox-relay
+        title: "Transactional Outbox Relay"
+        narrative: "After the HTTP 200 response returns, the outbox relay picks up GpsLocationUpdatedEvent and publishes it to Azure Service Bus. This decouples the sync response from downstream fanout."
+        activeCalls:
+          - outbox-relay
+          - outbox-to-asb
+        duration: 4000
+
+      - id: flow-ep-handler
+        title: "EventProcessor — Self-Consumption"
+        narrative: "The Trip Ops EventProcessor subscribes to its own topic. The handler checks Redis idempotency (1-hour TTL), then broadcasts the GPS update to SignalR groups — both the VR-specific group and the district-wide fleet group."
+        activeCalls:
+          - asb-to-ep
+          - ep-idempotency
+          - ep-to-signalr
+        duration: 5000
+
+      - id: flow-complete
+        title: "End-to-End: ~150-250ms"
+        narrative: "From GPS ingestion to the dispatcher seeing the vehicle move on the fleet map — 150 to 250 milliseconds. The sync path (API pod) takes 35ms. The async path (outbox → ASB → EP → SignalR) adds 115-215ms. This is the self-consumption pattern — Trip Ops consumes its own events to avoid blocking I/O in the sync path."
+        activeCalls:
+          - http-to-mediator
+          - domain-to-postgis
+          - domain-to-db
+          - outbox-to-asb
+          - asb-to-ep
+          - ep-to-signalr
+        focusNodes:
+          - api-pod
+          - ep-pod
+          - signalr-hub
+        duration: 5000

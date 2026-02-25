@@ -1,0 +1,319 @@
+id: conductor-orchestration
+title: "Rescue Orchestration — Conductor Saga"
+description: "Showcases all 8 new service types + sub-states: a Conductor workflow orchestrates a medical rescue with human approval, scheduling, serverless processing, and monitoring."
+renderer: service-flow
+schemaVersion: "2.0"
+layout: sequence
+
+services:
+  - id: dispatch-ui
+    name: Dispatch Console
+    type: client
+    technology: "React SPA"
+    tags:
+      role: dispatcher
+
+  - id: waf
+    name: Azure WAF
+    type: firewall
+    technology: "Azure Front Door"
+    status: healthy
+
+  - id: lb
+    name: K8s Ingress
+    type: load-balancer
+    technology: "NGINX Ingress"
+    tags:
+      algorithm: round-robin
+
+  - id: rescue-api
+    name: Rescue API
+    type: api
+    technology: "Node.js"
+    status: healthy
+    instances: 3
+    version: "2.4"
+    substates: [idle, processing, responding]
+    initialSubstate: idle
+
+  - id: conductor
+    name: Conductor
+    type: workflow
+    technology: "Orkes Conductor"
+    substates: [idle, running, waiting, compensating, completed, failed]
+    initialSubstate: idle
+
+  - id: nightly-trigger
+    name: "Rescue Schedule"
+    type: scheduler
+    technology: "Conductor Scheduler"
+    substates: [idle, triggered]
+    initialSubstate: idle
+    tags:
+      schedule: "on-demand"
+
+  - id: dispatch-approval
+    name: Dispatcher Approval
+    type: human-task
+    technology: "Conductor Human Task"
+    substates: [pending, assigned, reviewing, approved, rejected, escalated]
+    tags:
+      timeout: "15min"
+      escalation: Supervisor
+
+  - id: pdf-gen
+    name: PDF Generator
+    type: function
+    technology: "Azure Function"
+    substates: [idle, processing, completed]
+    initialSubstate: idle
+    tags:
+      trigger: HTTP
+      runtime: ".NET 8"
+
+  - id: rescue-db
+    name: PostgreSQL
+    type: database
+    technology: "PostgreSQL 16"
+    substates: [idle, reading, writing, committed]
+    initialSubstate: idle
+    tags:
+      region: us-east-1
+
+  - id: blob
+    name: Azure Blob
+    type: storage
+    technology: "Azure Blob Storage"
+    substates: [idle, uploading, stored]
+    initialSubstate: idle
+    tags:
+      container: rescue-docs
+
+  - id: rescue-cache
+    name: Redis Cache
+    type: cache
+    technology: "Redis 7"
+
+  - id: pagerduty
+    name: PagerDuty
+    type: monitor
+    technology: "PagerDuty"
+    substates: [quiet, alerting, resolved]
+    initialSubstate: quiet
+    tags:
+      integration: "Events API v2"
+
+  - id: maps-api
+    name: Google Maps
+    type: external
+    technology: "Maps Platform"
+
+queues:
+  - id: rescue-events
+    name: rescue-events
+    type: topic
+    broker: kafka
+    consumers: 3
+
+zones:
+  - id: security
+    label: "Security Boundary"
+    members: [waf, lb]
+    color: "rgba(244, 63, 94, 0.06)"
+  - id: orchestration
+    label: "Orchestration Layer"
+    members: [conductor, nightly-trigger, dispatch-approval]
+    color: "rgba(236, 72, 153, 0.06)"
+  - id: data
+    label: "Data Layer"
+    members: [rescue-db, blob, rescue-cache]
+    color: "rgba(120, 113, 108, 0.06)"
+
+calls:
+  - id: ui-to-waf
+    type: sync
+    from: dispatch-ui
+    to: waf
+    method: POST
+    path: /api/rescue
+    protocol: http
+    duration: 5
+  - id: waf-to-lb
+    type: sync
+    from: waf
+    to: lb
+    method: POST
+    path: /api/rescue
+    duration: 2
+  - id: lb-to-api
+    type: sync
+    from: lb
+    to: rescue-api
+    method: POST
+    path: /api/rescue
+    duration: 3
+  - id: api-trigger-workflow
+    type: sync
+    from: rescue-api
+    to: conductor
+    method: POST
+    path: /workflow/rescue-saga
+    duration: 50
+  - id: schedule-trigger
+    type: async
+    from: nightly-trigger
+    to: conductor
+    messageType: ScheduledTrigger
+  - id: conductor-to-approval
+    type: async
+    from: conductor
+    to: dispatch-approval
+    messageType: HumanTaskAssignment
+  - id: approval-response
+    type: async
+    from: dispatch-approval
+    to: conductor
+    messageType: HumanTaskCompletion
+  - id: conductor-to-db
+    type: sync
+    from: conductor
+    to: rescue-db
+    method: INSERT
+    path: /rescues
+    duration: 12
+  - id: conductor-to-pdf
+    type: sync
+    from: conductor
+    to: pdf-gen
+    method: POST
+    path: /generate
+    duration: 800
+  - id: pdf-to-blob
+    type: sync
+    from: pdf-gen
+    to: blob
+    method: PUT
+    path: /rescue-docs/{id}.pdf
+    duration: 200
+  - id: conductor-to-maps
+    type: sync
+    from: conductor
+    to: maps-api
+    method: GET
+    path: /directions
+    duration: 120
+  - id: conductor-publish
+    type: publish
+    from: conductor
+    to: rescue-events
+    messageType: RescueCompletedEvent
+  - id: pagerduty-subscribe
+    type: subscribe
+    from: rescue-events
+    to: pagerduty
+    messageType: RescueCompletedEvent
+    action: ResolveIncident
+  - id: conductor-to-cache
+    type: sync
+    from: conductor
+    to: rescue-cache
+    method: SET
+    path: /rescue/{id}/status
+    duration: 1
+
+steps:
+  - id: step-1
+    title: "Dispatch Request"
+    narration:
+      speaker: Architect
+      message: "A dispatcher initiates a rescue from the **Dispatch Console**. The request passes through the {color:rose|Azure WAF} and {color:teal|K8s Ingress} before reaching the Rescue API."
+    activeCalls: [ui-to-waf, waf-to-lb, lb-to-api]
+    focusNodes: [dispatch-ui, waf, lb, rescue-api]
+    substates:
+      rescue-api: processing
+
+  - id: step-2
+    title: "Workflow Triggered"
+    narration:
+      speaker: Architect
+      message: "The Rescue API triggers a **Conductor saga workflow**. Conductor transitions from `idle` to `running` — the orchestration begins."
+    activeCalls: [api-trigger-workflow]
+    revealCalls: [ui-to-waf, waf-to-lb, lb-to-api]
+    focusNodes: [rescue-api, conductor]
+    substates:
+      conductor: running
+      rescue-api: responding
+
+  - id: step-3
+    title: "Human Approval Required"
+    narration:
+      speaker: Architect
+      message: "Conductor pauses and assigns a **HUMAN_TASK** to the dispatcher. The workflow enters `waiting` state — it cannot proceed until a human approves."
+    activeCalls: [conductor-to-approval]
+    revealCalls: [api-trigger-workflow]
+    focusNodes: [conductor, dispatch-approval]
+    substates:
+      conductor: waiting
+      dispatch-approval: assigned
+
+  - id: step-4
+    title: "Dispatcher Approves"
+    narration:
+      speaker: Architect
+      message: "The dispatcher reviews and **approves** the rescue. The approval flows back to Conductor, which resumes orchestration."
+    activeCalls: [approval-response]
+    revealCalls: [conductor-to-approval]
+    focusNodes: [dispatch-approval, conductor]
+    substates:
+      conductor: running
+      dispatch-approval: approved
+
+  - id: step-5
+    title: "Persist Rescue & Route"
+    narration:
+      speaker: Architect
+      message: "Conductor orchestrates in parallel: persists the rescue to **PostgreSQL** and fetches optimal routing from {color:slate|Google Maps}."
+    activeCalls: [conductor-to-db, conductor-to-maps]
+    revealCalls: [approval-response]
+    focusNodes: [conductor, rescue-db, maps-api]
+    substates:
+      rescue-db: writing
+
+  - id: step-6
+    title: "Generate Documents"
+    narration:
+      speaker: Architect
+      message: "A serverless **Azure Function** generates the rescue PDF. The function is ephemeral — cold start, process, upload to {color:stone|Blob Storage}, done."
+    activeCalls: [conductor-to-pdf, pdf-to-blob]
+    revealCalls: [conductor-to-db, conductor-to-maps]
+    focusNodes: [pdf-gen, blob]
+    substates:
+      rescue-db: committed
+      pdf-gen: processing
+      blob: uploading
+
+  - id: step-7
+    title: "Cache & Publish"
+    narration:
+      speaker: Architect
+      message: "Conductor caches the rescue status in **Redis** for fast lookups, then publishes a `RescueCompletedEvent` to Kafka — decoupling downstream consumers."
+    activeCalls: [conductor-to-cache, conductor-publish]
+    revealCalls: [conductor-to-pdf, pdf-to-blob, conductor-to-db]
+    focusNodes: [conductor, rescue-cache, rescue-events]
+    substates:
+      conductor: completed
+      pdf-gen: completed
+      blob: stored
+
+  - id: step-8
+    title: "Monitoring & Resolution"
+    narration:
+      speaker: Architect
+      message: "**PagerDuty** subscribes to rescue events and resolves the incident automatically. The full saga — from dispatch to resolution — completes with every node showing its final sub-state."
+    activeCalls: [pagerduty-subscribe]
+    revealCalls: [conductor-to-cache, conductor-publish]
+    focusNodes: [pagerduty, rescue-events]
+    substates:
+      pagerduty: resolved
+      rescue-api: idle
+      nightly-trigger: idle

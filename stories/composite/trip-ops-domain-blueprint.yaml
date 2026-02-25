@@ -1,0 +1,718 @@
+id: trip-ops-domain-blueprint
+title: "Trip Operations — Lifecycle API Surface"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  SGR generation pipeline, VR lifecycle API, PT lifecycle API — all traced through
+  HTTP endpoints and Conductor orchestration. Every call shows the real API path,
+  the state transition it triggers, and the domain events that flow downstream.
+
+sections:
+  # ── Section 1: SGR Nightly Generation ──────────────────────────────────────
+  - renderer: service-flow
+    title: "SGR Nightly Generation"
+    accentColor: "#3B82F6"
+    layout: sequence
+
+    services:
+      - id: conductor
+        name: "Conductor"
+        type: workflow
+        technology: "Orkes Conductor"
+        status: healthy
+      - id: trip-ops-api
+        name: "Trip Operations API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: trip-ops-db
+        name: "PostgreSQL 16 + PostGIS"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: enrollment-api
+        name: "Enrollment & Demand API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: redis
+        name: "Redis"
+        type: cache
+        technology: "Redis 7"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+      - id: assignment-ep
+        name: "Assignment Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+
+    zones:
+      - id: sgr-pipeline
+        label: "SGR Generation Pipeline"
+        members: [conductor, trip-ops-api, trip-ops-db, enrollment-api, redis]
+        color: "rgba(59, 130, 246, 0.06)"
+      - id: downstream
+        label: "Downstream"
+        members: [asb, assignment-ep]
+        color: "rgba(34, 197, 94, 0.06)"
+
+    calls:
+      - id: trigger-sgr
+        type: sync
+        from: conductor
+        to: trip-ops-api
+        method: POST
+        path: /v1/sgr/trigger
+        protocol: http
+        duration: 200
+        status: 200
+        description: "TriggerSgrCommand — Conductor fires at 2AM per tenant"
+        response:
+          status: 200
+          label: "SGR instance created"
+      - id: check-exclusions
+        type: sync
+        from: trip-ops-api
+        to: trip-ops-db
+        method: GET
+        path: "calendar_exclusions WHERE date = target"
+        duration: 15
+        description: "Check 6 ExclusionTypes + weekends"
+      - id: check-enrollment
+        type: sync
+        from: trip-ops-api
+        to: enrollment-api
+        method: GET
+        path: /v1/ceps/{studentId}/eligibility
+        protocol: http
+        duration: 80
+        status: 200
+        description: "Verify CEP eligibility for each SubscriptionTrip"
+        response:
+          status: 200
+          label: "Eligibility confirmed"
+      - id: fetch-templates
+        type: sync
+        from: trip-ops-api
+        to: trip-ops-db
+        method: GET
+        path: "subscription_runs WHERE active AND bitmask"
+        duration: 25
+        description: "Fetch SRs matching DaysOfWeekBitmask for target date"
+      - id: create-vrs
+        type: sync
+        from: trip-ops-api
+        to: trip-ops-db
+        method: POST
+        path: "vehicle_runs + passenger_trips + outbox_messages"
+        duration: 350
+        description: "Atomic: VRs from SRs (1:1), PTs from STs (N:1), back-patch Stop-to-PT linkage"
+      - id: cache-warm
+        type: async
+        from: trip-ops-api
+        to: redis
+        messageType: "CacheWarmCommand"
+        payload:
+          path: "MSET pt-cache:{tenantId}:{ptId}"
+          duration: 25
+          description: "Pre-warm PT cache for GPS pipeline (~25ms for 500 PTs)"
+      - id: publish-complete
+        type: publish
+        from: trip-ops-api
+        to: asb
+        messageType: "SgrCompletedEvent"
+        payload:
+          description: "VR/PT counts, conflict count, execution duration"
+      - id: assignment-consume
+        type: subscribe
+        from: asb
+        to: assignment-ep
+        messageType: "SgrCompletedEvent"
+        action: "Trigger batch matching run"
+
+    steps:
+      - id: sgr-step-1
+        title: "Conductor Trigger"
+        narrative: >
+          The `sgr-generation-workflow` fires at 2AM per tenant. **CreateSgrInstanceTask**
+          creates the **ScheduledGenerationRun** aggregate (`Queued` → `Running`), then
+          **GenerateSubscriptionTripsTask** begins the 6-step pipeline. `POST /v1/sgr/trigger`
+          is the entry point — Conductor calls it as a registered HTTP task worker.
+        activeCalls: [trigger-sgr]
+        revealNodes: [conductor, trip-ops-api]
+        focusNodes: [conductor, trip-ops-api]
+        duration: 4500
+
+      - id: sgr-step-2
+        title: "Calendar & Exclusion Gate"
+        narrative: >
+          First gate: **CalendarExclusion** check against 6 ExclusionTypes (`Holiday`,
+          `TeacherWorkday`, `SnowDay`, `EarlyRelease`, `LateStart`, `Custom`) plus weekend
+          filter against `DaysOfWeekBitmask`. Active **SubscriptionRuns** matching the target
+          day-of-week are fetched from the database.
+        activeCalls: [check-exclusions, fetch-templates]
+        revealNodes: [trip-ops-db]
+        focusNodes: [trip-ops-api, trip-ops-db]
+        revealCalls: [trigger-sgr]
+        duration: 4500
+
+      - id: sgr-step-3
+        title: "CEP Eligibility Verification"
+        narrative: >
+          Second gate: CEP eligibility verification via the Enrollment & Demand API.
+          Each **SubscriptionTrip** is validated against the student's current eligibility
+          status — confirming the transportation entitlement has not been revoked or suspended.
+          This cross-BC HTTP call uses Polly resilience with tenant/correlation/service-auth
+          delegating handlers.
+        activeCalls: [check-enrollment]
+        revealNodes: [enrollment-api]
+        focusNodes: [trip-ops-api, enrollment-api]
+        revealCalls: [check-exclusions, fetch-templates]
+        duration: 4500
+
+      - id: sgr-step-4
+        title: "Atomic VR/PT Creation"
+        narrative: >
+          Single PostgreSQL transaction: **VehicleRuns** from SRs (1:1 mapping), **PassengerTrips**
+          from STs (N per VR, `TripOrigin.ScheduledGeneration`), Stop-to-PT linkage via
+          `WithPassengerTripId()`, **TripConflict** detection (±15 min window). Outbox events
+          written in the same transaction — **SgrCompletedEvent**, **VrCreatedEvent** per VR,
+          **PtCreatedEvent** per PT.
+        activeCalls: [create-vrs]
+        focusNodes: [trip-ops-api, trip-ops-db]
+        revealCalls: [check-enrollment]
+        duration: 5000
+
+      - id: sgr-step-5
+        title: "Cache Warm & Event Publish"
+        narrative: >
+          Redis PT cache pre-warmed for the real-time GPS pipeline that will consume these PTs
+          within hours (~25ms for 500 PTs via `MSET`). **SgrCompletedEvent** published via
+          **transactional outbox** relay to the `trip-operations` ASB topic. Assignment BC's
+          batch matching engine consumes it and begins driver-to-VR matching using the constraint
+          validation pipeline.
+        activeCalls: [cache-warm, publish-complete, assignment-consume]
+        revealNodes: [redis, asb, assignment-ep]
+        focusNodes: [asb, assignment-ep]
+        revealCalls: [create-vrs]
+        duration: 5000
+
+      - id: sgr-step-6
+        title: "Handoff to the VR Lifecycle"
+        narrative: >
+          The VRs are now in `NEW` state, waiting for Assignment to reserve them. Each VR
+          contains an ordered list of **Stop** value objects and linked **PassengerTrips**.
+          The VR lifecycle API manages the 16-state journey from `NEW` through active
+          stop-cycling to `BOOKED` and settlement.
+        activeCalls: []
+        focusNodes: [trip-ops-api]
+        duration: 3000
+
+  # ── Section 2: VR Lifecycle API ────────────────────────────────────────────
+  - renderer: service-flow
+    title: "VR Lifecycle API"
+    accentColor: "#22C55E"
+    layout: sequence
+
+    services:
+      - id: assignment-bc
+        name: "Assignment BC"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: trip-ops-api
+        name: "Trip Operations API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: trip-ops-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: driver-app
+        name: "Driver MDD"
+        type: external
+        technology: "Android/iOS"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+      - id: comms-ep
+        name: "Communications EP"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: monitoring-ep
+        name: "Monitoring EP"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: settlement-ep
+        name: "Settlement EP"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+
+    zones:
+      - id: trip-ops-core
+        label: "Trip Operations"
+        members: [trip-ops-api, trip-ops-db]
+        color: "rgba(34, 197, 94, 0.06)"
+      - id: consumers
+        label: "Event Consumers"
+        members: [asb, comms-ep, monitoring-ep, settlement-ep]
+        color: "rgba(168, 85, 247, 0.06)"
+
+    calls:
+      - id: reserve-vr
+        type: sync
+        from: assignment-bc
+        to: trip-ops-api
+        method: POST
+        path: /v1/vr/{id}/reserve
+        protocol: http
+        duration: 120
+        status: 200
+        payload:
+          driverId: "guid"
+          vehicleId: "guid"
+          monitorId: "guid"
+        description: "NEW → RESERVED"
+        response:
+          status: 200
+          label: "VR reserved"
+      - id: queue-offer
+        type: sync
+        from: trip-ops-api
+        to: trip-ops-db
+        method: POST
+        path: "vehicle_runs SET status = OFFERQUEUED"
+        protocol: http
+        duration: 80
+        status: 200
+        description: "RESERVED → OFFERQUEUED — persists offer state before notification dispatch"
+      - id: send-offer
+        type: publish
+        from: trip-ops-api
+        to: asb
+        messageType: "VrOfferSentEvent"
+        payload:
+          description: "OFFERQUEUED → OFFERSENT. Communications EP dispatches push notification to driver MDD."
+      - id: accept-offer
+        type: sync
+        from: driver-app
+        to: trip-ops-api
+        method: POST
+        path: /v1/vr/{id}/offer/accept
+        protocol: http
+        duration: 100
+        status: 200
+        description: "OFFERSENT → OFFERCONFIRMED → OFFERACCEPTED"
+        response:
+          status: 200
+          label: "Offer accepted"
+      - id: start-vr
+        type: sync
+        from: driver-app
+        to: trip-ops-api
+        method: POST
+        path: /v1/vr/{id}/start
+        protocol: http
+        duration: 90
+        status: 200
+        description: "OFFERACCEPTED → TOSTOP. Records ActualStartTime."
+        response:
+          status: 200
+          label: "Run started"
+      - id: arrive-stop
+        type: sync
+        from: driver-app
+        to: trip-ops-api
+        method: POST
+        path: /v1/vr/{id}/arrive-at-stop
+        protocol: http
+        duration: 100
+        status: 200
+        payload:
+          stopId: "guid"
+          lat: 39.7392
+          lng: -104.9903
+        description: "TOSTOP → ATSTOP. Haversine 0.5-mile GPS validation."
+      - id: depart-stop
+        type: sync
+        from: driver-app
+        to: trip-ops-api
+        method: POST
+        path: /v1/vr/{id}/depart-stop
+        protocol: http
+        duration: 80
+        status: 200
+        description: "ATSTOP → TOSTOP (more stops) or ATSTOP → POSTSERVICE (last stop)"
+      - id: complete-vr
+        type: sync
+        from: trip-ops-api
+        to: trip-ops-db
+        method: POST
+        path: "Conductor post-trip pipeline"
+        duration: 500
+        description: "POSTSERVICE → POSTCOMPLETENESS → POSTREADINESS → BOOKED"
+      - id: vr-events
+        type: publish
+        from: trip-ops-api
+        to: asb
+        messageType: "VrStateChangedEvent + VehicleRunCompletedEvent"
+        payload:
+          description: "VrStateChangedEvent on every transition + VehicleRunCompletedEvent at BOOKED"
+      - id: settlement-consume
+        type: subscribe
+        from: asb
+        to: settlement-ep
+        messageType: "VehicleRunCompletedEvent"
+        action: "Initiate BC/PD/PM calculation for the completed VR"
+      - id: persist-vr
+        type: sync
+        from: trip-ops-api
+        to: trip-ops-db
+        method: POST
+        path: "vehicle_runs + outbox_messages"
+        duration: 30
+        description: "State + outbox atomic commit"
+
+    steps:
+      - id: vr-step-1
+        title: "Assignment Reserves the VR"
+        narrative: >
+          Assignment BC reserves a VR via `POST /v1/vr/{id}/reserve` with `driverId`,
+          `vehicleId`, and `monitorId`. This transitions the VR from `NEW` → `RESERVED` and
+          copies settlement-critical identifiers onto the aggregate. The VR is now locked
+          to a specific driver and vehicle.
+        activeCalls: [reserve-vr]
+        revealNodes: [assignment-bc, trip-ops-api]
+        focusNodes: [assignment-bc, trip-ops-api]
+        duration: 4000
+
+      - id: vr-step-2
+        title: "4-Step Offer Pipeline"
+        narrative: >
+          The offer workflow follows: **QueueOffer** persists `RESERVED` → `OFFERQUEUED`.
+          **SendOffer** publishes **VrOfferSentEvent** — Communications EP dispatches a push
+          notification to the driver's MDD (`OFFERQUEUED` → `OFFERSENT`). Driver taps Accept,
+          hitting `POST /v1/vr/{id}/offer/accept` (`OFFERSENT` → `OFFERCONFIRMED` →
+          `OFFERACCEPTED`). Each pre-dispatch state is cancellable — decline triggers rescue.
+        activeCalls: [queue-offer, send-offer, accept-offer]
+        revealNodes: [trip-ops-db, driver-app, comms-ep]
+        focusNodes: [trip-ops-api, driver-app]
+        revealCalls: [reserve-vr]
+        duration: 5500
+
+      - id: vr-step-3
+        title: "Active Route — Stop Cycling"
+        narrative: >
+          Driver starts via `POST /v1/vr/{id}/start` (`OFFERACCEPTED` → `TOSTOP`, records
+          `ActualStartTime`). At each stop: `arrive-at-stop` with GPS coordinates (Haversine
+          0.5-mile radius validation, `TOSTOP` → `ATSTOP`), then `depart-stop` (`ATSTOP` →
+          `TOSTOP` for next, or `ATSTOP` → `POSTSERVICE` at last stop). Each state change
+          persists atomically with transactional outbox events.
+        activeCalls: [start-vr, arrive-stop, depart-stop, persist-vr]
+        focusNodes: [driver-app, trip-ops-api, trip-ops-db]
+        revealCalls: [queue-offer, send-offer, accept-offer]
+        duration: 5500
+
+      - id: vr-step-4
+        title: "Post-Trip Validation"
+        narrative: >
+          Conductor post-trip pipeline runs three validation tasks in sequence:
+          **ValidateCompletenessTask** (all passengers accounted for, no-shows recorded)
+          → `POSTCOMPLETENESS`. **ValidateBillingReadinessTask** (exceptions resolved)
+          → `POSTREADINESS`. **BookVehicleRunTask** finalizes: → `BOOKED`.
+        activeCalls: [complete-vr]
+        focusNodes: [trip-ops-api, trip-ops-db]
+        revealCalls: [start-vr, arrive-stop, depart-stop, persist-vr]
+        duration: 4500
+
+      - id: vr-step-5
+        title: "Settlement Handoff"
+        narrative: >
+          **VehicleRunCompletedEvent** published via transactional outbox. Settlement BC
+          calculates **BC/PD/PM** — Bill Client, Pay Driver, Pay Monitor. Monitoring EP
+          records operational metrics. The VR's journey is complete.
+        activeCalls: [vr-events, settlement-consume]
+        revealNodes: [asb, settlement-ep, monitoring-ep]
+        focusNodes: [asb, settlement-ep]
+        revealCalls: [complete-vr]
+        duration: 4500
+
+      - id: vr-step-6
+        title: "Inside the VR: Passenger Trips"
+        narrative: >
+          Each **VehicleRun** contains multiple **PassengerTrips**. The PT lifecycle models
+          the individual student journey — from boarding through the revenue-critical dropoff
+          moment. The PT's `POSTSERVICE` transition fires **PtDroppedOffEvent** — the single
+          most important event in the platform because it triggers settlement.
+        activeCalls: []
+        focusNodes: [trip-ops-api]
+        revealCalls: [vr-events, settlement-consume]
+        duration: 3500
+
+  # ── Section 3: PT Lifecycle API ────────────────────────────────────────────
+  - renderer: service-flow
+    title: "PT Lifecycle API"
+    accentColor: "#A855F7"
+    layout: sequence
+
+    services:
+      - id: driver-app
+        name: "Driver MDD"
+        type: external
+        technology: "Android/iOS"
+        status: healthy
+      - id: trip-ops-api
+        name: "Trip Operations API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: trip-ops-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: redis
+        name: "Redis PT Cache"
+        type: cache
+        technology: "Redis 7"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+      - id: settlement-ep
+        name: "Settlement EP"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: comms-ep
+        name: "Communications EP"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: monitoring-ep
+        name: "Monitoring EP"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: rescue-ep
+        name: "Rescue EP"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+
+    zones:
+      - id: trip-ops-core
+        label: "Trip Operations"
+        members: [trip-ops-api, trip-ops-db, redis]
+        color: "rgba(168, 85, 247, 0.06)"
+      - id: revenue-path
+        label: "Revenue Pipeline"
+        members: [asb, settlement-ep]
+        color: "rgba(234, 179, 8, 0.06)"
+      - id: ops-consumers
+        label: "Operational Consumers"
+        members: [comms-ep, monitoring-ep, rescue-ep]
+        color: "rgba(34, 197, 94, 0.06)"
+
+    calls:
+      - id: board-pt
+        type: sync
+        from: driver-app
+        to: trip-ops-api
+        method: POST
+        path: /v1/pt/{id}/board
+        protocol: http
+        duration: 90
+        status: 200
+        payload:
+          studentIdScanned: "string"
+          lat: 39.7392
+          lng: -104.9903
+        description: "ATPU → ONBOARD. StudentId scan for audit."
+        response:
+          status: 200
+          label: "Student boarded"
+      - id: cache-invalidate-board
+        type: async
+        from: trip-ops-api
+        to: redis
+        messageType: "CacheInvalidateCommand"
+        payload:
+          path: "DEL pt-cache:{tenantId}:{ptId}"
+          description: "Invalidate stale cache on state change"
+      - id: arrive-dropoff
+        type: sync
+        from: driver-app
+        to: trip-ops-api
+        method: POST
+        path: /v1/pt/{id}/arrive
+        protocol: http
+        duration: 80
+        status: 200
+        payload:
+          lat: 39.7392
+          lng: -104.9903
+        description: "TODO → ATDO"
+      - id: dropoff-pt
+        type: sync
+        from: driver-app
+        to: trip-ops-api
+        method: POST
+        path: /v1/pt/{id}/dropoff
+        protocol: http
+        duration: 100
+        status: 200
+        payload:
+          lat: 39.7392
+          lng: -104.9903
+        description: "ATDO → POSTSERVICE. Revenue-critical transition."
+        response:
+          status: 200
+          label: "Student delivered — revenue recognized"
+      - id: persist-dropoff
+        type: sync
+        from: trip-ops-api
+        to: trip-ops-db
+        method: POST
+        path: "passenger_trips + outbox_messages (PtDroppedOffEvent)"
+        duration: 30
+        description: "PT state + outbox_messages (PtDroppedOffEvent with DriverId, ServiceProviderId, MonitorId) — ATOMIC"
+      - id: publish-dropped
+        type: publish
+        from: trip-ops-api
+        to: asb
+        messageType: "PtDroppedOffEvent"
+        payload:
+          description: "Carries denormalized settlement data — self-contained for BC/PD/PM"
+      - id: settlement-calc
+        type: subscribe
+        from: asb
+        to: settlement-ep
+        messageType: "PtDroppedOffEvent"
+        action: "Calculate BC/PD/PM settlement — Bill Client, Pay Driver, Pay Monitor"
+      - id: parent-sms
+        type: subscribe
+        from: asb
+        to: comms-ep
+        messageType: "PtDroppedOffEvent"
+        action: "Send 'Student arrived safely' SMS to parent via Twilio"
+      - id: noshow-pt
+        type: sync
+        from: driver-app
+        to: trip-ops-api
+        method: POST
+        path: /v1/pt/{id}/no-show
+        protocol: http
+        duration: 80
+        status: 200
+        payload:
+          reason: "string"
+        description: "TOPU/ATPU → NOSHOW (terminal)"
+      - id: noshow-publish
+        type: publish
+        from: trip-ops-api
+        to: asb
+        messageType: "PtNoShowEvent"
+        payload:
+          description: "PtNoShowEvent triggers rescue and monitoring downstream"
+      - id: rescue-consume
+        type: subscribe
+        from: asb
+        to: rescue-ep
+        messageType: "PtNoShowEvent"
+        action: "Initiate rescue-orchestration-workflow for replacement provider"
+      - id: adhoc-create
+        type: sync
+        from: trip-ops-api
+        to: trip-ops-db
+        method: POST
+        path: /v1/pt
+        duration: 150
+        status: 201
+        description: "CreateAdHocTripCommand — TripOrigin.AdHoc, dispatcher-initiated one-off trip"
+
+    steps:
+      - id: pt-step-1
+        title: "Student Boarding"
+        narrative: >
+          Driver arrives at pickup (`TOPU` → `ATPU` is synchronized from the parent VR's
+          `arrive-at-stop` call). Student scans ID and boards — `POST /v1/pt/{id}/board`
+          with `studentIdScanned` transitions `ATPU` → `ONBOARD`. Redis PT cache invalidated
+          to prevent stale dashboard reads. Once `ONBOARD`, the trip cannot be cancelled —
+          the student is physically in the vehicle.
+        activeCalls: [board-pt, cache-invalidate-board]
+        revealNodes: [driver-app, trip-ops-api, redis]
+        focusNodes: [driver-app, trip-ops-api]
+        duration: 4500
+
+      - id: pt-step-2
+        title: "The Revenue Moment — Dropoff"
+        narrative: >
+          Driver arrives at school — `POST /v1/pt/{id}/arrive` transitions `TODO` → `ATDO`.
+          Then `POST /v1/pt/{id}/dropoff` triggers the revenue-critical transition:
+          `ATDO` → `POSTSERVICE`. The **PtDroppedOffEvent** is written to `outbox_messages`
+          in the same PostgreSQL transaction as the PT state change.
+        activeCalls: [arrive-dropoff, dropoff-pt, persist-dropoff]
+        revealNodes: [trip-ops-db]
+        focusNodes: [driver-app, trip-ops-api, trip-ops-db]
+        revealCalls: [board-pt, cache-invalidate-board]
+        duration: 5000
+
+      - id: pt-step-3
+        title: "Denormalized Settlement Data"
+        narrative: >
+          The **PtDroppedOffEvent** carries denormalized `DriverId`, `ServiceProviderId`, and
+          `MonitorId` — copied from the parent VR at assignment time via `UpdateSettlementData()`.
+          Settlement BC calculates **BC/PD/PM** without cross-service queries. Communications
+          EP sends parent SMS. Monitoring EP records on-time status. {color:green|Three independent
+          consumers, one atomic event, zero coupling.}
+        activeCalls: [publish-dropped, settlement-calc, parent-sms]
+        revealNodes: [asb, settlement-ep, comms-ep]
+        focusNodes: [asb, settlement-ep]
+        revealCalls: [arrive-dropoff, dropoff-pt, persist-dropoff]
+        duration: 5500
+
+      - id: pt-step-4
+        title: "Exception: No-Show"
+        narrative: >
+          `POST /v1/pt/{id}/no-show` from `TOPU` or `ATPU` transitions to `NOSHOW` (terminal).
+          **PtNoShowEvent** triggers Rescue BC's automated replacement workflow — the
+          `rescue-orchestration-workflow` Conductor saga finds a replacement provider and
+          reassigns affected PTs. Monitoring creates an **OperationalException** for review.
+        activeCalls: [noshow-pt, noshow-publish, rescue-consume]
+        revealNodes: [rescue-ep, monitoring-ep]
+        focusNodes: [trip-ops-api, rescue-ep]
+        revealCalls: [publish-dropped, settlement-calc, parent-sms]
+        duration: 4500
+
+      - id: pt-step-5
+        title: "Exception: Ad-Hoc Trip"
+        narrative: >
+          Ad-hoc trips (`POST /v1/pt` with `TripOrigin.AdHoc`) bypass SGR entirely —
+          dispatchers create one-off trips for emergency transportation or field trips.
+          These PTs enter the same 16-state lifecycle at `NEW` and follow the identical
+          board-to-dropoff path, generating the same **PtDroppedOffEvent** for settlement.
+        activeCalls: [adhoc-create]
+        focusNodes: [trip-ops-api, trip-ops-db]
+        revealCalls: [noshow-pt, noshow-publish, rescue-consume]
+        duration: 4000

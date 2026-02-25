@@ -18,6 +18,7 @@ interface TeamOwnershipCanvasProps {
   story: TeamOwnershipStory;
   currentStepIndex: number;
   onStepChange?: (step: number) => void;
+  hideOverlay?: boolean;
 }
 
 function TeamCard({ team, services, isHighlighted, delay = 0 }: {
@@ -53,7 +54,7 @@ function TeamCard({ team, services, isHighlighted, delay = 0 }: {
   );
 }
 
-export function TeamOwnershipCanvas({ story, currentStepIndex, onStepChange }: TeamOwnershipCanvasProps) {
+export function TeamOwnershipCanvas({ story, currentStepIndex, onStepChange, hideOverlay = false }: TeamOwnershipCanvasProps) {
   const currentStep = story.steps[currentStepIndex] as TeamOwnershipStep | undefined;
   
   const highlightedTeams = useMemo(() => 
@@ -76,6 +77,8 @@ export function TeamOwnershipCanvas({ story, currentStepIndex, onStepChange }: T
       stepTitle={currentStep?.title}
       stepDescription={currentStep?.description}
       onStepChange={onStepChange}
+      showInfo={!hideOverlay}
+      showNav={!hideOverlay}
       infoClassName="team-info"
       navClassName="team-nav"
     >

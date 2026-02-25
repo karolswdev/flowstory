@@ -1,0 +1,354 @@
+id: monitoring-detection-pipeline
+title: "Monitoring & Exceptions — Detection Pipeline & Alert Escalation"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  The ExceptionDetectionJob background service runs every 60 seconds, querying active VRs
+  across all tenants and running 4 detection algorithms. Detected anomalies create
+  OperationalException aggregates with ExceptionClassification value objects, then route
+  through the alert system with Redis deduplication, PagerDuty escalation, and Firebase
+  push notifications.
+
+sections:
+  # ── Section 1: Exception Detection ─────────────────────────────────────────
+  - renderer: service-flow
+    title: "Exception Detection"
+    accentColor: "#3B82F6"
+    layout: sequence
+
+    services:
+      - id: monitoring-ep
+        name: "Monitoring Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: identity-api
+        name: "Identity & Access API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: trip-ops-api
+        name: "Trip Operations API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: redis
+        name: "Redis"
+        type: cache
+        technology: "Redis 7"
+        status: healthy
+      - id: monitoring-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+
+    zones:
+      - id: detection-pipeline
+        label: "Detection Pipeline"
+        members: [monitoring-ep, identity-api, trip-ops-api, redis]
+        color: "rgba(59, 130, 246, 0.06)"
+      - id: persistence
+        label: "Persistence & Publish"
+        members: [monitoring-db, asb]
+        color: "rgba(34, 197, 94, 0.06)"
+
+    calls:
+      - id: query-tenants
+        type: sync
+        from: monitoring-ep
+        to: identity-api
+        method: GET
+        path: /v1/identity/tenants
+        protocol: http
+        duration: 50
+        status: 200
+        description: "ITenantQueryService — fetch all active tenants for detection sweep"
+        response:
+          status: 200
+          label: "Active tenant list"
+      - id: query-active-vrs
+        type: sync
+        from: monitoring-ep
+        to: trip-ops-api
+        method: GET
+        path: /v1/vr?status=TOSTOP,ATSTOP,OFFERACCEPTED
+        protocol: http
+        duration: 120
+        status: 200
+        description: "ITripOperationsQueryClient — VRs in active dispatch states per tenant"
+        response:
+          status: 200
+          label: "Active VR snapshots"
+      - id: check-vr-cache
+        type: sync
+        from: monitoring-ep
+        to: redis
+        method: GET
+        path: "GET monitoring:vr:{tenantId}:{vehicleRunId}"
+        duration: 5
+        description: "Retrieve VehicleRunMonitoringSnapshot (24h TTL) for baseline comparison"
+      - id: check-idempotency
+        type: sync
+        from: monitoring-ep
+        to: redis
+        method: GET
+        path: "GET monitoring:detection:{vrId}:{type}:{window}"
+        duration: 3
+        description: "RedisDetectionIdempotencyService — prevent duplicate detection within window"
+      - id: persist-exception
+        type: sync
+        from: monitoring-ep
+        to: monitoring-db
+        method: POST
+        path: "monitoring.exceptions + monitoring.outbox_messages"
+        duration: 30
+        description: "Atomic: OperationalException + outbox event in single transaction"
+      - id: publish-detection
+        type: publish
+        from: monitoring-ep
+        to: asb
+        messageType: "DriverNoShowDetectedEvent | LatePickupDetectedEvent | RouteDeviationDetectedEvent | PassengerNoShowDetectedEvent"
+        payload:
+          description: "Detection events published to monitoring-and-exceptions topic via transactional outbox"
+
+    steps:
+      - id: detect-step-1
+        title: "Sweep Initialization"
+        narrative: >
+          **ExceptionDetectionJob** is a `BackgroundService` firing every 60 seconds. Each cycle
+          queries **ITenantQueryService** (HTTP to Identity & Access) for all active tenants, then
+          for each tenant queries **ITripOperationsQueryClient** for VRs in `TOSTOP`, `ATSTOP`, and
+          `OFFERACCEPTED` states. VR monitoring snapshots cached in Redis (24h TTL) provide the
+          baseline data — scheduled times, route waypoints, driver assignments — against which
+          anomalies are measured. The **RedisDetectionIdempotencyService** prevents duplicate
+          detections within sliding windows per VR and exception type.
+        activeCalls: [query-tenants, query-active-vrs, check-vr-cache, check-idempotency]
+        revealNodes: [monitoring-ep, identity-api, trip-ops-api, redis]
+        duration: 5000
+      - id: detect-step-2
+        title: "4 Detection Algorithms"
+        narrative: >
+          Four domain service detectors run against each active VR: (1) **ILatePickupDetector** —
+          compares current time against scheduled pickup + ETA (fixed 30mph when Fleet Engine
+          unavailable). Thresholds: <10min=ignore, 10-30min=Warning, >30min=Critical with
+          `IsCriticalDelay` flag. (2) **INoShowDetector** — driver no-show checks VR in OFFERACCEPTED
+          past dispatch + 15min grace; passenger no-show checks PT in ATPU past arrival + 10min grace.
+          Returns Detected/Skipped/NotDetected result objects. (3) **IRouteDeviationDetector** — dual
+          validation requiring adherence score <80% AND geofence corridor violation AND deviation >
+          threshold. Uses equirectangular projection for nearest waypoint calculation. (4) **IStaleVrDetector** —
+          VR stuck in pre-dispatch state past scheduled time. Severity: >=30min or >=10 trips = Critical,
+          >=15min or >=5 trips = Warning.
+        activeCalls: []
+        focusNodes: [monitoring-ep]
+        duration: 6000
+      - id: detect-step-3
+        title: "Exception Creation & Classification"
+        narrative: >
+          Each detection result creates an **OperationalException** aggregate via `Create()` factory
+          with tenant isolation. The **ExceptionClassification** value object (324 lines) provides 12
+          factory methods: `Late(delayMinutes)`, `NoShow(isDriver)`, `RouteDeviation(deviationMeters)`,
+          `Accident()`, `NearMiss()`, `BehaviorIncident()`, `MissingCredential()`, `ExpiredLicense()`,
+          `VehicleBreakdown()`, `NotificationFailure()`, `ParentComplaint()`, `Early()`. Each factory
+          method encodes severity thresholds — Late: <10min=Low, <20min=Medium, <30min=High,
+          >=30min=Critical. RouteDeviation: <500m=Low, <1000m=Medium, <2000m=High, >=2000m=Critical.
+          The classification also sets `AutoEscalateAfterMinutes` and `RequiresImmediateAction` flags
+          that drive the alert escalation pipeline downstream.
+        activeCalls: [persist-exception]
+        revealNodes: [monitoring-db]
+        revealCalls: [query-tenants, query-active-vrs, check-vr-cache, check-idempotency]
+        duration: 5000
+      - id: detect-step-4
+        title: "Outbox Publish to Alert Pipeline"
+        narrative: >
+          Detection events are written to `monitoring.outbox_messages` atomically with the
+          OperationalException entity. The transactional outbox relay publishes to the
+          `monitoring-and-exceptions` ASB topic. Four event types flow downstream:
+          **DriverNoShowDetectedEvent** (v3 schema — includes AffectedPassengerTripIds and
+          ProviderContractId), **LatePickupDetectedEvent** (carries IsGpsBased flag and
+          RemainingDistanceMiles), **RouteDeviationDetectedEvent** (includes PlannedRouteWaypoints
+          for map visualization), **PassengerNoShowDetectedEvent** (carries WaitDurationMinutes
+          and StudentId). Three downstream consumers: Rescue BC (trigger rescue workflow),
+          Communications BC (notify stakeholders), and Monitoring's own MediatR notification
+          handlers (create Alert aggregates). {color:blue|Next section: how alerts are created and escalated.}
+        activeCalls: [publish-detection]
+        revealNodes: [asb]
+        revealCalls: [persist-exception]
+        duration: 5000
+
+  # ── Section 2: Alert Escalation ──────────────────────────────────────────
+  - renderer: service-flow
+    title: "Alert Escalation"
+    accentColor: "#EF4444"
+    layout: sequence
+
+    services:
+      - id: monitoring-api
+        name: "Monitoring API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: monitoring-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: redis
+        name: "Redis"
+        type: cache
+        technology: "Redis 7"
+        status: healthy
+      - id: conductor
+        name: "Conductor"
+        type: workflow
+        technology: "Orkes Conductor"
+        status: healthy
+      - id: pagerduty
+        name: "PagerDuty"
+        type: external
+        technology: "Events API v2"
+        status: healthy
+      - id: firebase
+        name: "Firebase Cloud Messaging"
+        type: external
+        technology: "Firebase Admin SDK"
+        status: healthy
+
+    zones:
+      - id: alert-creation
+        label: "Alert Creation & Dedup"
+        members: [monitoring-api, monitoring-db, redis]
+        color: "rgba(239, 68, 68, 0.06)"
+      - id: escalation
+        label: "Escalation Pipeline"
+        members: [conductor, pagerduty, firebase]
+        color: "rgba(234, 179, 8, 0.06)"
+
+    calls:
+      - id: dedup-check
+        type: sync
+        from: monitoring-api
+        to: redis
+        method: GET
+        path: "GET monitoring:alert-dedup:{vrId}:{type}"
+        duration: 3
+        description: "RedisAlertDeduplicationService — 15min TTL, ConcurrentDictionary fallback if Redis down"
+      - id: create-alert
+        type: sync
+        from: monitoring-api
+        to: monitoring-db
+        method: POST
+        path: "monitoring.alerts"
+        duration: 25
+        description: "Alert.Create() with DedupKey, Channel routing, ExceptionId linkage"
+      - id: set-dedup
+        type: async
+        from: monitoring-api
+        to: redis
+        messageType: "SetDedupKey"
+        payload:
+          path: "SET monitoring:alert-dedup:{vrId}:{type} EX 900"
+          description: "15min TTL dedup marker prevents duplicate alerts for same VR + type"
+      - id: trigger-escalation
+        type: sync
+        from: monitoring-api
+        to: conductor
+        method: POST
+        path: "alert-escalation-workflow"
+        protocol: http
+        duration: 100
+        description: "Conductor saga: CreateEscalationRecord -> SendPagerDuty -> NotifyStakeholders -> ResolveEscalation"
+      - id: send-pagerduty
+        type: sync
+        from: conductor
+        to: pagerduty
+        method: POST
+        path: /v2/enqueue
+        protocol: https
+        duration: 300
+        status: 202
+        description: "PagerDutyService — Events API v2 trigger event. No-op mode when integration key unconfigured"
+        response:
+          status: 202
+          label: "Incident created"
+      - id: send-firebase
+        type: sync
+        from: conductor
+        to: firebase
+        method: POST
+        path: "FCM send"
+        protocol: https
+        duration: 150
+        description: "FirebasePushService — push notification to dispatcher. Graceful failure (returns false, never fails workflow)"
+        response:
+          status: 200
+          label: "Push delivered"
+      - id: resolve-escalation
+        type: sync
+        from: conductor
+        to: monitoring-db
+        method: POST
+        path: "monitoring.alerts SET status = Escalated"
+        duration: 20
+        description: "ResolveEscalationTask — marks alert Escalated with PagerDuty externalReferenceId"
+
+    steps:
+      - id: alert-step-1
+        title: "Alert Creation & Dedup"
+        narrative: >
+          Three MediatR notification handlers consume detection events within the same process:
+          **LatePickupAlertHandler** (Warning: Firebase Push for 10-30min, Critical: PagerDuty for
+          >30min, suppressed for <10min), **DriverNoShowAlertHandler** (always Critical, always
+          PagerDuty), **RouteDeviationAlertHandler** (always Warning, always Firebase Push). Before
+          creating an Alert, each handler calls **RedisAlertDeduplicationService** — Redis-backed with
+          configurable 15-minute TTL. Key format: `monitoring:alert-dedup:{vehicleRunId}:{exceptionType}`.
+          If Redis is unavailable, a `ConcurrentDictionary<string, DateTimeOffset>` in-memory fallback
+          activates, with auto-clear when Redis reconnects. Duplicate alerts within the TTL window
+          are silently dropped. The **Alert** aggregate is created with DedupKey, Channel routing,
+          and ExceptionId linkage.
+        activeCalls: [dedup-check, create-alert, set-dedup]
+        revealNodes: [monitoring-api, redis, monitoring-db]
+        duration: 5000
+      - id: alert-step-2
+        title: "Conductor Escalation Saga"
+        narrative: >
+          Critical-severity alerts trigger the **alert-escalation-workflow** in Conductor — a 4-task
+          saga with compensation. **CreateEscalationRecordTask** marks the alert with `PendingEscalationId`
+          and `EscalationReason`. **SendPagerDutyEscalationTask** sends to PagerDuty Events API v2
+          (`POST /v2/enqueue`) — returns incident key as `externalReferenceId`. No-op mode when
+          integration key is unconfigured. **NotifyEscalationStakeholdersTask** sends Firebase push
+          notification (optional — graceful failure never blocks the workflow). **ResolveEscalationTask**
+          finalizes the alert to `Escalated` status with the PagerDuty reference. If any step fails,
+          **CancelEscalationTask** (saga compensation) restores the alert to `Active` status via
+          `CancelEscalation(reason)`. All tasks use `IServiceScopeFactory` for scoped DbContext
+          resolution — Conductor workers are registered as singletons but resolve EF Core contexts per execution.
+        activeCalls: [trigger-escalation, send-pagerduty, send-firebase, resolve-escalation]
+        revealNodes: [conductor, pagerduty, firebase]
+        revealCalls: [dedup-check, create-alert, set-dedup]
+        duration: 6000
+      - id: alert-step-3
+        title: "Channel Routing Summary"
+        narrative: >
+          Alert routing follows severity-driven rules encoded in the MediatR handlers. **Late Pickup**:
+          <10min = no alert, 10-30min = Warning via Firebase Push, >30min = Critical via PagerDuty.
+          **Driver No-Show**: always Critical, always PagerDuty — this is the highest-priority
+          operational exception because affected students have no transportation. **Route Deviation**:
+          always Warning via Firebase Push — dispatchers monitor deviations on the map visualization.
+          **Capacity Gap** (from Capacity Planning BC): Critical = PagerDuty + InApp, High = Email,
+          Medium = InApp, Low = dashboard metric only. **Stale VR**: >=30min or >=10 trips = Critical
+          exception record, >=15min or >=5 trips = Warning. The CapacityGapIdentifiedEventHandler
+          in the EP creates both OperationalException and Alert records simultaneously, bypassing the
+          MediatR notification handler path. {color:red|PagerDuty integration key and Firebase credentials
+          are pending configuration in production — no-op and graceful failure modes active.}
+        activeCalls: []
+        focusNodes: [monitoring-api]
+        revealCalls: [trigger-escalation, send-pagerduty, send-firebase, resolve-escalation]
+        duration: 5000

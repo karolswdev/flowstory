@@ -1,0 +1,189 @@
+id: coupling-analysis
+title: "Coupling Analysis — Failure Cascade Demo"
+renderer: service-flow
+schemaVersion: "2.0"
+description: "Demonstrates coupling indicators and failure cascade simulation"
+
+services:
+  - id: gateway
+    name: API Gateway
+    type: gateway
+    technology: Kong
+
+  - id: order-svc
+    name: Order Service
+    type: api
+    technology: Go
+
+  - id: payment-svc
+    name: Payment Service
+    type: api
+    technology: Java
+    substates: [healthy, processing, failed]
+    initialSubstate: healthy
+
+  - id: inventory-svc
+    name: Inventory Service
+    type: api
+    technology: Rust
+
+  - id: notification-svc
+    name: Notification Service
+    type: worker
+    technology: Node.js
+
+  - id: order-db
+    name: Order DB
+    type: database
+    technology: PostgreSQL
+
+  - id: payment-db
+    name: Payment DB
+    type: database
+    technology: PostgreSQL
+
+  - id: events
+    name: Event Bus
+    type: event-bus
+    technology: Kafka
+
+  - id: cache
+    name: Redis Cache
+    type: cache
+    technology: Redis
+
+zones:
+  - id: critical-path
+    label: Critical Payment Path
+    members: [gateway, order-svc, payment-svc, payment-db]
+  - id: eventually-consistent
+    label: Eventually Consistent
+    members: [events, notification-svc, inventory-svc]
+
+calls:
+  - id: gw-to-order
+    type: sync
+    from: gateway
+    to: order-svc
+    method: POST
+    path: /orders
+    coupling: tight
+    critical: true
+
+  - id: order-to-payment
+    type: sync
+    from: order-svc
+    to: payment-svc
+    method: POST
+    path: /payments/charge
+    coupling: tight
+    critical: true
+
+  - id: payment-to-db
+    type: sync
+    from: payment-svc
+    to: payment-db
+    method: INSERT
+    path: payments
+    coupling: tight
+    critical: true
+
+  - id: order-to-db
+    type: sync
+    from: order-svc
+    to: order-db
+    method: INSERT
+    path: orders
+    coupling: tight
+    critical: true
+
+  - id: order-to-cache
+    type: sync
+    from: order-svc
+    to: cache
+    method: SET
+    path: order:{id}
+    coupling: loose
+    fallback: "Skip cache, serve from DB"
+
+  - id: order-to-events
+    type: publish
+    from: order-svc
+    to: events
+    messageType: OrderCreated
+    coupling: eventual
+
+  - id: events-to-inventory
+    type: subscribe
+    from: events
+    to: inventory-svc
+    messageType: OrderCreated
+    action: reserveStock
+    coupling: eventual
+
+  - id: events-to-notify
+    type: subscribe
+    from: events
+    to: notification-svc
+    messageType: OrderCreated
+    action: sendConfirmation
+    coupling: eventual
+
+steps:
+  - id: step-1
+    title: "Normal Operation — Coupling Landscape"
+    narrative: >-
+      Three coupling levels are visible:
+      {color:red|Tight} (solid thick) — synchronous, blocking dependencies.
+      {color:blue|Loose} (normal) — can degrade gracefully.
+      {color:gray|Eventual} (dashed thin) — async, no availability coupling.
+    activeCalls: [gw-to-order, order-to-payment, payment-to-db, order-to-db, order-to-cache, order-to-events, events-to-inventory, events-to-notify]
+    focusNodes: []
+    camera:
+      fitAll: true
+      duration: 1000
+
+  - id: step-2
+    title: "Order Flow — Critical Path"
+    narrative: >-
+      The **critical path** runs through the {color:red|tightly coupled} chain:
+      Gateway → Order Service → Payment Service → Payment DB.
+      Every link is `critical: true` — failure cascades upstream.
+    activeCalls: [gw-to-order, order-to-payment, payment-to-db, order-to-db]
+    focusNodes: [gateway, order-svc, payment-svc, payment-db]
+    substates:
+      payment-svc: processing
+    camera:
+      zoom: 1.2
+      easing: ease-in
+      duration: 800
+
+  - id: step-3
+    title: "💥 Payment DB Failure — Cascade!"
+    narrative: >-
+      The **Payment DB goes down**. Because the entire chain is `critical: true`,
+      failure cascades upstream: Payment Service → Order Service → Gateway.
+      All {color:red|affected nodes} pulse red. The {color:blue|loose} cache call
+      activates its {color:green|fallback}.
+    activeCalls: [gw-to-order, order-to-payment, payment-to-db, order-to-db, order-to-cache]
+    focusNodes: [payment-db, payment-svc, order-svc, gateway]
+    simulateFailure: payment-db
+    substates:
+      payment-svc: failed
+    camera:
+      zoom: 1.1
+      easing: ease-out
+      duration: 1500
+
+  - id: step-4
+    title: "Eventual Consistency — Unaffected"
+    narrative: >-
+      Meanwhile, the {color:gray|eventually consistent} services are unaffected.
+      Inventory and Notifications continue processing from the event bus.
+      This is why **coupling analysis matters** — it shows your blast radius.
+    activeCalls: [order-to-events, events-to-inventory, events-to-notify]
+    focusNodes: [events, inventory-svc, notification-svc]
+    camera:
+      zoom: 1.0
+      easing: ease-in-out
+      duration: 1000

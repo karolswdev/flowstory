@@ -1,0 +1,135 @@
+id: event-stream-demo
+title: "Event Stream — Cinematic Node Demo"
+description: "Showcasing the event-stream node type with rotating glow, streaming particles, and cycling event cards."
+renderer: service-flow
+schemaVersion: "2.0"
+
+services:
+  - id: trip-api
+    name: Trip API
+    type: api
+    technology: "Node.js"
+
+  - id: trip-stream
+    name: Trip Events
+    type: event-stream
+    technology: "Kafka"
+    tags:
+      partitions: "24"
+      throughput: "100k/s"
+    events:
+      - key: TripCreatedEvent
+        value: "trip_id, rider_id, pickup"
+        emoji: "📦"
+        color: "#3B82F6"
+      - key: DriverAssignedEvent
+        value: "trip_id, driver_id, eta"
+        emoji: "🚗"
+        color: "#22C55E"
+      - key: TripCompletedEvent
+        value: "trip_id, fare, duration"
+        emoji: "✅"
+        color: "#10B981"
+      - key: PaymentProcessedEvent
+        value: "trip_id, amount, method"
+        emoji: "💳"
+        color: "#A855F7"
+
+  - id: matching-engine
+    name: Matching Engine
+    type: worker
+    technology: "Rust"
+
+  - id: tracking-svc
+    name: Tracking Service
+    type: api
+    technology: "Go"
+
+  - id: billing-svc
+    name: Billing Service
+    type: api
+    technology: "Java"
+
+  - id: analytics-db
+    name: Analytics Store
+    type: database
+    technology: "ClickHouse"
+
+calls:
+  - id: api-to-stream
+    type: publish
+    from: trip-api
+    to: trip-stream
+    messageType: TripCreatedEvent
+    stream: true
+
+  - id: stream-to-matching
+    type: subscribe
+    from: trip-stream
+    to: matching-engine
+    messageType: TripCreatedEvent
+    action: "assign driver"
+    stream: true
+
+  - id: stream-to-tracking
+    type: subscribe
+    from: trip-stream
+    to: tracking-svc
+    messageType: DriverAssignedEvent
+    action: "start tracking"
+    stream: true
+
+  - id: stream-to-billing
+    type: subscribe
+    from: trip-stream
+    to: billing-svc
+    messageType: TripCompletedEvent
+    action: "calculate fare"
+
+  - id: stream-to-analytics
+    type: subscribe
+    from: trip-stream
+    to: analytics-db
+    messageType: PaymentProcessedEvent
+    action: "persist metrics"
+
+steps:
+  - id: step-1
+    title: "Trip Created"
+    narrative: >-
+      The **Trip API** publishes a `TripCreatedEvent` to the
+      {color:cyan|Trip Events} stream. Watch the event stream
+      come alive with its rotating glow.
+    activeCalls: [api-to-stream]
+    focusNodes: [trip-api, trip-stream]
+
+  - id: step-2
+    title: "Real-Time Fan-Out"
+    narrative: >-
+      The event stream fans out to the **Matching Engine** and
+      **Tracking Service** simultaneously. Events flow as a
+      {color:purple|continuous stream} to each consumer.
+    activeCalls: [stream-to-matching, stream-to-tracking]
+    focusNodes: [trip-stream, matching-engine, tracking-svc]
+
+  - id: step-3
+    title: "Trip Completion Pipeline"
+    narrative: >-
+      When a trip completes, the stream delivers events to
+      **Billing** for fare calculation and **Analytics** for
+      metrics persistence. Event cards cycle through all 4
+      domain events below the stream node.
+    activeCalls: [stream-to-billing, stream-to-analytics]
+    focusNodes: [trip-stream, billing-svc, analytics-db]
+
+  - id: step-4
+    title: "Full Architecture View"
+    narrative: >-
+      The complete event-driven architecture with the
+      {color:cyan|Event Stream} at its core — a high-throughput
+      Kafka backbone handling **100k events/second** across 24
+      partitions.
+    activeCalls: [api-to-stream, stream-to-matching, stream-to-tracking, stream-to-billing, stream-to-analytics]
+    camera:
+      fitAll: true
+      duration: 1500

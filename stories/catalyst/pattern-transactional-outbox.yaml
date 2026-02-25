@@ -1,0 +1,287 @@
+id: pattern-transactional-outbox
+title: "Transactional Outbox — The Dual-Write Problem & Its Solution"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  Two perspectives on the transactional outbox: the dual-write problem that causes
+  silent event loss (and its real-world consequences), and the atomic commit +
+  background relay pattern that solves it with at-least-once delivery + consumer
+  idempotency = effectively-once semantics.
+
+sections:
+  # ── Section 1: The Dual-Write Problem ───────────────────────────────────
+  - renderer: service-flow
+    title: "The Dual-Write Problem"
+    accentColor: "#EF4444"
+    layout: sequence
+
+    services:
+      - id: handler
+        name: "Command Handler"
+        type: worker
+        technology: "Application Layer"
+        status: healthy
+      - id: aggregate
+        name: "Aggregate"
+        type: api
+        technology: "Domain Entity"
+        status: healthy
+      - id: db
+        name: "PostgreSQL"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: asb
+        name: "Event Bus"
+        type: event-bus
+        technology: "Azure Service Bus"
+        status: degraded
+      - id: downstream
+        name: "Downstream Service"
+        type: event-processor
+        technology: "Settlement, Rescue, etc."
+        status: healthy
+
+    zones:
+      - id: write-path
+        label: "Write Path"
+        members: [handler, aggregate, db]
+        color: "rgba(239, 68, 68, 0.06)"
+      - id: publish-path
+        label: "Publish Path"
+        members: [asb, downstream]
+        color: "rgba(239, 68, 68, 0.10)"
+
+    calls:
+      - id: mutate
+        type: sync
+        from: handler
+        to: aggregate
+        method: INVOKE
+        path: "aggregate.Complete()"
+        duration: 1
+        description: "Mutation succeeds — domain state changes"
+      - id: db-commit
+        type: sync
+        from: handler
+        to: db
+        method: POST
+        path: "SaveChangesAsync() — COMMIT succeeds"
+        duration: 30
+        status: 200
+        description: "Database commit succeeds — state is persisted"
+      - id: publish-fail
+        type: publish
+        from: handler
+        to: asb
+        messageType: "CompletedEvent"
+        payload:
+          description: "PUBLISH FAILS — network timeout, ASB throttle, process crash"
+      - id: never-arrives
+        type: subscribe
+        from: asb
+        to: downstream
+        messageType: "CompletedEvent"
+        action: "NEVER RECEIVED — downstream has no idea the event occurred"
+
+    steps:
+      - id: problem-step-1
+        title: "The Happy Path That Isn't"
+        narrative: >
+          Without an outbox, the handler does two independent operations: (1) commit domain
+          state to PostgreSQL, then (2) publish the domain event to the message bus. These are
+          **two separate I/O calls** with no shared transaction. If step 1 succeeds and step 2
+          fails — network timeout, ASB throttle, process crash between the two calls — the
+          database has the new state but the event never reaches the bus. The aggregate changed
+          state. Nobody downstream knows.
+        activeCalls: [mutate, db-commit]
+        revealNodes: [handler, aggregate, db]
+        duration: 5000
+      - id: problem-step-2
+        title: "Silent Data Loss"
+        narrative: >
+          The event publish fails. **No retry. No recovery.** The event is lost. The downstream
+          service never receives it. In this domain, the consequences are concrete: a student
+          dropoff event that never reaches Settlement means the trip is **never invoiced** — silent
+          revenue loss. A no-show event that never reaches Rescue means a student is **stranded
+          without a replacement driver** — a safety incident. The dual-write problem is not
+          theoretical. It is a data integrity and safety risk.
+        activeCalls: [publish-fail, never-arrives]
+        revealNodes: [asb, downstream]
+        revealCalls: [mutate, db-commit]
+        duration: 6000
+
+  # ── Section 2: Atomic Commit + Background Relay ─────────────────────────
+  - renderer: service-flow
+    title: "Atomic Commit + Background Relay"
+    accentColor: "#22C55E"
+    layout: sequence
+
+    services:
+      - id: handler
+        name: "Command Handler"
+        type: worker
+        technology: "Application Layer"
+        status: healthy
+      - id: aggregate
+        name: "Aggregate"
+        type: api
+        technology: "Domain Entity"
+        status: healthy
+      - id: db
+        name: "PostgreSQL"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: outbox
+        name: "outbox_messages"
+        type: database
+        technology: "Same DB, same transaction"
+        status: healthy
+      - id: relay
+        name: "Outbox Relay"
+        type: worker
+        technology: "Background Service"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+      - id: consumer
+        name: "Consumer"
+        type: event-processor
+        technology: "Event Handler"
+        status: healthy
+      - id: redis
+        name: "Redis Idempotency"
+        type: cache
+        technology: "Redis 7"
+        status: healthy
+
+    zones:
+      - id: atomic-write
+        label: "Atomic Write (ONE transaction)"
+        members: [handler, aggregate, db, outbox]
+        color: "rgba(34, 197, 94, 0.06)"
+      - id: async-relay
+        label: "Async Relay"
+        members: [relay, asb]
+        color: "rgba(59, 130, 246, 0.06)"
+      - id: consumer-side
+        label: "Consumer Idempotency"
+        members: [consumer, redis]
+        color: "rgba(168, 85, 247, 0.06)"
+
+    calls:
+      - id: mutate
+        type: sync
+        from: handler
+        to: aggregate
+        method: INVOKE
+        path: "aggregate.Complete() → RaiseDomainEvent(CompletedEvent)"
+        duration: 1
+        description: "Aggregate mutates state and queues domain event"
+      - id: save-state
+        type: sync
+        from: handler
+        to: db
+        method: POST
+        path: "UPDATE domain_table SET status = 'Completed'"
+        duration: 15
+        description: "Domain state persisted"
+      - id: save-outbox
+        type: sync
+        from: handler
+        to: outbox
+        method: POST
+        path: "INSERT INTO outbox_messages (event_type, payload, created_at)"
+        duration: 5
+        description: "Event serialized into outbox — SAME transaction as domain state"
+      - id: commit
+        type: sync
+        from: db
+        to: outbox
+        method: INVOKE
+        path: "COMMIT — both writes succeed or both fail"
+        duration: 10
+        description: "PostgreSQL atomic commit — all-or-nothing"
+      - id: poll
+        type: sync
+        from: relay
+        to: outbox
+        method: GET
+        path: "SELECT * FROM outbox_messages WHERE processed_at IS NULL"
+        duration: 5
+        description: "Background relay polls every 500ms"
+      - id: publish
+        type: publish
+        from: relay
+        to: asb
+        messageType: "CompletedEvent"
+        payload:
+          description: "Event delivered to ASB topic — retries with exponential backoff on failure"
+      - id: mark-processed
+        type: sync
+        from: relay
+        to: outbox
+        method: POST
+        path: "UPDATE outbox_messages SET processed_at = NOW()"
+        duration: 2
+        description: "Mark as processed after successful publish"
+      - id: consume
+        type: subscribe
+        from: asb
+        to: consumer
+        messageType: "CompletedEvent"
+        action: "Consumer receives the event"
+      - id: idem-check
+        type: sync
+        from: consumer
+        to: redis
+        method: GET
+        path: "EXISTS idem:{eventId} — 1-hour TTL"
+        duration: 1
+        description: "Idempotency check: skip if already processed"
+
+    steps:
+      - id: solution-step-1
+        title: "Atomic Commit"
+        narrative: >
+          The handler calls `SaveChangesAsync()`. EF Core writes TWO things in a **single
+          PostgreSQL transaction**: (1) the aggregate's new state to its domain table, and
+          (2) the serialized domain event to the `outbox_messages` table. Same database. Same
+          transaction. Same `COMMIT`. If the transaction succeeds, both the state and the event
+          exist. If it fails, neither exists. The dual-write problem is eliminated because there
+          is only **one write**.
+        activeCalls: [mutate, save-state, save-outbox, commit]
+        revealNodes: [handler, aggregate, db, outbox]
+        duration: 6000
+      - id: solution-step-2
+        title: "Background Relay"
+        narrative: >
+          A background service polls `outbox_messages` every 500ms for unprocessed rows,
+          publishes them to the Azure Service Bus topic, and marks them as processed. If
+          the publish fails, the row stays unprocessed and is retried on the next poll cycle
+          with exponential backoff. The relay is crash-resilient: if the process dies between
+          publish and mark-processed, the next startup re-publishes the event. This produces
+          **at-least-once delivery** — the event may be delivered more than once, but it will
+          never be lost.
+        activeCalls: [poll, publish, mark-processed]
+        revealNodes: [relay, asb]
+        revealCalls: [mutate, save-state, save-outbox, commit]
+        duration: 6000
+      - id: solution-step-3
+        title: "Consumer Idempotency = Effectively-Once"
+        narrative: >
+          At-least-once delivery means duplicates are possible. The consumer handles this with
+          a **Redis idempotency check**: before processing, it checks `EXISTS idem:{eventId}`.
+          If the key exists, the event was already processed — skip it. If not, process the
+          event and set the key with a 1-hour TTL. At-least-once delivery from the outbox +
+          idempotency on the consumer = **effectively-once processing**. The event is never
+          lost, and it is never processed twice. This is the strongest delivery guarantee
+          achievable without distributed transactions.
+        activeCalls: [consume, idem-check]
+        revealNodes: [consumer, redis]
+        revealCalls: [poll, publish, mark-processed]
+        duration: 5000

@@ -1,0 +1,433 @@
+id: trip-operations-realtime
+title: "Trip Operations — Real-Time Infrastructure"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  The real-time nervous system of Trip Operations — from the SignalR WebSocket hub that
+  pushes state changes to 1000+ concurrent dispatchers and parents, through the GPS
+  telemetry pipeline that ingests 30-second location updates via PostGIS, to the ETA
+  calculation engine with confidence intervals and the Fleet Engine integration that
+  bridges Catalyst to Google's vehicle tracking platform.
+
+sections:
+  # ── Section 1: SignalR Hub & Live Dispatcher Updates ──────────────────
+  - renderer: service-flow
+    title: "SignalR Real-Time Hub"
+    accentColor: "#3B82F6"
+    layout: sequence
+
+    services:
+      - id: trip-hq
+        name: "Trip HQ Frontend"
+        type: external
+        technology: "Next.js 15 + React 19"
+        status: healthy
+      - id: signalr-hub
+        name: "TripOperationsHub"
+        type: api
+        technology: "SignalR WebSocket at /hubs/trip-operations"
+        status: healthy
+      - id: trip-ops-api
+        name: "Trip Operations API"
+        type: api
+        technology: ".NET 10"
+        status: healthy
+      - id: trip-ops-ep
+        name: "Event Processor"
+        type: event-processor
+        technology: ".NET 10 (9 handlers)"
+        status: healthy
+      - id: asb-self
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "trip-operations topic (self-consumption)"
+        status: healthy
+      - id: redis-cache
+        name: "Redis"
+        type: cache
+        technology: "CatalystTripOps: prefix"
+        status: healthy
+      - id: broadcast-handlers
+        name: "Broadcast Handlers"
+        type: api
+        technology: "Api/Handlers/ (4 handlers)"
+        status: healthy
+
+    zones:
+      - id: client-zone
+        label: "Browser Clients (dispatchers, parents, drivers)"
+        members: [trip-hq]
+        color: "rgba(59, 130, 246, 0.06)"
+      - id: hub-zone
+        label: "SignalR Infrastructure"
+        members: [signalr-hub, broadcast-handlers]
+        color: "rgba(139, 92, 246, 0.06)"
+      - id: event-zone
+        label: "Self-Consumption Pipeline"
+        members: [trip-ops-ep, asb-self, redis-cache]
+        color: "rgba(245, 158, 11, 0.06)"
+
+    calls:
+      - id: ws-connect
+        type: sync
+        from: trip-hq
+        to: signalr-hub
+        method: GET
+        path: "/hubs/trip-operations (WebSocket upgrade)"
+        duration: 100
+        description: "JWT Bearer auth on connection. Hub validates tenant_id claim before allowing subscriptions."
+      - id: subscribe-vr
+        type: sync
+        from: trip-hq
+        to: signalr-hub
+        method: POST
+        path: "SubscribeToVehicleRun(vrId)"
+        duration: 10
+        description: "Joins SignalR group vr-{vrId}. VrTenantValidationService validates VR belongs to caller's tenant."
+      - id: subscribe-district
+        type: sync
+        from: trip-hq
+        to: signalr-hub
+        method: POST
+        path: "SubscribeToDistrict(tenantId)"
+        duration: 10
+        description: "Joins SignalR group district-{tenantId}. Guard: tenantId must match JWT tenant_id (self-tenant only)."
+      - id: subscribe-parent
+        type: sync
+        from: trip-hq
+        to: signalr-hub
+        method: POST
+        path: "SubscribeToMyStudents()"
+        duration: 10
+        description: "Joins SignalR group parent-{userId}. Guard: caller must have parent role."
+      - id: domain-event-publish
+        type: publish
+        from: trip-ops-api
+        to: asb-self
+        messageType: "VrStateChangedEvent / PtStateChangedEvent / GpsLocationUpdatedEvent / EtaUpdatedEvent"
+        description: "Domain events published via transactional outbox to trip-operations topic."
+      - id: ep-consume
+        type: subscribe
+        from: asb-self
+        to: trip-ops-ep
+        messageType: "Self-consumption (4 event types)"
+        description: "EP consumes own events. Redis idempotency (1hr TTL) prevents duplicate processing."
+      - id: ep-to-broadcast
+        type: async
+        from: trip-ops-ep
+        to: broadcast-handlers
+        description: "EP handlers invoke broadcast handlers in Api project to push to SignalR groups."
+      - id: broadcast-push
+        type: async
+        from: broadcast-handlers
+        to: signalr-hub
+        description: "4 broadcast handlers: VrStateChangedBroadcastHandler, PtStateChangedBroadcastHandler, GpsLocationUpdatedBroadcastHandler, EtaUpdatedBroadcastHandler."
+      - id: hub-push
+        type: async
+        from: signalr-hub
+        to: trip-hq
+        description: "Push to groups: VrStateChanged, PtStateChanged, GpsLocationUpdated, EtaUpdated."
+
+    steps:
+      - id: rt-step-1
+        title: "WebSocket Connection & Auth"
+        narrative: >
+          Trip HQ opens a WebSocket to `/hubs/trip-operations` using the same FusionAuth JWT
+          used for REST calls. The hub validates the `tenant_id` claim on connection and stores
+          it in the connection context. Target capacity is 1000+ concurrent connections.
+        activeCalls: [ws-connect]
+        revealNodes: [trip-hq, signalr-hub]
+        focusNodes: [trip-hq, signalr-hub]
+        duration: 3500
+
+      - id: rt-step-2
+        title: "Group Subscriptions by Persona"
+        narrative: >
+          Three subscription methods serve three personas. `SubscribeToVehicleRun(vrId)` joins
+          group `vr-{vrId}` after VrTenantValidationService confirms tenant ownership.
+          `SubscribeToDistrict(tenantId)` joins `district-{tenantId}` with a self-tenant-only
+          guard. `SubscribeToMyStudents()` joins `parent-{userId}` for parent-role callers.
+        activeCalls: [subscribe-vr, subscribe-district, subscribe-parent]
+        revealCalls: [ws-connect]
+        focusNodes: [signalr-hub]
+        duration: 4500
+
+      - id: rt-step-3
+        title: "Domain Event Publishing via Outbox"
+        narrative: >
+          When a VR or PT state transition occurs, the API publishes domain events to the
+          `trip-operations` ASB topic via the transactional outbox. Four event types flow
+          through this path: VrStateChangedEvent, PtStateChangedEvent, GpsLocationUpdatedEvent,
+          and EtaUpdatedEvent.
+        activeCalls: [domain-event-publish]
+        revealNodes: [trip-ops-api, asb-self]
+        revealCalls: [subscribe-vr, subscribe-district, subscribe-parent]
+        focusNodes: [trip-ops-api, asb-self]
+        duration: 3500
+
+      - id: rt-step-4
+        title: "Self-Consumption with Idempotency"
+        narrative: >
+          The Event Processor consumes events from the same topic its API published to. This
+          self-consumption pattern decouples the API from the push notification layer. Redis
+          idempotency with `CatalystTripOps:` prefix and 1-hour TTL prevents duplicate ASB
+          deliveries from producing duplicate SignalR pushes.
+        activeCalls: [ep-consume]
+        revealNodes: [trip-ops-ep, redis-cache]
+        focusNodes: [trip-ops-ep, redis-cache]
+        duration: 4000
+
+      - id: rt-step-5
+        title: "Broadcast Handler Fan-Out"
+        narrative: >
+          EP handlers invoke the four broadcast handlers in the Api project:
+          VrStateChangedBroadcastHandler, PtStateChangedBroadcastHandler,
+          GpsLocationUpdatedBroadcastHandler, and EtaUpdatedBroadcastHandler. Each handler
+          pushes to the appropriate SignalR groups (district, VR, parent).
+        activeCalls: [ep-to-broadcast, broadcast-push]
+        revealNodes: [broadcast-handlers]
+        focusNodes: [broadcast-handlers, signalr-hub]
+        duration: 3500
+
+      - id: rt-step-6
+        title: "Live Push to Browsers"
+        narrative: >
+          SignalR pushes incremental updates to connected browsers. Dispatchers on the fleet
+          dashboard receive all VR/PT state changes plus GPS updates via the district group.
+          Parents receive a narrower view — only PT state changes and ETA updates for their
+          linked students. The self-consumption path adds latency versus direct push, but
+          keeps the API stateless and horizontally scalable.
+        activeCalls: [hub-push]
+        revealCalls: [domain-event-publish, ep-consume, ep-to-broadcast, broadcast-push]
+        focusNodes: [signalr-hub, trip-hq]
+        duration: 5000
+
+  # ── Bridge ──────────────────────────────────────────────────────────────
+  - renderer: service-flow
+    title: "GPS Pipeline & Fleet Engine"
+    accentColor: "#F59E0B"
+    layout: sequence
+
+    services:
+      - id: mdd-device
+        name: "Mobile Data Device"
+        type: external
+        technology: "Driver tablet/phone"
+        status: healthy
+      - id: gps-controller
+        name: "GpsController"
+        type: api
+        technology: "[Route(\"v1/gps\")] — 4 endpoints"
+        status: healthy
+      - id: gps-db
+        name: "PostgreSQL + PostGIS"
+        type: database
+        technology: "geometry(Point, 4326) + GIST index"
+        status: healthy
+      - id: eta-service
+        name: "ETA Service"
+        type: api
+        technology: "GpsSpeedBasedEtaService"
+        status: healthy
+      - id: route-adherence
+        name: "Route Adherence"
+        type: api
+        technology: "HaversineRouteAdherenceService"
+        status: healthy
+      - id: geofence-svc
+        name: "GeofenceService"
+        type: api
+        technology: "PostGIS ST_DWithin"
+        status: healthy
+      - id: fleet-engine-svc
+        name: "Fleet Engine"
+        type: external
+        technology: "FleetEngineService / FakeFleetEngineService"
+        status: degraded
+      - id: gps-asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "trip-operations topic"
+        status: healthy
+
+    zones:
+      - id: ingestion-zone
+        label: "GPS Ingestion (30-second cadence)"
+        members: [mdd-device, gps-controller]
+        color: "rgba(245, 158, 11, 0.06)"
+      - id: processing-zone
+        label: "GPS Processing Pipeline"
+        members: [gps-db, eta-service, route-adherence, geofence-svc]
+        color: "rgba(59, 130, 246, 0.06)"
+      - id: fleet-zone
+        label: "Fleet Engine Integration (STUB)"
+        members: [fleet-engine-svc]
+        color: "rgba(239, 68, 68, 0.06)"
+      - id: event-zone
+        label: "Event Publishing"
+        members: [gps-asb]
+        color: "rgba(34, 197, 94, 0.06)"
+
+    calls:
+      - id: ingest-gps
+        type: sync
+        from: mdd-device
+        to: gps-controller
+        method: POST
+        path: "v1/gps/location"
+        duration: 30
+        description: "GPS reading from MDD every 30 seconds. Payload: lat, lng, accuracy, heading, speed, timestamp."
+      - id: validate-reading
+        type: sync
+        from: gps-controller
+        to: eta-service
+        method: POST
+        path: "GpsReading validation"
+        duration: 5
+        description: "GpsReading VO validates: AccuracyThresholdMeters=50, StalenessThresholdSeconds=30. IsValid = IsAccurate && !IsStale."
+      - id: persist-gps
+        type: sync
+        from: gps-controller
+        to: gps-db
+        method: INSERT
+        path: "gps_locations (PostGIS Point SRID 4326)"
+        duration: 20
+        description: "GpsLocation entity with geometry(Point, 4326), GIST index. 90-day retention, 30s intervals."
+      - id: calculate-eta
+        type: sync
+        from: gps-controller
+        to: eta-service
+        method: GET
+        path: "v1/gps/vehicles/{vehicleId}/eta"
+        duration: 80
+        description: "GpsSpeedBasedEtaService: weighted average of recent GPS speeds. Returns EstimatedTimeOfArrival VO with confidence intervals."
+      - id: check-adherence
+        type: sync
+        from: gps-controller
+        to: route-adherence
+        method: POST
+        path: "v1/gps/vehicles/{vehicleId}/route-adherence"
+        duration: 60
+        description: "HaversineRouteAdherenceService: Haversine distance with configurable threshold (RouteAdherenceOptions). MinimumGpsPoints required."
+      - id: geofence-check
+        type: sync
+        from: gps-controller
+        to: geofence-svc
+        method: POST
+        path: "v1/geofence/within-corridor"
+        duration: 40
+        description: "PostGIS ST_DWithin query: is vehicle within route buffer? Used by VR ArriveAtStop guard (0.5 miles)."
+      - id: gps-event
+        type: publish
+        from: gps-controller
+        to: gps-asb
+        messageType: "GpsLocationUpdatedEvent"
+        description: "Published every 30s per active vehicle. Consumed by EP for SignalR broadcast + Monitoring BC."
+      - id: signal-lost
+        type: publish
+        from: eta-service
+        to: gps-asb
+        messageType: "GpsSignalLostEvent"
+        description: "Revenue-critical: vehicle lost GPS signal. Triggers Monitoring exception."
+      - id: late-arrival
+        type: publish
+        from: eta-service
+        to: gps-asb
+        messageType: "LateArrivalDetectedEvent"
+        description: "Revenue-critical: ETA predicts late arrival. Triggers Monitoring alert + parent notification."
+      - id: fleet-register
+        type: sync
+        from: fleet-engine-svc
+        to: gps-controller
+        method: POST
+        path: "FleetEngineVehicleAdapter"
+        duration: 200
+        description: "STUB: FakeFleetEngineService returns mock FleetEngineVehicleId. Real integration awaiting credentials."
+
+    steps:
+      - id: gps-step-1
+        title: "GPS Ingestion from Driver Devices"
+        narrative: >
+          Every active vehicle sends a GPS reading every 30 seconds via `POST v1/gps/location`.
+          The payload arrives as a GpsReading value object with lat, lng, accuracy, heading,
+          speed (mph), and timestamp. At 500K daily trip scale, peak ingestion reaches roughly
+          10K writes per minute to PostGIS.
+        activeCalls: [ingest-gps]
+        revealNodes: [mdd-device, gps-controller]
+        focusNodes: [mdd-device, gps-controller]
+        duration: 3500
+
+      - id: gps-step-2
+        title: "Reading Validation & Quality Gate"
+        narrative: >
+          The GpsReading VO enforces two thresholds: AccuracyThresholdMeters (50m) rejects
+          inaccurate readings, and StalenessThresholdSeconds (30s) rejects old ones. The
+          combined `IsValid` property gates all downstream processing — invalid readings
+          are discarded before persistence.
+        activeCalls: [validate-reading]
+        revealCalls: [ingest-gps]
+        focusNodes: [gps-controller, eta-service]
+        duration: 3000
+
+      - id: gps-step-3
+        title: "PostGIS Persistence & Event Emission"
+        narrative: >
+          Valid readings are stored as GpsLocation entities using PostGIS `geometry(Point, 4326)`
+          with a GIST spatial index. A 90-day retention policy keeps the table manageable. Each
+          persist emits a GpsLocationUpdatedEvent to the trip-operations topic, feeding both the
+          SignalR broadcast pipeline and the Monitoring BC.
+        activeCalls: [persist-gps, gps-event]
+        revealNodes: [gps-db, gps-asb]
+        focusNodes: [gps-db, gps-asb]
+        duration: 4000
+
+      - id: gps-step-4
+        title: "ETA Calculation with Confidence Intervals"
+        narrative: >
+          GpsSpeedBasedEtaService computes ETAs using a weighted average of recent GPS speeds.
+          The result is an EstimatedTimeOfArrival VO with LikelyArrivalTime, OptimisticArrivalTime,
+          PessimisticArrivalTime, and a Confidence score (0.0-1.0). EtaAdjustments fine-tune
+          predictions with rush hour, driver behavior, and route type factors.
+        activeCalls: [calculate-eta]
+        revealNodes: [eta-service]
+        revealCalls: [persist-gps, gps-event]
+        focusNodes: [eta-service]
+        duration: 4500
+
+      - id: gps-step-5
+        title: "Late Arrival & Signal Loss Detection"
+        narrative: >
+          When `IsLate()` returns true, the service emits LateArrivalDetectedEvent — consumed
+          by Monitoring BC for exception creation and Communications BC for parent alerts.
+          GpsSignalLostEvent fires when a vehicle stops reporting. Both are revenue-critical
+          events that can trigger rescue orchestration workflows.
+        activeCalls: [late-arrival, signal-lost]
+        revealCalls: [calculate-eta]
+        focusNodes: [eta-service, gps-asb]
+        duration: 3500
+
+      - id: gps-step-6
+        title: "Route Adherence & Geofencing"
+        narrative: >
+          HaversineRouteAdherenceService scores how closely the vehicle follows its planned
+          route using configurable thresholds. GeofenceService uses PostGIS ST_DWithin for
+          corridor containment — the same spatial primitive enforces the 0.5-mile ArriveAtStop
+          guard. Both services share the GIST index used for GPS storage.
+        activeCalls: [check-adherence, geofence-check]
+        revealNodes: [route-adherence, geofence-svc]
+        revealCalls: [late-arrival, signal-lost]
+        focusNodes: [route-adherence, geofence-svc]
+        duration: 4500
+
+      - id: gps-step-7
+        title: "Fleet Engine Integration (STUB)"
+        narrative: >
+          Fleet Engine bridges Catalyst to Google's vehicle tracking platform.
+          FakeFleetEngineService currently returns mock FleetEngineVehicleIds — real
+          integration awaits Google Cloud credentials. The switchover is a DI registration
+          change with no domain model modifications required.
+        activeCalls: [fleet-register]
+        revealNodes: [fleet-engine-svc]
+        revealCalls: [check-adherence, geofence-check]
+        focusNodes: [fleet-engine-svc, gps-controller]
+        duration: 5500

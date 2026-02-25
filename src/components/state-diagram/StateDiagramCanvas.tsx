@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import { StepOverlay } from '../shared';
+import { useMemo, useState, useCallback, useEffect } from 'react';
+import { StepOverlay, EdgeReadinessGate } from '../shared';
 import {
   ReactFlow,
   Background,
@@ -60,6 +60,7 @@ interface StateDiagramCanvasProps {
   story: StateDiagramStory;
   currentStepIndex: number;
   onStepChange?: (step: number) => void;
+  hideOverlay?: boolean;
 }
 
 // ============================================================================
@@ -293,6 +294,7 @@ function buildLayout(
 export function StateDiagramCanvas({
   story,
   currentStepIndex,
+  hideOverlay = false,
 }: StateDiagramCanvasProps) {
   // Compute active/completed/revealed sets
   const {
@@ -354,13 +356,17 @@ export function StateDiagramCanvas({
     [activeStateIds],
   );
 
+  const [edgesReady, setEdgesReady] = useState(false);
+  const onEdgesReady = useCallback(() => setEdgesReady(true), []);
+  useEffect(() => { setEdgesReady(false); }, [story.id]);
+
   const currentStep = story.steps[currentStepIndex];
 
   return (
     <div className="state-diagram-canvas" data-testid="state-diagram-canvas">
       <ReactFlow
         nodes={nodes}
-        edges={edges}
+        edges={edgesReady ? edges : []}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         connectionMode={ConnectionMode.Loose}
@@ -374,6 +380,7 @@ export function StateDiagramCanvas({
       >
         <Background color="#e0e0e0" gap={20} />
         <Controls showInteractive={false} />
+        <EdgeReadinessGate onReady={onEdgesReady} />
         <StateDiagramCameraController activeNodeIds={activeNodeIds} />
         <MiniMap
           nodeColor={(node) => {
@@ -406,7 +413,7 @@ export function StateDiagramCanvas({
         </svg>
       </ReactFlow>
 
-      {currentStep && (
+      {!hideOverlay && currentStep && (
         <StepOverlay
           stepIndex={currentStepIndex}
           totalSteps={story.steps.length}

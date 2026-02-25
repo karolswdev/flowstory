@@ -1,0 +1,506 @@
+id: incidents-safety-investigation
+title: "Incidents & Safety — Investigation Lifecycle & Regulatory Compliance"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  The Incidents & Safety bounded context manages the full lifecycle of safety incidents
+  in student transportation — from initial driver report through investigation, evidence
+  collection, corrective action tracking, and regulatory closure. At its core sits the
+  1832-line SafetyIncident aggregate root, which enforces two independent state machines
+  (IncidentStatus and InvestigationStatus), NHTSA/OSHA/FERPA regulatory requirements,
+  severity-based SLA escalation, and separation-of-duties on corrective action verification.
+  A 5-step Conductor workflow (incident-investigation) orchestrates the investigation pipeline
+  with a 30-day timeout aligned to NHTSA 49 CFR Part 390 compliance windows.
+
+sections:
+  # -- Section 1: Incident Reporting & Investigation Lifecycle ---------------------
+  - renderer: service-flow
+    title: "Incident Reporting & Investigation Lifecycle"
+    accentColor: "#DC2626"
+    layout: sequence
+
+    services:
+      - id: incidents-api
+        name: "Incidents & Safety API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: incidents-db
+        name: "PostgreSQL 16 (incidents)"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: conductor
+        name: "Conductor"
+        type: workflow
+        technology: "Orkes Conductor"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+      - id: redis
+        name: "Redis"
+        type: cache
+        technology: "Redis 7"
+        status: healthy
+
+    zones:
+      - id: incidents-core
+        label: "Incidents & Safety"
+        members: [incidents-api, incidents-db]
+        color: "rgba(220, 38, 38, 0.06)"
+      - id: orchestration
+        label: "Investigation Orchestration"
+        members: [conductor, redis]
+        color: "rgba(245, 158, 11, 0.06)"
+      - id: messaging
+        label: "Event Bus"
+        members: [asb]
+        color: "rgba(34, 197, 94, 0.06)"
+
+    calls:
+      - id: report-incident
+        type: sync
+        from: incidents-api
+        to: incidents-db
+        method: POST
+        path: /v1/incidents/report
+        protocol: http
+        duration: 150
+        status: 201
+        description: "ReportIncidentCommand — simplified driver mobile entry point. SafetyIncident.Create() validates TenantId, enforces CRITICAL description >= 50 chars, determines minimum severity by IncidentType, and auto-escalates STUDENT_LEFT_ON_VEHICLE/UNAUTHORIZED_RELEASE/SECURITY_THREAT/DRIVER_MEDICAL_EMERGENCY to CRITICAL."
+        response:
+          status: 201
+          label: "Incident reported (REPORTED)"
+      - id: create-incident
+        type: sync
+        from: incidents-api
+        to: incidents-db
+        method: POST
+        path: /v1/incidents
+        protocol: http
+        duration: 180
+        status: 201
+        description: "CreateIncidentCommand — full incident creation with VehicleRunId, PassengerTripId, all NHTSA fields (VIN, license plate, driver license number/state). RegulatoryRequirements.Determine() computes bitwise RegulatoryReportingFlag across 12 agencies."
+        response:
+          status: 201
+          label: "Incident created (REPORTED)"
+      - id: publish-reported
+        type: publish
+        from: incidents-api
+        to: asb
+        messageType: "IncidentReportedEvent"
+        payload:
+          description: "incidentId, tenantId, type, severity, descriptionPreview, requiresImmediateEscalation, requiresNHTSAReporting — published via transactional outbox to incidents-and-safety topic"
+      - id: start-investigation
+        type: sync
+        from: incidents-api
+        to: incidents-db
+        method: POST
+        path: /v1/incidents/{id}/start-investigation
+        protocol: http
+        duration: 120
+        status: 200
+        description: "StartInvestigationCommand — BeginInvestigation() transitions REPORTED -> UNDER_INVESTIGATION, assigns investigator. EscalationRule.ForIncident() determines SLA: CRITICAL=5min response/15min assignment (PagerDuty P1), HIGH=15min/60min (P2). Raises InvestigationStartedEvent."
+        response:
+          status: 200
+          label: "Investigation started"
+      - id: conductor-assign
+        type: sync
+        from: conductor
+        to: incidents-api
+        method: POST
+        path: "AssignInvestigatorTask"
+        protocol: http
+        duration: 200
+        description: "Conductor workflow step 1/5: Assign qualified investigator based on severity and InvestigatorCertificationLevel (Junior/Standard/Senior/Lead). Checks MaxConcurrentInvestigations (1-50) and availability."
+      - id: conductor-evidence
+        type: sync
+        from: conductor
+        to: incidents-api
+        method: POST
+        path: "CollectEvidenceTask"
+        protocol: http
+        duration: 300
+        description: "Conductor workflow step 2/5: Collect scene photos and initial driver report. Evidence entity (357 lines) validates content type matches EvidenceType, tracks SHA-256 FileHash, enforces 500MB max."
+      - id: conductor-witness
+        type: sync
+        from: conductor
+        to: incidents-api
+        method: POST
+        path: "CollectWitnessStatementsTask"
+        protocol: http
+        duration: 250
+        description: "Conductor workflow step 3/5 (OPTIONAL): Collect witness statements via 5 CollectionMethods (InPerson/Phone/Written/Video/Email). WitnessStatement entity (409 lines) tracks ConfirmByWitness(), ChainOfCustody transfers."
+      - id: conductor-resolve
+        type: sync
+        from: conductor
+        to: incidents-api
+        method: POST
+        path: "ResolveIncidentTask"
+        protocol: http
+        duration: 200
+        description: "Conductor workflow step 4/5: Analyze evidence + determine corrective/preventive actions. ResolveIncident() requires findings >= 20 chars, CRITICAL/HIGH requires verified evidence or witness statements."
+      - id: conductor-close
+        type: sync
+        from: conductor
+        to: incidents-api
+        method: POST
+        path: "CloseInvestigationTask"
+        protocol: http
+        duration: 150
+        description: "Conductor workflow step 5/5: Close investigation and notify stakeholders. Close() blocks if NHTSA report not submitted. Sets RetentionDate: 7 years (CRITICAL), 5 years (NHTSA), 3 years (default)."
+      - id: publish-closed
+        type: publish
+        from: incidents-api
+        to: asb
+        messageType: "IncidentClosedEvent"
+        payload:
+          description: "incidentId, closedAt, totalDurationHours, retentionDate, nhtsaReportNumber — published to incidents-and-safety topic"
+
+    steps:
+      - id: investigation-step-1
+        title: "Incident Reporting & Regulatory Determination"
+        narrative: >
+          A safety incident enters the system through two paths: `POST /v1/incidents/report`
+          (simplified driver mobile flow via **ReportIncidentCommand**) or `POST /v1/incidents`
+          (full admin creation via **CreateIncidentCommand**). Both invoke
+          **SafetyIncident.Create()** on the {color:red|1832-line aggregate root}
+          (`Domain/Aggregates/SafetyIncident.cs`), which enforces a cascade of invariants.
+          The **IncidentType** enum spans 25 values across 6 categories (Legacy 0-4, Vehicle 100-102,
+          Student 200-203, Driver 300-304, Equipment 400-402, Compliance 500-503, Environmental 600-602).
+          Four types auto-escalate to CRITICAL: `STUDENT_LEFT_ON_VEHICLE`, `UNAUTHORIZED_RELEASE`,
+          `SECURITY_THREAT`, `DRIVER_MEDICAL_EMERGENCY`. The **IncidentSeverity** value object
+          (`Domain/ValueObjects/IncidentSeverity.cs`, ~122 lines) wraps the `Severity` enum with
+          computed properties: `RequiresImmediateEscalation` (CRITICAL only),
+          `MinimumDescriptionLength` (50 for CRITICAL, 10 otherwise),
+          `RequiresMandatoryInvestigation` (HIGH/CRITICAL).
+
+
+          Simultaneously, **RegulatoryRequirements.Determine()**
+          (`Domain/ValueObjects/RegulatoryRequirements.cs`, ~357 lines) computes the bitwise
+          `RegulatoryReportingFlag` across {color:blue|12 regulatory agencies}: NHTSA, OSHA, DOT,
+          FMCSA, FERPA, State, StateDMV, StateDOE, Insurance, LawEnforcement, ClientNotification,
+          ExecutiveNotification. NHTSA deadlines: {color:red|24h (fatality), 168h/7d (injury),
+          720h/30d (tow-away)}. OSHA deadlines: {color:red|8h (fatality), 24h (hospitalization)}.
+          FERPA deadlines: 1h (CRITICAL), 8h (HIGH), 24h (MEDIUM/LOW). The aggregate raises
+          **IncidentReportedEvent** published via transactional outbox (`outbox_messages` table,
+          migration `20260219070639_AddOutboxMessages`) to the `incidents-and-safety` ASB topic.
+        activeCalls: [report-incident, create-incident, publish-reported]
+        revealNodes: [incidents-api, incidents-db, asb]
+        duration: 6000
+      - id: investigation-step-2
+        title: "Investigation Assignment & SLA Enforcement"
+        narrative: >
+          `POST /v1/incidents/{id}/start-investigation` triggers **StartInvestigationCommand**,
+          which calls **SafetyIncident.BeginInvestigation()** — transitioning the dual state machines:
+          `IncidentStatus` from `REPORTED` to `UNDER_INVESTIGATION` and `InvestigationStatus` from
+          `REPORTED` to `UNDER_INVESTIGATION`. The **EscalationRule** value object
+          (`Domain/ValueObjects/EscalationRule.cs`, ~261 lines) determines SLA timelines via
+          `ForIncident(incidentType, reportedSeverity)`:
+          {color:red|CRITICAL = 5min response / 15min assignment (PagerDuty P1)},
+          HIGH = 15min / 60min (P2), MEDIUM = 60min / 4h, LOW = 4h / 24h.
+
+
+          The **Investigator** entity (`Domain/Entities/Investigator.cs`, ~259 lines) tracks
+          `CertificationLevel` (Junior/Standard/Senior/Lead), `MaxConcurrentInvestigations` (1-50),
+          `Specializations`, and availability windows. The **IncidentAssignment** entity
+          (`Domain/Entities/IncidentAssignment.cs`, ~193 lines) records the binding with its own
+          state machine: `InProgress` -> `Completed` | `Reassigned` | `Cancelled`.
+          {color:green|Auto-escalation triggers} include: fatality, multiple casualties,
+          student left unattended, student location unknown, media on scene, law enforcement involvement.
+          The `incident-investigation` Conductor workflow
+          (`Application/Workflows/IncidentInvestigationWorkflow.cs`) kicks off with a 30-day timeout
+          aligned to NHTSA 49 CFR Part 390 and exponential backoff retry (3 retries, 30s initial, 2.0x scale).
+        activeCalls: [start-investigation, conductor-assign]
+        revealNodes: [conductor, redis]
+        revealCalls: [report-incident, create-incident, publish-reported]
+        duration: 6000
+      - id: investigation-step-3
+        title: "Evidence Collection & Chain of Custody"
+        narrative: >
+          Conductor steps 2-3 drive evidence and witness collection. The **Evidence** entity
+          (`Domain/Entities/Evidence.cs`, ~357 lines) validates that content type matches
+          `EvidenceType` (Photo=image/*, Video=video/*, Audio=audio/*, Document=application/*|text/*),
+          enforces {color:red|500 MB max file size}, tracks SHA-256 `FileHash` for integrity, and
+          captures geolocation (`CapturedLatitude`, `CapturedLongitude`) and timestamp (`CapturedAt`).
+          Evidence files live in Azure Blob Storage (container: `incident-evidence`), referenced by
+          `StorageUrl` — {color:blue|the client uploads directly to blob storage and provides the URL}
+          (Risk R5 in code analysis: no upload endpoint in this BC).
+
+
+          The **ChainOfCustody** value object (`Domain/ValueObjects/ChainOfCustody.cs`, ~119 lines)
+          is embedded in both Evidence and WitnessStatement as an owned collection, recording
+          `CustodianId`, `TransferredAt`, and `Notes` (5-500 chars) for each transfer.
+          **WitnessStatement** (`Domain/Entities/WitnessStatement.cs`, ~409 lines) supports 5
+          collection methods and enforces statement text 20-10000 chars. `AddSupplement()` resets
+          verification status — {color:green|ensuring amended statements require re-verification}.
+          The aggregate enforces capacity limits: max 50 photos, {color:red|100 evidence items},
+          50 witness statements. Each addition raises **EvidenceAttachedEvent** or
+          **WitnessStatementRecordedEvent** with counts for downstream monitoring.
+        activeCalls: [conductor-evidence, conductor-witness]
+        revealCalls: [start-investigation, conductor-assign]
+        duration: 5000
+      - id: investigation-step-4
+        title: "Resolution, Closure & Retention"
+        narrative: >
+          Conductor steps 4-5 resolve and close the investigation. **ResolveIncidentTask** calls
+          `SafetyIncident.ResolveIncident()`, which requires `Findings` >= 20 chars and —
+          for {color:red|CRITICAL/HIGH severity} — verified evidence or witness statements
+          (the aggregate checks `Evidence.Any(e => e.IsVerified)` or
+          `WitnessStatements.Any(w => w.IsVerified)`). Resolution transitions `IncidentStatus`
+          from `UNDER_INVESTIGATION` to `RESOLVED` and raises **IncidentResolvedEvent** with
+          `investigationDurationHours` and `findingsSummary`.
+
+
+          The investigation review sub-flow supports `SubmitInvestigationForReview()` (raises
+          **InvestigationCompletedEvent**), `ApproveInvestigationReview()`, and
+          `RejectInvestigationReview()` (requires 20+ char reason, returns to UNDER_INVESTIGATION).
+          {color:red|Risk R2: Approve/Reject do NOT raise domain events — downstream systems have
+          no visibility into review outcomes.} {color:red|Risk R3: No controller endpoints expose
+          the review operations.}
+
+
+          **CloseInvestigationTask** calls `Close()`, which {color:red|blocks if NHTSA report not
+          submitted} (`RequiresNHTSAReporting && NHTSAReportedAt == null` guard). Close() sets
+          `RetentionDate` based on severity: {color:blue|7 years (CRITICAL), 5 years (NHTSA-reportable),
+          3 years (all others)}. The `ReopenInvestigation()` path requires 20+ char justification and
+          transitions `CLOSED` -> `REOPENED` -> `UNDER_INVESTIGATION`. Raises **IncidentClosedEvent**
+          with `retentionDate` and `nhtsaReportNumber` via transactional outbox.
+        activeCalls: [conductor-resolve, conductor-close, publish-closed]
+        revealCalls: [conductor-evidence, conductor-witness]
+        duration: 5000
+
+  # -- Section 2: Corrective Actions & Regulatory Reporting -------------------------
+  - renderer: service-flow
+    title: "Corrective Actions & Regulatory Reporting"
+    accentColor: "#F59E0B"
+    layout: sequence
+
+    services:
+      - id: incidents-api
+        name: "Incidents & Safety API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: incidents-db
+        name: "PostgreSQL 16 (incidents)"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+      - id: comms-ep
+        name: "Communications EP"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: reports-svc
+        name: "Regulatory Report Service"
+        type: api
+        technology: ".NET 10"
+        status: healthy
+
+    zones:
+      - id: corrective-zone
+        label: "Corrective Action Management"
+        members: [incidents-api, incidents-db]
+        color: "rgba(245, 158, 11, 0.06)"
+      - id: regulatory-zone
+        label: "Regulatory Compliance"
+        members: [reports-svc]
+        color: "rgba(220, 38, 38, 0.06)"
+      - id: notification-zone
+        label: "Notifications"
+        members: [asb, comms-ep]
+        color: "rgba(34, 197, 94, 0.06)"
+
+    calls:
+      - id: assign-corrective
+        type: sync
+        from: incidents-api
+        to: incidents-db
+        method: POST
+        path: /v1/incidents/{incidentId}/corrective-actions
+        protocol: http
+        duration: 120
+        status: 201
+        description: "AssignCorrectiveActionCommand — creates CorrectiveAction entity with Title (5-200 chars), Description (20-2000 chars), Category (Training/Process/Equipment/Policy/Documentation/Communication/Other), Priority (High/Medium/Low), DueDate. Max 25 per incident."
+        response:
+          status: 201
+          label: "Corrective action assigned"
+      - id: update-ca-status
+        type: sync
+        from: incidents-api
+        to: incidents-db
+        method: PUT
+        path: /v1/incidents/{incidentId}/corrective-actions/{actionId}/status
+        protocol: http
+        duration: 80
+        status: 200
+        description: "UpdateCorrectiveActionStatusCommand — transitions Assigned -> InProgress -> Completed. Complete() requires 20+ char completion notes. Raises CorrectiveActionStatusUpdatedEvent with isOverdue flag."
+        response:
+          status: 200
+          label: "Status updated"
+      - id: verify-ca
+        type: sync
+        from: incidents-api
+        to: incidents-db
+        method: POST
+        path: /v1/incidents/{incidentId}/corrective-actions/{actionId}/verify
+        protocol: http
+        duration: 100
+        status: 200
+        description: "VerifyCorrectiveActionCommand — Completed -> Verified. Enforces separation of duties: verifier != assignee. Raises CorrectiveActionVerifiedEvent with remainingUnverifiedCount and allActionsVerified flag."
+        response:
+          status: 200
+          label: "Action verified"
+      - id: publish-ca-assigned
+        type: publish
+        from: incidents-api
+        to: asb
+        messageType: "CorrectiveActionAssignedEvent"
+        payload:
+          description: "incidentId, correctiveActionId, title, category, priority, assignedToUserId, dueDate"
+      - id: publish-ca-verified
+        type: publish
+        from: incidents-api
+        to: asb
+        messageType: "CorrectiveActionVerifiedEvent"
+        payload:
+          description: "incidentId, correctiveActionId, verifiedByUserId, remainingUnverifiedCount, allActionsVerified"
+      - id: publish-parent-notify
+        type: publish
+        from: incidents-api
+        to: asb
+        messageType: "ParentNotificationRequiredEvent"
+        payload:
+          description: "incidentId, studentId, parentContactId, notificationPriority (Immediate/SameDay/NextBusinessDay), requiredByRegulation — FERPA compliance"
+      - id: comms-consume
+        type: subscribe
+        from: asb
+        to: comms-ep
+        messageType: "ParentNotificationRequiredEvent"
+        action: "Communications BC delivers Twilio/SendGrid notification per FERPA priority: Immediate (CRITICAL, 30min), SameDay (HIGH, 8h), NextBusinessDay (MEDIUM/LOW, 24h)"
+      - id: regulatory-report
+        type: sync
+        from: incidents-api
+        to: reports-svc
+        method: GET
+        path: /v1/incidents/reports/regulatory
+        protocol: http
+        duration: 500
+        description: "GetRegulatoryReportsQuery — IRegulatoryReportService generates NHTSA/DOT compliance reports in PDF/CSV. Returns RegulatoryReportsDto with data, contentType, and filename."
+      - id: compliance-status
+        type: sync
+        from: incidents-api
+        to: incidents-db
+        method: GET
+        path: /v1/incident-reports/compliance
+        protocol: http
+        duration: 200
+        description: "GetComplianceStatusQuery — returns ComplianceStatusDto with NhtsaComplianceMetrics, FerpaComplianceMetrics, CorrectiveActionComplianceMetrics, ComplianceAlertItems."
+
+    steps:
+      - id: corrective-step-1
+        title: "Corrective Action Lifecycle & Separation of Duties"
+        narrative: >
+          The **CorrectiveAction** entity (`Domain/Entities/CorrectiveAction.cs`, ~475 lines)
+          implements a 4-state machine: `Assigned` -> `InProgress` -> `Completed` -> `Verified`,
+          with a rejection path (`Completed` -> `InProgress` via `RejectCompletion()` requiring
+          20+ char reason). The aggregate enforces {color:red|max 25 corrective actions per incident}
+          and 7 categories: Training, Process, Equipment, Policy, Documentation, Communication, Other.
+
+
+          `POST /v1/incidents/{incidentId}/corrective-actions` creates the action via
+          **AssignCorrectiveActionCommand**. `PUT .../status` drives transitions via
+          **UpdateCorrectiveActionStatusCommand** — `Complete()` requires 20+ char `CompletionNotes`.
+          `POST .../verify` invokes **VerifyCorrectiveActionCommand**, which enforces
+          {color:green|separation of duties: VerifiedByUserId != AssignedToUserId}. The
+          **CorrectiveActionVerifiedEvent** carries `remainingUnverifiedCount` and `allActionsVerified`
+          — enabling downstream systems to track when an incident's full corrective action plan is
+          complete. `IsOverdue()` checks `DueDate < DateTimeOffset.UtcNow` when status is not
+          Completed or Verified. `CanTransitionTo()` validates allowed state transitions before
+          any mutation.
+        activeCalls: [assign-corrective, update-ca-status, verify-ca, publish-ca-assigned, publish-ca-verified]
+        revealNodes: [incidents-api, incidents-db, asb]
+        duration: 6000
+      - id: corrective-step-2
+        title: "FERPA Parent Notification Flow"
+        narrative: >
+          When a safety incident involves a student, **SafetyIncident.RequireParentNotification()**
+          raises **ParentNotificationRequiredEvent** with a priority determined by severity:
+          {color:red|Immediate (CRITICAL — must notify within 30 minutes)}, SameDay (HIGH — within 8 hours),
+          NextBusinessDay (MEDIUM/LOW — within 24 hours). The `requiredByRegulation` flag indicates
+          this is a {color:blue|FERPA compliance obligation}, not a discretionary notification.
+
+
+          The event flows through the transactional outbox to the `incidents-and-safety` ASB topic,
+          where the Communications BC subscriber delivers the notification via Twilio (SMS/Voice)
+          or SendGrid (Email). FERPA reporting deadlines from **RegulatoryRequirements** value object:
+          1h for CRITICAL incidents, 8h for HIGH, 24h for MEDIUM/LOW. The
+          **IncidentReportsController** at `GET /v1/incident-reports/compliance` returns
+          **ComplianceStatusDto** including `FerpaComplianceMetrics` — tracking notification
+          compliance rates and overdue notifications. {color:red|Risk R2 applies here: if the
+          investigation review is approved/rejected, no events fire to update the parent on
+          investigation outcome.}
+        activeCalls: [publish-parent-notify, comms-consume]
+        revealCalls: [assign-corrective, update-ca-status, verify-ca]
+        duration: 5000
+      - id: corrective-step-3
+        title: "NHTSA/OSHA/DOT Regulatory Reporting"
+        narrative: >
+          The **RegulatoryRequirements** value object (`Domain/ValueObjects/RegulatoryRequirements.cs`,
+          ~357 lines) uses the `[Flags]` enum **RegulatoryReportingFlag** with 12 individual flags
+          plus 4 combination flags (e.g., `CriticalIncident = NHTSA | OSHA | DOT | FMCSA |
+          LawEnforcement | Insurance | ExecutiveNotification`). The factory method
+          `Determine(incidentType, severity, hasStudentInvolved, hasDriverInjury,
+          hasPassengerInjury, hasFatality, hasVehicleTow, hasMediaInvolvement)` computes the full
+          flag set and `DeadlinesByAgency` dictionary.
+
+
+          {color:red|NHTSA deadlines are non-negotiable}: 24h for fatality incidents, 168h (7 days) for
+          injury, 720h (30 days) for tow-away. OSHA: 8h for fatality, 24h for hospitalization/amputation/
+          eye loss. The Conductor workflow's {color:blue|30-day timeout aligns to the longest NHTSA window}.
+          `GET /v1/incidents/reports/regulatory` invokes **GetRegulatoryReportsQuery** backed by
+          **IRegulatoryReportService** / **RegulatoryReportService** — generating PDF/CSV reports
+          as `RegulatoryReportsDto`. The `Close()` method on SafetyIncident {color:red|hard-blocks
+          if RequiresNHTSAReporting is true and NHTSAReportedAt is null} — the incident cannot
+          close until the NHTSA report is filed. `GET /v1/incident-reports/compliance` returns
+          **ComplianceStatusDto** with **NhtsaComplianceMetrics** tracking filed vs. pending reports,
+          overdue items, and compliance percentage.
+        activeCalls: [regulatory-report, compliance-status]
+        revealCalls: [publish-parent-notify, comms-consume]
+        duration: 5000
+      - id: corrective-step-4
+        title: "Dashboard Analytics & Trend Reporting"
+        narrative: >
+          The **IncidentReportsController** (`Api/Controllers/IncidentReportsController.cs`) at
+          route `v1/incident-reports` exposes 4 analytical endpoints backed by
+          **IIncidentAnalyticsService** / **IncidentAnalyticsService**. `GET /summary` returns
+          **IncidentSummaryDto** with total counts, open investigations, NHTSA compliance metrics,
+          and corrective action completion rates. `GET /by-type` returns **IncidentsByTypeDto**
+          with **IncidentTypeBreakdownItem** including **SeverityCount** sub-breakdowns for each of
+          the 25 incident types. {color:red|Risk R7: Legacy IncidentType values (0-4) coexist with
+          new granular types (100-602) — analytics must handle both.}
+
+
+          `GET /trends` returns **IncidentTrendsDto** with **MonthlyIncidentCount**,
+          **WeeklyIncidentCount**, **SeverityTrendItem**, and **ResolutionTimeTrend** — enabling
+          operations teams to spot patterns across time horizons. All reporting DTOs are defined in
+          `Application/DTOs/IncidentReportDtos.cs`. {color:green|The query layer is fully separated
+          from the command layer (CQRS)} — 19 query handlers vs. 17 command handlers, with the
+          **IncidentsDbContext** supporting `AsNoTracking()` reads via multi-tenant global query
+          filters. Test coverage spans {color:green|78 test files} across domain, application,
+          infrastructure, EP handlers, and integration categories — including dedicated
+          `SafetyIncidentComplianceTests` and `SafetyIncidentDomainEventsTests`.
+        activeCalls: [compliance-status]
+        revealCalls: [regulatory-report]
+        duration: 4000

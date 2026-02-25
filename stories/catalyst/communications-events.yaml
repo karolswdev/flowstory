@@ -1,0 +1,466 @@
+id: communications-events
+title: "Communications — Event Topology & Cross-Context Integration"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  The Communications BC is the most broadly connected context in Catalyst — it subscribes to
+  9 ASB topics consuming 27 distinct event types from every operational domain. This story
+  maps the complete inbound event topology: Trip Operations (7 handlers for VR/PT lifecycle),
+  Enrollment & Demand (5 handlers for TRF + student events), Provider Network (3 handlers for
+  credential alerts), Monitoring (4 handlers for exception detection), Settlement (7 handlers
+  for payment lifecycle), Rescue, Incidents, and Identity. It then traces the outbound delivery
+  status events that close the feedback loop for upstream consumers.
+
+sections:
+  # -- Section 1: Inbound Event Consumption (9 Topics, 27 Handlers) ------------------
+  - renderer: service-flow
+    title: "Inbound Event Consumption — 9 Topics, 27 Handlers"
+    accentColor: "#A855F7"
+    layout: sequence
+
+    services:
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+      - id: comms-ep
+        name: "Communications Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: comms-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "PostgreSQL 16 (communications)"
+        status: healthy
+      - id: redis
+        name: "Redis"
+        type: cache
+        technology: "Redis (CatalystComms:)"
+        status: healthy
+      - id: trip-ops-ep
+        name: "Trip Operations"
+        type: api
+        technology: ".NET 10 (topic: trip-operations)"
+        status: healthy
+      - id: enrollment-ep
+        name: "Enrollment & Demand"
+        type: api
+        technology: ".NET 10 (topic: enrollment-and-demand)"
+        status: healthy
+      - id: provider-ep
+        name: "Provider Network"
+        type: api
+        technology: ".NET 10 (topic: provider-network-and-assignment)"
+        status: healthy
+      - id: monitoring-ep
+        name: "Monitoring & Exceptions"
+        type: api
+        technology: ".NET 10 (topic: monitoring-and-exceptions)"
+        status: healthy
+      - id: settlement-ep
+        name: "Settlement"
+        type: api
+        technology: ".NET 10 (topic: settlement)"
+        status: healthy
+      - id: rescue-ep
+        name: "Rescue Orchestration"
+        type: api
+        technology: ".NET 10 (topic: rescue-orchestration)"
+        status: healthy
+      - id: incidents-ep
+        name: "Incidents & Safety"
+        type: api
+        technology: ".NET 10 (topic: incidents-and-safety)"
+        status: healthy
+      - id: identity-ep
+        name: "Identity & Access"
+        type: api
+        technology: ".NET 10 (topic: identity-and-access)"
+        status: healthy
+
+    zones:
+      - id: producers
+        label: "Event Producers (9 BCs)"
+        members: [trip-ops-ep, enrollment-ep, provider-ep, monitoring-ep, settlement-ep, rescue-ep, incidents-ep, identity-ep]
+        color: "rgba(59, 130, 246, 0.06)"
+      - id: comms-zone
+        label: "Communications BC"
+        members: [comms-ep, comms-db, redis]
+        color: "rgba(168, 85, 247, 0.06)"
+      - id: bus
+        label: "Event Bus"
+        members: [asb]
+        color: "rgba(245, 158, 11, 0.06)"
+
+    calls:
+      - id: trip-ops-events
+        type: subscribe
+        from: asb
+        to: comms-ep
+        messageType: "Trip Operations Events (7)"
+        payload:
+          description: "communications-trip-subscriber: TripAssignedEvent, TripCompletedEvent, VehicleRunStartedEvent, VehicleRunCompletedEvent, EtaUpdatedEvent, PtPickedUpEvent, PtDroppedOffEvent"
+      - id: enrollment-events
+        type: subscribe
+        from: asb
+        to: comms-ep
+        messageType: "Enrollment Events (5)"
+        payload:
+          description: "communications-enrollment-subscriber: StudentEnrolledEvent, TrfSubmittedEvent, TrfApprovedEvent, TrfRejectedEvent, SchoolBellScheduleUpdatedEvent"
+      - id: provider-events
+        type: subscribe
+        from: asb
+        to: comms-ep
+        messageType: "Provider Network Events (3)"
+        payload:
+          description: "communications-provider-subscriber: DriverCertifiedEvent, CredentialExpiredEvent, CredentialExpiringEvent"
+      - id: monitoring-events
+        type: subscribe
+        from: asb
+        to: comms-ep
+        messageType: "Monitoring Events (4)"
+        payload:
+          description: "communications-monitoring-subscriber: LatePickupDetectedEvent, DriverNoShowDetectedEvent, PassengerNoShowDetectedEvent, RouteDeviationDetectedEvent"
+      - id: settlement-events
+        type: subscribe
+        from: asb
+        to: comms-ep
+        messageType: "Settlement Events (7)"
+        payload:
+          description: "communications-settlement-subscriber: SettlementDisputeCreatedEvent, SettlementDisputeResolvedEvent, ServiceProviderPaymentCreatedEvent, ServiceProviderPaymentPaidEvent, SettlementPaidEvent, SettlementRejectedEvent, ReconciliationDiscrepancyEvent"
+      - id: rescue-events
+        type: subscribe
+        from: asb
+        to: comms-ep
+        messageType: "Rescue Events (1)"
+        payload:
+          description: "communications-rescue-subscriber: RescueRequestedEvent"
+      - id: incidents-events
+        type: subscribe
+        from: asb
+        to: comms-ep
+        messageType: "Incidents Events (3)"
+        payload:
+          description: "communications-incidents-subscriber: IncidentReportedEvent, VehicleInspectedEvent, ParentNotificationRequiredEvent (FERPA)"
+      - id: identity-events
+        type: subscribe
+        from: asb
+        to: comms-ep
+        messageType: "Identity Events (1)"
+        payload:
+          description: "communications-identity-subscriber: UserCreatedEvent"
+      - id: ep-to-db
+        type: sync
+        from: comms-ep
+        to: comms-db
+        method: POST
+        path: "CreateNotificationCommand via MediatR"
+        duration: 80
+        description: "Each handler maps event -> template -> recipient -> Notification aggregate. Persisted through CommunicationsDbContext with transactional outbox."
+      - id: ep-idempotency
+        type: sync
+        from: comms-ep
+        to: redis
+        method: GET
+        path: "Redis idempotency check (EventId, 1h TTL)"
+        duration: 2
+        description: "Standard idempotency pattern: check Redis for EventId before processing, set after successful handling. CatalystComms: prefix."
+      - id: trip-ops-publish
+        type: publish
+        from: trip-ops-ep
+        to: asb
+        messageType: "Trip Operations Domain Events"
+        payload:
+          description: "VR/PT lifecycle state transitions published to trip-operations topic"
+      - id: enrollment-publish
+        type: publish
+        from: enrollment-ep
+        to: asb
+        messageType: "Enrollment Domain Events"
+        payload:
+          description: "TRF + student lifecycle events published to enrollment-and-demand topic"
+      - id: settlement-publish
+        type: publish
+        from: settlement-ep
+        to: asb
+        messageType: "Settlement Domain Events"
+        payload:
+          description: "Payment + dispute lifecycle events published to settlement topic"
+
+    steps:
+      - id: events-step-1
+        title: "Trip Operations & Real-Time Parent Notifications (7 Handlers)"
+        narrative: >
+          The largest event source is the `trip-operations` topic with 7 handlers on the
+          `communications-trip-subscriber` subscription. **TripAssignedEventHandler** triggers
+          dual notifications to both driver and parent when a trip is matched to a VR.
+          **VehicleRunStartedEventHandler** and **VehicleRunCompletedEventHandler** notify
+          dispatchers and parents of VR lifecycle transitions. **EtaUpdatedEventHandler**
+          sends real-time ETA updates to parents — the highest-frequency notification type
+          during active operations. **PtPickedUpEventHandler** and **PtDroppedOffEventHandler**
+          deliver pickup confirmation and dropoff confirmation respectively — these are
+          the most time-sensitive parent notifications with `NotificationPriority.High` (1-min SLA).
+          **TripCompletedEventHandler** sends trip completion summary.
+
+          Each handler follows the same pipeline: idempotency check (Redis, `EventId` key,
+          1-hour TTL) -> `IEventToNotificationMapper.MapAsync()` -> `IRecipientResolver` ->
+          `CreateNotificationCommand`. The handler files live at
+          `Catalyst.Communications.EventProcessor/Handlers/TripOperations/*.cs`.
+
+          {color:green|All 7 trip-operations handlers produce audit-trail notifications that
+          satisfy EverDriven's parent communication SLA requirements.}
+        activeCalls: [trip-ops-publish, trip-ops-events, ep-idempotency, ep-to-db]
+        revealNodes: [trip-ops-ep, asb, comms-ep, redis, comms-db]
+        duration: 6000
+      - id: events-step-2
+        title: "Enrollment, Provider & Credential Notifications (8 Handlers)"
+        narrative: >
+          The `enrollment-and-demand` topic feeds 5 handlers on `communications-enrollment-subscriber`:
+          **StudentEnrolledEventHandler** sends welcome notification to parent,
+          **TrfSubmittedEventHandler** confirms TRF receipt, **TrfApprovedEventHandler** and
+          **TrfRejectedEventHandler** deliver approval/rejection decisions (template category:
+          `TemplateCategory.TripOperations`), and **ScheduleChangedEventHandler** notifies
+          affected parents when a `SchoolBellScheduleUpdatedEvent` modifies pickup/dropoff times.
+
+          The `provider-network-and-assignment` topic feeds 3 handlers on
+          `communications-provider-subscriber`: **DriverCertifiedEventHandler** sends
+          certification confirmation to driver and provider admin,
+          **CredentialExpiredEventHandler** sends urgent credential expiration alert
+          (category: `TemplateCategory.Compliance`), and **CredentialExpiringEventHandler**
+          sends advance warning — these credential handlers are critical for keeping the
+          provider fleet compliant. Handler files at
+          `Catalyst.Communications.EventProcessor/Handlers/Enrollment/*.cs` and
+          `Handlers/ProviderNetwork/*.cs`.
+
+          {color:red|SchoolBellScheduleUpdatedEvent handler (ScheduleChangedEventHandler)
+          may trigger bulk notifications affecting many parents — no batch throttling mechanism.}
+        activeCalls: [enrollment-publish, enrollment-events, provider-events]
+        revealCalls: [trip-ops-publish, trip-ops-events]
+        duration: 6000
+      - id: events-step-3
+        title: "Monitoring, Settlement & Operational Alerts (11 Handlers)"
+        narrative: >
+          The `monitoring-and-exceptions` topic feeds 4 handlers on
+          `communications-monitoring-subscriber`: **LatePickupDetectedEventHandler**,
+          **DriverNoShowDetectedEventHandler**, **PassengerNoShowDetectedEventHandler**,
+          and **RouteDeviationDetectedEventHandler**. These produce dispatcher alerts with
+          `NotificationPriority.Critical` (immediate SLA) for no-shows and
+          `NotificationPriority.High` for late pickups and route deviations.
+
+          The `settlement` topic feeds the most handlers — 7 on `communications-settlement-subscriber`:
+          **SettlementDisputeCreatedEventHandler** and **SettlementDisputeResolvedEventHandler**
+          for dispute lifecycle, **ServiceProviderPaymentCreatedEventHandler** and
+          **ServiceProviderPaymentPaidEventHandler** for provider payment alerts,
+          **SettlementPaidEventHandler** and **SettlementRejectedEventHandler** for settlement
+          outcomes, and **ReconciliationDiscrepancyEventHandler** for billing anomalies
+          (category: `TemplateCategory.SettlementPayment`).
+
+          {color:blue|Settlement handlers added in R076 (Event-Driven Infrastructure Hardening)
+          — 8 settlement event consumers wired as part of cross-context event completeness audit.}
+        activeCalls: [monitoring-events, settlement-publish, settlement-events]
+        revealCalls: [enrollment-events, provider-events]
+        duration: 5000
+      - id: events-step-4
+        title: "Rescue, Incidents, Identity & the Complete Event Map"
+        narrative: >
+          Three remaining topic subscriptions complete the 9-topic coverage.
+          `rescue-orchestration` topic: **RescueRequestedEventHandler** on
+          `communications-rescue-subscriber` — sends urgent rescue notifications to dispatchers
+          and affected parents when a rescue workflow is triggered (category:
+          `TemplateCategory.RescueExceptions`, priority: `Critical`).
+
+          `incidents-and-safety` topic: 3 handlers on `communications-incidents-subscriber` —
+          **IncidentReportedEventHandler** for safety incident alerts to operations,
+          **VehicleInspectedEventHandler** for inspection result notifications, and
+          **ParentNotificationRequiredEventHandler** for FERPA-compliant parent notifications
+          during safety incidents.
+
+          `identity-and-access` topic: **UserCreatedEventHandler** on
+          `communications-identity-subscriber` — sends welcome/onboarding notification to
+          newly created users (category: `TemplateCategory.System`).
+
+          **Complete topology**: 9 ASB subscriptions, 27 event handlers, 5 template categories
+          (TripOperations, RescueExceptions, Compliance, SettlementPayment, System), 4 priority
+          levels, 4 delivery channels (SMS, Email, Push, IVR). EP observability:
+          `AddCatalystEpMetrics("catalyst-communications")` + all 27 handlers decorated with
+          `DecorateEventHandlerWithMetrics<T>()`. Health probe at `/health/live` (port 8081).
+
+          {color:green|Communications is the only BC that subscribes to 9 topics — the broadest
+          event consumer in the platform. 1,187 test facts across 77 test files validate the
+          full pipeline.}
+        activeCalls: [rescue-events, incidents-events, identity-events]
+        revealCalls: [monitoring-events, settlement-events]
+        duration: 5000
+
+  # -- Section 2: Outbound Events & Delivery Lifecycle --------------------------------
+  - renderer: service-flow
+    title: "Outbound Events & Delivery Lifecycle"
+    accentColor: "#22C55E"
+    layout: sequence
+
+    services:
+      - id: comms-api
+        name: "Communications API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: comms-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "PostgreSQL 16 (communications)"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+      - id: redis
+        name: "Redis"
+        type: cache
+        technology: "Redis (CatalystComms:)"
+        status: healthy
+      - id: downstream-consumers
+        name: "Downstream Consumers"
+        type: event-processor
+        technology: "Reporting, Monitoring"
+        status: healthy
+
+    zones:
+      - id: comms-lifecycle
+        label: "Communications Lifecycle"
+        members: [comms-api, comms-db, redis]
+        color: "rgba(34, 197, 94, 0.06)"
+      - id: outbound
+        label: "Outbound"
+        members: [asb, downstream-consumers]
+        color: "rgba(168, 85, 247, 0.06)"
+
+    calls:
+      - id: notification-state-change
+        type: sync
+        from: comms-api
+        to: comms-db
+        method: PUT
+        path: "Notification.MarkAsSent() / MarkAsDelivered() / MarkAsFailed() / Retry()"
+        duration: 30
+        description: "Notification aggregate state transitions with per-channel ChannelDeliveryStatus tracking. _allowedChannelTransitions enforces: Queued->Sent, Sent->Delivered/Failed/Retrying, Retrying->Sent/Failed, Queued->Delivered/Failed."
+      - id: delivery-attempt-record
+        type: sync
+        from: comms-api
+        to: comms-db
+        method: POST
+        path: "Notification.RecordDeliveryAttempt() / RecordSuccessfulDeliveryAttempt()"
+        duration: 20
+        description: "DeliveryAttempt entity created per attempt: AttemptNumber (1-based), Channel, Status (Pending->Delivered|Failed|Bounced), ProviderMessageId, ErrorCode/ErrorMessage."
+      - id: publish-notification-events
+        type: publish
+        from: comms-api
+        to: asb
+        messageType: "Notification Lifecycle Events (7)"
+        payload:
+          description: "NotificationSentEvent, NotificationDeliveredEvent, NotificationFailedEvent, NotificationReadEvent, EmailOpenedEvent, EmailLinkClickedEvent, EmailBouncedEvent — published to communications topic"
+      - id: publish-template-events
+        type: publish
+        from: comms-api
+        to: asb
+        messageType: "Template Lifecycle Events (9)"
+        payload:
+          description: "TemplateCreatedEvent, TemplateVersionAddedEvent, TemplateActivatedEvent, TemplateArchivedEvent, TemplateRestoredEvent, TemplateAbTestStartedEvent, TemplateAbTestEndedEvent, TemplateVersionRolledBackEvent, SmsVoiceFallbackTriggeredEvent"
+      - id: read-tracking
+        type: sync
+        from: comms-api
+        to: comms-db
+        method: PUT
+        path: "PUT /v1/notifications/{id}/read | PUT /v1/notifications/read-all"
+        duration: 25
+        description: "MarkNotificationReadCommand (single) and MarkAllNotificationsReadCommand (batch). MarkAsRead() is idempotent — no-op if already read. Raises NotificationReadEvent on first read only."
+      - id: downstream-consume
+        type: subscribe
+        from: asb
+        to: downstream-consumers
+        messageType: "Communications Domain Events"
+        payload:
+          description: "Reporting BC consumes delivery events for communication analytics. Monitoring BC may consume failure events for operational alerting."
+
+    steps:
+      - id: lifecycle-step-1
+        title: "Notification State Machine & Delivery Attempts"
+        narrative: >
+          The **Notification** aggregate manages a dual-layer state machine. The aggregate-level
+          status (`NotificationStatus`: Queued=1, Sent=2, Delivered=3, Failed=4, Retrying=5)
+          is computed from the per-channel `ChannelDeliveryStatus` entries. Each channel tracks
+          its own `Status`, `AttemptCount`, `SentAt`, `DeliveredAt`, `FailedAt`,
+          `ExternalMessageId`, `ErrorCode`, and `ErrorMessage`.
+
+          State transition methods enforce the `_allowedChannelTransitions` dictionary:
+          `MarkAsSent(channel, externalMessageId)` — Queued -> Sent;
+          `MarkAsDelivered(channel, deliveredAt)` — Sent or Queued -> Delivered;
+          `MarkAsFailed(channel, errorCode, errorMessage)` — Queued, Sent, or Retrying -> Failed;
+          `Retry(channel)` — Sent -> Retrying (auto-fails if `MaxRetryAttempts = 3` exceeded).
+          Invalid transitions raise **CommunicationsDomainException** with `INVALID_STATE_TRANSITION`.
+
+          **DeliveryAttempt** entity (in `Catalyst.Communications.Domain/Entities/DeliveryAttempt.cs`)
+          provides granular per-attempt tracking: `AttemptNumber` (1-based), `Channel` (`ChannelType`),
+          state machine (Pending -> Delivered | Failed | Bounced, all terminal from Pending only),
+          `ProviderMessageId` for external correlation.
+
+          {color:green|Aggregate status computation ensures the externally visible state reflects
+          the best-case channel outcome: ANY Delivered -> aggregate Delivered.}
+        activeCalls: [notification-state-change, delivery-attempt-record]
+        revealNodes: [comms-api, comms-db]
+        duration: 5000
+      - id: lifecycle-step-2
+        title: "Read Tracking & Notification Inbox"
+        narrative: >
+          The **NotificationController** (`v1/notifications`, `[Authorize]`) exposes the
+          notification inbox: `GET /v1/notifications` retrieves history for the authenticated
+          user via **GetNotificationsByRecipientQuery**, `GET /v1/notifications/unread-count`
+          returns unread count, `PUT /v1/notifications/{id}/read` marks single notification
+          read via **MarkNotificationReadCommand**, and `PUT /v1/notifications/read-all`
+          marks all notifications read via **MarkAllNotificationsReadCommand**.
+
+          `Notification.MarkAsRead()` is idempotent — if `IsRead` is already true, the method
+          is a no-op. On first read, it sets `IsRead = true`, `ReadAt = DateTimeOffset.UtcNow`,
+          and raises **NotificationReadEvent**. Direct messaging: `POST /v1/notifications/direct`
+          via **SendDirectMessageCommand** and `POST /v1/notifications/broadcast` via
+          **SendBroadcastNotificationCommand**. Conversation history:
+          `GET /v1/notifications/conversations/{userId}` via **GetConversationHistoryQuery**.
+
+          {color:red|Tenant extraction inconsistency: NotificationController.GetTenantIdFromContext()
+          falls back to Guid.Empty if no tenant found, while TemplateController.GetTenantId()
+          throws UnauthorizedAccessException. Should be standardized.}
+        activeCalls: [read-tracking]
+        revealCalls: [notification-state-change, delivery-attempt-record]
+        duration: 5000
+      - id: lifecycle-step-3
+        title: "16 Outbound Domain Events"
+        narrative: >
+          The Communications BC publishes 16 domain events to the `communications` ASB topic.
+          **Notification lifecycle (7 events)**: `NotificationSentEvent` (on `MarkAsSent()`),
+          `NotificationDeliveredEvent` (on `MarkAsDelivered()`), `NotificationFailedEvent`
+          (on `MarkAsFailed()`), `NotificationReadEvent` (on `MarkAsRead()`),
+          `EmailOpenedEvent` (on `RecordEmailOpened()`), `EmailLinkClickedEvent`
+          (on `RecordEmailLinkClicked()`), `EmailBouncedEvent` (on `RecordEmailBounced()`).
+
+          **Template lifecycle (8 events)**: `TemplateCreatedEvent`, `TemplateVersionAddedEvent`,
+          `TemplateActivatedEvent`, `TemplateArchivedEvent`, `TemplateRestoredEvent`,
+          `TemplateAbTestStartedEvent`, `TemplateAbTestEndedEvent`,
+          `TemplateVersionRolledBackEvent`.
+
+          **SMS fallback (1 event)**: `SmsVoiceFallbackTriggeredEvent` — raised by
+          `SendSmsCommandHandler` when voice fallback activates for Critical/High SMS failure.
+
+          All events published via transactional outbox (`outbox_messages` table in
+          `CommunicationsDbContext` implementing `IOutboxDbContext`). Event definitions at
+          `Catalyst.Communications.Domain/Events/*.cs`.
+
+          {color:blue|The communications topic (`communications-event-processor` subscription)
+          is also consumed by its own EP for self-referential processing — e.g., chaining
+          notifications or analytics aggregation.}
+        activeCalls: [publish-notification-events, publish-template-events, downstream-consume]
+        revealNodes: [asb, downstream-consumers]
+        revealCalls: [read-tracking]
+        duration: 4000

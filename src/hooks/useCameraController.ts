@@ -20,6 +20,10 @@ interface FocusOptions {
   maxZoom?: number;
   /** Minimum zoom level (default 0.5) */
   minZoom?: number;
+  /** Easing function name (default: spring-overshoot) */
+  easing?: string;
+  /** Explicit target zoom level (overrides auto-computed zoom) */
+  targetZoom?: number;
 }
 
 interface CameraController {
@@ -89,6 +93,15 @@ function springOvershoot(t: number): number {
   return 1 - Math.exp(-6 * t) * Math.cos(3 * Math.PI * t);
 }
 
+/** Named easing functions for camera animations */
+const EASING_FNS: Record<string, (t: number) => number> = {
+  'spring-overshoot': springOvershoot,
+  'linear': (t: number) => t,
+  'ease-in': (t: number) => t * t * t,
+  'ease-out': (t: number) => 1 - Math.pow(1 - t, 3),
+  'ease-in-out': (t: number) => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2,
+};
+
 /**
  * Hook for camera control in React Flow
  */
@@ -142,6 +155,7 @@ export function useCameraController(): CameraController {
     targetY: number,
     targetZoom: number,
     duration: number,
+    easingName?: string,
   ): Promise<void> => {
     // Cancel any in-flight animation
     if (animFrameRef.current) {
@@ -153,12 +167,13 @@ export function useCameraController(): CameraController {
     const startY = current.y;
     const startZoom = current.zoom;
     const startTime = performance.now();
+    const easingFn = EASING_FNS[easingName || 'spring-overshoot'] || springOvershoot;
 
     return new Promise(resolve => {
       const tick = (now: number) => {
         const elapsed = now - startTime;
         const t = Math.min(elapsed / duration, 1);
-        const eased = springOvershoot(t);
+        const eased = easingFn(t);
 
         setViewport({
           x: startX + (targetX - startX) * eased,
@@ -211,6 +226,11 @@ export function useCameraController(): CameraController {
     let zoom = Math.min(cw / bw, ch / bh);
     zoom = Math.max(opts.minZoom!, Math.min(opts.maxZoom!, zoom));
 
+    // Allow explicit zoom override
+    if (opts.targetZoom != null) {
+      zoom = Math.max(opts.minZoom!, Math.min(opts.maxZoom!, opts.targetZoom));
+    }
+
     // Compute the viewport x/y that centers the bounds
     // React Flow viewport: screen = world * zoom + offset
     // To center bounds: offset = containerSize/2 - (boundsCenter * zoom)
@@ -219,7 +239,7 @@ export function useCameraController(): CameraController {
     const targetX = cw / 2 - centerX * zoom;
     const targetY = ch / 2 - centerY * zoom;
 
-    await animateViewport(targetX, targetY, zoom, opts.duration!);
+    await animateViewport(targetX, targetY, zoom, opts.duration!, opts.easing);
   }, [getNodesBounds, fitView, animateViewport, containerWidth, containerHeight]);
 
   /**
@@ -238,21 +258,23 @@ export function useCameraController(): CameraController {
   const panTo = useCallback(async (
     x: number,
     y: number,
-    duration = DEFAULT_OPTIONS.duration
+    duration = DEFAULT_OPTIONS.duration,
+    easing?: string,
   ): Promise<void> => {
     const current = getViewport();
-    await animateViewport(x, y, current.zoom, duration!);
+    await animateViewport(x, y, current.zoom, duration!, easing);
   }, [getViewport, animateViewport]);
 
   /**
-   * Zoom to level with spring-overshoot
+   * Zoom to level with configurable easing
    */
   const zoomTo = useCallback(async (
     level: number,
-    duration = DEFAULT_OPTIONS.duration
+    duration = DEFAULT_OPTIONS.duration,
+    easing?: string,
   ): Promise<void> => {
     const current = getViewport();
-    await animateViewport(current.x, current.y, level, duration!);
+    await animateViewport(current.x, current.y, level, duration!, easing);
   }, [getViewport, animateViewport]);
 
   /**
@@ -281,33 +303,90 @@ export function useCameraController(): CameraController {
   };
 }
 
+/** Camera override from YAML step schema */
+interface CameraOverrideInput {
+  zoom?: number;
+  duration?: number;
+  easing?: string;
+  focusNodes?: string[];
+  fitAll?: boolean;
+  pan?: [number, number];
+  padding?: number;
+}
+
 /**
- * Hook that auto-focuses on active nodes when they change
+ * Hook that auto-focuses on active nodes when they change.
+ * Supports per-step camera overrides for cinematic control.
+ * Includes retry logic for initial render (e.g. embed/iframe) where
+ * ReactFlow may not have measured nodes yet.
  */
 export function useAutoFocus(
   activeNodeIds: string[],
-  options?: FocusOptions & { enabled?: boolean }
+  options?: FocusOptions & { enabled?: boolean },
+  cameraOverride?: CameraOverrideInput | null,
 ) {
   const camera = useCameraController();
   const prevActiveRef = useRef<string[]>([]);
+  const mountedRef = useRef(false);
+  const prevOverrideRef = useRef<CameraOverrideInput | null | undefined>(null);
 
   useEffect(() => {
     if (options?.enabled === false) return;
 
-    // Check if active nodes changed
+    // Check if active nodes or camera override changed
     const prevSet = new Set(prevActiveRef.current);
-    const currSet = new Set(activeNodeIds);
+    const overrideChanged = cameraOverride !== prevOverrideRef.current;
 
     const changed =
-      prevSet.size !== currSet.size ||
+      overrideChanged ||
+      prevSet.size !== new Set(activeNodeIds).size ||
       activeNodeIds.some(id => !prevSet.has(id));
 
-    if (changed && activeNodeIds.length > 0) {
-      camera.focusNodes(activeNodeIds, options);
-    }
+    if (!changed) return;
 
     prevActiveRef.current = activeNodeIds;
-  }, [activeNodeIds, camera, options]);
+    prevOverrideRef.current = cameraOverride;
+
+    // Build merged focus options
+    const mergedOpts: FocusOptions = {
+      ...options,
+      ...(cameraOverride?.duration != null && { duration: cameraOverride.duration }),
+      ...(cameraOverride?.easing != null && { easing: cameraOverride.easing }),
+      ...(cameraOverride?.padding != null && { padding: cameraOverride.padding }),
+      ...(cameraOverride?.zoom != null && { targetZoom: cameraOverride.zoom }),
+    };
+
+    // Determine which nodes to focus on
+    const focusTargets = cameraOverride?.focusNodes?.length
+      ? cameraOverride.focusNodes
+      : activeNodeIds;
+
+    const doFocus = async () => {
+      if (cameraOverride?.fitAll) {
+        await camera.fitAll(cameraOverride.padding ?? 0.2);
+      } else if (focusTargets.length > 0) {
+        await camera.focusNodes(focusTargets, mergedOpts);
+      }
+
+      // Apply manual pan offset after focus
+      if (cameraOverride?.pan) {
+        const [px, py] = cameraOverride.pan;
+        await camera.panTo(
+          px, py,
+          cameraOverride.duration ?? options?.duration,
+          cameraOverride.easing,
+        );
+      }
+    };
+
+    if (!mountedRef.current) {
+      mountedRef.current = true;
+      const timer = setTimeout(doFocus, 150);
+      return () => clearTimeout(timer);
+    }
+
+    doFocus();
+  }, [activeNodeIds, camera, options, cameraOverride]);
 
   return camera;
 }

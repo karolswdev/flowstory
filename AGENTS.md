@@ -5,12 +5,15 @@
 ## What is FlowStory?
 
 FlowStory creates animated flow diagrams from YAML. It supports:
+- **Service Flows** — Architecture storytelling engine (flagship, 28 node types, coupling analysis, failure cascade, cinematic camera, layout scenes)
 - **User Stories** — Actor-driven journeys with effects
-- **HTTP Flows** — REST API sequences  
-- **Service Flows** — Microservice architecture
+- **HTTP Flows** — REST API sequences
 - **Pipelines** — CI/CD workflows
+- **State Diagrams** — UML state machines
 - **BC Composition** — Progressive reveal of any concept's constituents
 - **BC Deployments** — Kubernetes/DevOps topology
+- **Composite** — Multi-renderer deep dives (any renderers stitched into one story)
+- **C4 Context / Tech Radar / Event Storming / ADR Timeline / Cloud Cost** — SVG renderers
 
 ## Quick Commands
 

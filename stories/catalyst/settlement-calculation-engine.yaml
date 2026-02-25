@@ -1,0 +1,461 @@
+id: settlement-calculation-engine
+title: "Settlement — BC/PD/PM Calculation Engine"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  The Settlement bounded context owns the financial lifecycle of every completed trip.
+  A SettlementBatch aggregate progresses through Pending -> Calculated -> Approved -> Paid -> Reconciled,
+  orchestrating the three-pronged BC/PD/PM (Bill Client / Pay Driver / Pay Monitor) calculation
+  engine — a 911-line SettlementCalculationService that resolves CTTC contract rates from Pricing,
+  provider rates from Provider Network, and trip data from Trip Operations. The batch then flows
+  through a finance approval gate, invoice generation (QuestPDF), adjustment/dispute resolution,
+  and final reconciliation with configurable tolerance matching.
+
+sections:
+  # -- Section 1: BC/PD/PM Calculation Pipeline ----------------------------------------
+  - renderer: service-flow
+    title: "BC/PD/PM Calculation Pipeline"
+    accentColor: "#8B5CF6"
+    layout: sequence
+
+    services:
+      - id: settlement-api
+        name: "Settlement API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: settlement-db
+        name: "PostgreSQL 16 (settlement)"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: conductor
+        name: "Conductor"
+        type: workflow
+        technology: "Orkes Conductor"
+        status: healthy
+      - id: pricing-api
+        name: "Pricing API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: trip-ops-api
+        name: "Trip Operations API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: provider-api
+        name: "Provider Network API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: redis
+        name: "Redis"
+        type: cache
+        technology: "Redis"
+        status: healthy
+
+    zones:
+      - id: settlement-core
+        label: "Settlement BC"
+        members: [settlement-api, settlement-db, redis]
+        color: "rgba(139, 92, 246, 0.06)"
+      - id: calculation-pipeline
+        label: "Conductor Calculation Pipeline"
+        members: [conductor, pricing-api, trip-ops-api, provider-api]
+        color: "rgba(245, 158, 11, 0.06)"
+
+    calls:
+      - id: trigger-calculation
+        type: sync
+        from: settlement-api
+        to: conductor
+        method: POST
+        path: "POST batches/{id}/calculate → SettlementWorkflowTriggerService"
+        protocol: http
+        duration: 200
+        description: "SettlementController triggers settlement-calculation-workflow via SettlementWorkflowTriggerService (on-demand or scheduled monthly 1st @ 2AM)"
+      - id: create-batch
+        type: sync
+        from: conductor
+        to: settlement-db
+        method: POST
+        path: "CreateSettlementBatchTask"
+        protocol: http
+        duration: 150
+        description: "Conductor worker creates SettlementBatch aggregate in Pending state via SettlementBatch.Create() factory — idempotent, raises SettlementBatchCreatedEvent"
+      - id: fetch-trips
+        type: sync
+        from: conductor
+        to: trip-ops-api
+        method: GET
+        path: "FetchBookedTripsTask → trip-operations-api:8080"
+        protocol: http
+        duration: 800
+        description: "FetchBookedTripsTask calls ISettlementTripClient (SettlementTripHttpClient) to retrieve all completed trips for the billing period. Polly: 3x exponential retry, circuit breaker 5/30s. 300s timeout."
+      - id: fetch-cttc-rates
+        type: sync
+        from: conductor
+        to: pricing-api
+        method: GET
+        path: "CalculateBcTask → pricing-api:8080"
+        protocol: http
+        duration: 600
+        description: "CalculateBcTask calls IPricingClient (PricingHttpClient) to fetch CTTC contract rates (ContractRateDto) per trip. 30s timeout, 10s per-request. Polly resilience."
+      - id: calculate-bc
+        type: sync
+        from: conductor
+        to: settlement-db
+        method: POST
+        path: "CalculateBcTask → SettlementCalculationService.CalculateBc()"
+        protocol: http
+        duration: 1200
+        description: "BC formula: baseRate + (distance x perMileRate) + (duration x perMinuteRate) + surcharges. 600s timeout, 2 retries."
+      - id: fetch-provider-rates
+        type: sync
+        from: conductor
+        to: provider-api
+        method: GET
+        path: "CalculatePdPmTask → provider-network-api:8080"
+        protocol: http
+        duration: 500
+        description: "CalculatePdPmTask calls IProviderNetworkClient (ProviderNetworkHttpClient) to fetch ProviderRateDto and MonitorRateDto. 30s timeout, 10s per-request."
+      - id: calculate-pd-pm
+        type: sync
+        from: conductor
+        to: settlement-db
+        method: POST
+        path: "CalculatePdPmTask → CalculatePd() + CalculatePm()"
+        protocol: http
+        duration: 1000
+        description: "PD: per-trip/hourly/per-mile rates + overtime/hazard/bonus adjustments. PM: per-trip/hourly + skill/medical/special-needs premiums. 600s timeout, 2 retries."
+      - id: complete-batch
+        type: sync
+        from: conductor
+        to: settlement-db
+        method: POST
+        path: "CompleteSettlementBatchTask → batch.MarkAsCalculated()"
+        protocol: http
+        duration: 200
+        description: "CompleteSettlementBatchTask transitions batch Pending -> Calculated, sets TotalBillClientAmount/TotalPayDriverAmount/TotalPayMonitorAmount (Money VOs), raises SettlementCalculatedEvent via transactional outbox"
+
+    steps:
+      - id: calc-step-1
+        title: "Batch Creation & Trip Fetching"
+        narrative: >
+          Settlement calculation begins when a finance user calls `POST /v1/settlement/batches/{id}/calculate`
+          or the monthly scheduler fires (1st of month @ 2AM). The **SettlementController** delegates to
+          **SettlementWorkflowTriggerService**, which starts the `settlement-calculation-workflow` in Conductor
+          (defined in `src/workflows/settlement/settlement-calculation-workflow.json`, 30-minute timeout).
+
+
+          Step 1: **CreateSettlementBatchTask** creates the **SettlementBatch** aggregate
+          (`Domain/Aggregates/SettlementBatch.cs`, 434 lines) in `Pending` status via the `SettlementBatch.Create()`
+          factory method, capturing `BillingPeriodStart` and `BillingPeriodEnd` (typically monthly). This raises
+          **SettlementBatchCreatedEvent**. The task is {color:green|idempotent} — repeated invocations return
+          the existing batch.
+
+
+          Step 2: **FetchBookedTripsTask** calls Trip Operations via **SettlementTripHttpClient**
+          (`Infrastructure/ExternalServices/SettlementTripHttpClient.cs`) with Polly resilience (3x exponential
+          retry, circuit breaker at 5 failures/30s, jitter). The client includes **TenantIdDelegatingHandler**
+          and **CorrelationIdDelegatingHandler** for cross-context multi-tenancy propagation. Returns
+          `BookedTripDto` records with trip status, distance, duration, and JSONB metadata.
+        activeCalls: [trigger-calculation, create-batch, fetch-trips]
+        revealNodes: [settlement-api, conductor, settlement-db, trip-ops-api]
+        duration: 6000
+      - id: calc-step-2
+        title: "BC Calculation: Bill Client Engine"
+        narrative: >
+          **CalculateBcTask** (`Application/Tasks/CalculateBcTask.cs`) first fetches CTTC contract rates from
+          Pricing BC via **PricingHttpClient** — each trip resolves to a `ContractRateDto` with `baseRate`,
+          `perMileRate`, `perMinuteRate`, and `MinimumCharge`. Then it invokes
+          **SettlementCalculationService.CalculateBc()** (`Infrastructure/Services/SettlementCalculationService.cs`,
+          911 lines) — the heart of the BC/PD/PM engine.
+
+
+          The BC formula handles 6 trip settlement statuses defined in `TripSettlementStatus` enum:
+          {color:blue|Completed} = `baseRate + (distance x perMileRate) + (duration x perMinuteRate)` + percentage-based
+          surcharges (Fuel, Holiday, AfterHours, RescueTrip, SameDayChange, UrgentSameDayChange). Minimum charge
+          enforcement applies. {color:blue|NoShow} = `fullBaseAmount x noShowChargePercentage` (typically 50%).
+          {color:blue|Cancelled} = `lateCancellationFee` if < 24hr notice, else $0.
+          {color:blue|RescueTrip} = full charge + optional rescue surcharge.
+          {color:blue|SplitTrip} = first segment gets full BC; subsequent segments = $0 (avoid double-billing).
+          {color:blue|SameDayChange} = full charge + surcharge (urgent if < 2hr notice).
+
+
+          All amounts use **Money** value object (`Catalyst.Shared.Domain.ValueObjects`) for 2-decimal precision.
+          The task has a 600-second timeout with 2 retries (fixed 30s backoff).
+        activeCalls: [fetch-cttc-rates, calculate-bc]
+        revealNodes: [pricing-api]
+        revealCalls: [trigger-calculation, create-batch, fetch-trips]
+        duration: 7000
+      - id: calc-step-3
+        title: "PD/PM Calculation: Pay Driver & Pay Monitor"
+        narrative: >
+          **CalculatePdPmTask** (`Application/Tasks/CalculatePdPmTask.cs`) fetches provider and monitor rates
+          from Provider Network via **ProviderNetworkHttpClient**, then calls
+          **SettlementCalculationService.CalculatePd()** and **SettlementCalculationService.CalculatePm()**.
+
+
+          **PD (Pay Driver)** supports three rate models: per-trip (`rateAmount`), hourly
+          (`(durationMinutes / 60) x rateAmount`), and per-mile (`distanceMiles x rateAmount`). Adjustments
+          include overtime (threshold 8hr), hazardPay, bonuses, and waitTime (from trip JSONB). NoShow pays
+          a show-up fee (min $10 or configured). RescueTrip splits between original + rescue driver based on
+          `OriginalDriverPortion`. SplitTrip distributes proportionally by distance, duration, or equal fallback.
+          Payment line items are stored as `PaymentLineItem` JSONB in **DriverPayment** entity
+          (`Domain/Entities/DriverPayment.cs`, 407 lines). Formula: `TotalAmount = BaseDriverPay + MonitorPay + Additions - Deductions`.
+
+
+          **PM (Pay Monitor)** defaults to $15/trip if no rate configured. Supports per-trip and hourly models.
+          Premium adjustments: SkillPremium, MedicalCertificationPremium, SpecialNeedsPremium, monitorHazardPay,
+          monitorBonus. NoShow and Cancelled both pay $0 (no service rendered). The PM engine creates
+          **ServiceProviderPayment** records (`Domain/Entities/ServiceProviderPayment.cs`, 393 lines) that
+          aggregate driver payments per provider: `NetAmount = GrossAmount - AdminFeeAmount`.
+        activeCalls: [fetch-provider-rates, calculate-pd-pm]
+        revealNodes: [provider-api, redis]
+        revealCalls: [fetch-cttc-rates, calculate-bc]
+        duration: 6000
+      - id: calc-step-4
+        title: "Batch Completion & Outbox Publishing"
+        narrative: >
+          **CompleteSettlementBatchTask** (`Application/Tasks/CompleteSettlementBatchTask.cs`) transitions the
+          batch from `Pending` to `Calculated` via `batch.MarkAsCalculated()`, setting the three financial totals:
+          `TotalBillClientAmount`, `TotalPayDriverAmount`, `TotalPayMonitorAmount` — all as **Money** value objects.
+          This raises **SettlementCalculatedEvent**.
+
+
+          {color:green|The event is persisted via transactional outbox} — **SettlementDbContext**
+          (`Infrastructure/Data/SettlementDbContext.cs`) extends `DomainEventPublishingDbContext` and implements
+          `IOutboxDbContext`. Domain events are written to the `outbox_messages` table in the SAME transaction as
+          domain state changes, then published to ASB asynchronously. This guarantees at-least-once delivery.
+
+
+          The **SettlementBatch** state machine (`Domain/Aggregates/SettlementBatch.cs`, 434 lines) enforces
+          transitions via an `_allowedTransitions` dictionary:
+          `Pending -> Calculated -> Approved -> Paid -> Reconciled` (happy path),
+          `Calculated -> Rejected -> Pending` (reopen loop), `Pending -> Cancelled` (terminal).
+          {color:red|Risk: the workflow has a 30-minute timeout — large billing periods with thousands of
+          trips could approach this limit during BC/PD/PM calculation}.
+        activeCalls: [complete-batch]
+        revealCalls: [fetch-provider-rates, calculate-pd-pm]
+        duration: 5000
+
+  # -- Section 2: Settlement Batch Lifecycle & Financial Operations ---------------------
+  - renderer: service-flow
+    title: "Settlement Batch Lifecycle & Financial Operations"
+    accentColor: "#10B981"
+    layout: sequence
+
+    services:
+      - id: settlement-api
+        name: "Settlement API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: settlement-db
+        name: "PostgreSQL 16 (settlement)"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+      - id: questpdf
+        name: "QuestPDF Engine"
+        type: external
+        technology: "QuestPDF"
+        status: healthy
+      - id: redis
+        name: "Redis"
+        type: cache
+        technology: "Redis"
+        status: healthy
+
+    zones:
+      - id: settlement-core
+        label: "Settlement BC"
+        members: [settlement-api, settlement-db, redis]
+        color: "rgba(16, 185, 129, 0.06)"
+      - id: external
+        label: "External"
+        members: [asb, questpdf]
+        color: "rgba(245, 158, 11, 0.06)"
+
+    calls:
+      - id: approve-batch
+        type: sync
+        from: settlement-api
+        to: settlement-db
+        method: POST
+        path: "/v1/settlement/batches/{id}/approve"
+        protocol: http
+        duration: 100
+        description: "ApproveSettlementBatchCommand — FinanceManager role required. batch.MarkAsApproved() raises SettlementApprovedEvent via outbox"
+      - id: reject-batch
+        type: sync
+        from: settlement-api
+        to: settlement-db
+        method: POST
+        path: "/v1/settlement/batches/{id}/reject"
+        protocol: http
+        duration: 80
+        description: "RejectSettlementBatchCommand — Calculated -> Rejected. Can be reopened to Pending for recalculation."
+      - id: mark-paid
+        type: sync
+        from: settlement-api
+        to: settlement-db
+        method: POST
+        path: "/v1/settlement/batches/{id}/mark-paid"
+        protocol: http
+        duration: 100
+        description: "MarkSettlementBatchAsPaidCommand — Approved -> Paid. DriverPayment transitions to Completed, ClientInvoice generated."
+      - id: generate-invoice-pdf
+        type: sync
+        from: settlement-api
+        to: questpdf
+        method: GET
+        path: "/v1/invoices/{id}/pdf → IInvoicePdfGenerator"
+        protocol: http
+        duration: 500
+        description: "InvoicePdfGenerator generates PDF via QuestPDF with invoice number format {TenantAbbr}-INV-{YYYYMM}-{Seq}, line items (JSONB), due date (Net 30)"
+      - id: request-adjustment
+        type: sync
+        from: settlement-api
+        to: settlement-db
+        method: POST
+        path: "/v1/settlements/{batchId}/adjustments"
+        protocol: http
+        duration: 100
+        description: "RequestAdjustmentCommand — SettlementAdjustment.Create() with approval thresholds: Standard < $500, Manager < $5K, Director >= $5K"
+      - id: open-dispute
+        type: sync
+        from: settlement-api
+        to: settlement-db
+        method: POST
+        path: "/v1/settlements/{batchId}/disputes"
+        protocol: http
+        duration: 100
+        description: "OpenDisputeCommand — SettlementDispute.Create() with DisputeType (BillingError, ServiceNotRendered, RateDispute, Other)"
+      - id: reconcile-batch
+        type: sync
+        from: settlement-api
+        to: settlement-db
+        method: POST
+        path: "/v1/settlement/batches/{id}/reconcile"
+        protocol: http
+        duration: 150
+        description: "ReconcileSettlementBatchCommand — Paid -> Reconciled (terminal). PaymentReconciliation compares expected vs actual with configurable tolerance (default 1 cent)."
+      - id: publish-settlement-events
+        type: publish
+        from: settlement-api
+        to: asb
+        messageType: "Settlement domain events"
+        payload:
+          description: "13 outbound events via transactional outbox: SettlementCalculated, Approved, Rejected, Paid, Reconciled, DisputeCreated/Resolved, AdjustmentRequested/Approved/Rejected/Applied, ReconciliationDiscrepancy"
+
+    steps:
+      - id: lifecycle-step-1
+        title: "Finance Approval Gate"
+        narrative: >
+          After the Conductor pipeline marks the batch as `Calculated`, a finance user reviews the
+          BC/PD/PM totals. The **SettlementController** exposes two paths:
+          `POST /v1/settlement/batches/{id}/approve` (requires `FinanceManager` role) calls
+          **ApproveSettlementBatchHandler** which invokes `batch.MarkAsApproved()`, raising
+          **SettlementApprovedEvent**. Alternatively, `POST /v1/settlement/batches/{id}/reject`
+          transitions to `Rejected`, and `batch.ReopenForRecalculation()` can loop back to `Pending`
+          for a fresh calculation pass.
+
+
+          {color:green|Batch approval also supports bulk operations} — `POST /v1/settlement/batches/batch-approve`
+          calls **BatchApproveSettlementsHandler**, which loops through multiple batch IDs calling
+          `batch.MarkAsApproved()` per batch. All 16 of 30 endpoints require `FinanceManager` role authorization.
+
+
+          The state machine (`SettlementBatch.cs`, 434 lines) enforces valid transitions via an
+          `_allowedTransitions` dictionary. Invalid transitions throw a domain exception.
+          {color:red|Risk: duplicate controller routes — AdjustmentController (nested at
+          `v1/settlements/{id}/adjustments`) and AdjustmentsController (flat at `v1/adjustments`)
+          serve overlapping functionality, increasing API surface area}.
+        activeCalls: [approve-batch, reject-batch]
+        revealNodes: [settlement-api, settlement-db]
+        duration: 5000
+      - id: lifecycle-step-2
+        title: "Invoice Generation & Payment Processing"
+        narrative: >
+          Once approved, `POST /v1/settlement/batches/{id}/mark-paid` transitions the batch to `Paid`.
+          **ClientInvoice** entities (`Domain/Entities/ClientInvoice.cs`, 284 lines) are generated per district
+          with invoice number format `{TenantAbbr}-INV-{YYYYMM}-{Seq}` and Net 30 due dates. Each invoice
+          contains `InvoiceLineItem` value objects (JSONB) referencing individual `BookedTripId` with BC amounts.
+          The invoice lifecycle: `Draft -> Sent -> Paid` (with `Sent -> Overdue -> Paid` for late payments).
+
+
+          **InvoicePdfGenerator** (`Infrastructure/Services/InvoicePdfGenerator.cs`) uses **QuestPDF** to
+          render professional invoice PDFs accessible via `GET /v1/invoices/{id}/pdf`.
+          **SendInvoiceCommand** transitions `Draft -> Sent` via `invoice.MarkAsSent()`.
+
+
+          **DriverPayment** entities (`Domain/Entities/DriverPayment.cs`, 407 lines) track per-driver payments
+          with `PaymentLineItem` JSONB (BookedTripId, DriverPayAmount, MonitorPayAmount per trip) and
+          `PaymentAdjustment` JSONB (overtime, bonuses, deductions). Payment reference format:
+          `{TenantAbbr}-PAY-{YYYYMM}-{DriverId:8}`.
+          {color:red|Risk: InvoiceController.GetInvoiceById accesses SettlementDbContext directly
+          (lines 122-148) rather than via MediatR query handler — violates Clean Architecture pattern}.
+        activeCalls: [mark-paid, generate-invoice-pdf]
+        revealNodes: [questpdf]
+        revealCalls: [approve-batch, reject-batch]
+        duration: 6000
+      - id: lifecycle-step-3
+        title: "Adjustments & Disputes"
+        narrative: >
+          Post-calculation corrections flow through two parallel entity lifecycles.
+          **SettlementAdjustment** (`Domain/Entities/SettlementAdjustment.cs`, 396 lines): `POST
+          /v1/settlements/{batchId}/adjustments` creates an adjustment via `SettlementAdjustment.Create()`
+          with type (Credit/Debit/Correction), reason (RouteChange, ServiceIssue, etc.), and settlement type
+          (BC/PD/PM). {color:green|Tiered approval thresholds enforce governance}: Standard < $500,
+          `ManagerApprovalThreshold` = $500, `DirectorApprovalThreshold` = $5,000.
+          `GetRequiredApprovalLevel()` returns "Standard", "Manager", or "Director".
+          `GetEffectiveAmount()` returns signed amount (negative for debits).
+          **ApplyAdjustmentCommand** calls `adjustment.MarkAsApplied()` and updates batch totals.
+          **IAdjustmentApprovalService** (`Application/Services/AdjustmentApprovalService.cs`) encapsulates
+          the threshold logic.
+
+
+          **SettlementDispute** (`Domain/Entities/SettlementDispute.cs`, 294 lines): `Open -> UnderReview ->
+          Resolved` (or `Rejected`). Four dispute types: BillingError, ServiceNotRendered, RateDispute, Other.
+          **ResolveDisputeCommand** calls `dispute.Resolve()` (accepted) or `dispute.Reject()` — the
+          **SettlementDisputeResolvedEvent** carries a `wasAccepted` flag for downstream consumers.
+        activeCalls: [request-adjustment, open-dispute]
+        revealCalls: [mark-paid, generate-invoice-pdf]
+        duration: 5000
+      - id: lifecycle-step-4
+        title: "Reconciliation & Event Publishing"
+        narrative: >
+          The terminal state: `POST /v1/settlement/batches/{id}/reconcile` (FinanceManager role) transitions
+          `Paid -> Reconciled`. **PaymentReconciliation** (`Domain/Entities/PaymentReconciliation.cs`, 365 lines)
+          compares expected vs actual amounts per **ReconciliationPeriod** value object (immutable VO with
+          `StartDate`, `EndDate`, `ProviderIds` scope; factory methods `ForMonth()`, `ForAllProviders()`; max 1 year).
+
+
+          Reconciliation lifecycle: `Pending -> Matched` (within tolerance, default 1 cent) or
+          `Pending -> Discrepancy -> Resolved`. Discrepancy types: Overpayment, Underpayment, MissingTrips,
+          DuplicatePayment. **ReconciliationDiscrepancyEvent** is raised when variance exceeds tolerance.
+          {color:red|Risk: PaymentReconciliation has a full 365-line domain implementation with state machine
+          but is NOT declared as a DbSet in SettlementDbContext — it may only be used in-memory}.
+
+
+          All 13 outbound domain events are published via {color:green|transactional outbox} to the `settlement`
+          ASB topic. The **SettlementDbContext** writes events to `outbox_messages` in the same transaction as
+          domain state changes, guaranteeing at-least-once delivery. Downstream consumers include Communications
+          (invoice notifications), Reporting (settlement analytics), and Monitoring (discrepancy alerts).
+        activeCalls: [reconcile-batch, publish-settlement-events]
+        revealNodes: [asb]
+        revealCalls: [request-adjustment, open-dispute]
+        duration: 5000

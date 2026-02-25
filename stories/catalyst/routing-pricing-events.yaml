@@ -1,0 +1,417 @@
+id: routing-pricing-events
+title: "Routing & Pricing -- TRF Processing Integration & Revenue Event Chain"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  How Routing & Pricing participates in the cross-context event-driven pipeline.
+  Section 1 traces the three Conductor task workers that execute within the
+  trf-processing-workflow orchestrated by Enrollment BC. Section 2 follows the
+  revenue-critical event chain from RouteCalculatedEvent through TripCostCalculatedEvent
+  to Settlement BC/PD/PM, all via transactional outbox.
+
+sections:
+  # -- Section 1: TRF Processing Integration ------------------------------------
+  - renderer: service-flow
+    title: "TRF Processing Integration"
+    accentColor: "#A855F7"
+    layout: sequence
+
+    services:
+      - id: enrollment-ep
+        name: "Enrollment Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: conductor
+        name: "Conductor"
+        type: workflow
+        technology: "Orkes Conductor"
+        status: healthy
+      - id: routing-ep
+        name: "Routing Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: google-maps
+        name: "Google Maps Platform"
+        type: external
+        technology: "Geocoding + Directions"
+        status: healthy
+      - id: redis
+        name: "Redis"
+        type: cache
+        technology: "Redis 7"
+        status: healthy
+      - id: routing-db
+        name: "PostgreSQL (routing)"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: pricing-db
+        name: "PostgreSQL (pricing)"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+
+    zones:
+      - id: orchestration
+        label: "Conductor Orchestration"
+        members: [conductor, enrollment-ep]
+        color: "rgba(168, 85, 247, 0.06)"
+      - id: worker-pipeline
+        label: "Task Worker Pipeline"
+        members: [routing-ep, google-maps, redis, routing-db, pricing-db]
+        color: "rgba(59, 130, 246, 0.06)"
+
+    calls:
+      - id: trf-submitted
+        type: subscribe
+        from: asb
+        to: routing-ep
+        messageType: "TrfSubmittedEvent"
+        action: "TrfSubmittedEventHandler starts trf-processing-workflow in Conductor (213 lines)"
+      - id: start-workflow
+        type: sync
+        from: routing-ep
+        to: conductor
+        method: POST
+        path: /api/workflow/trf-processing-workflow
+        protocol: http
+        duration: 100
+        status: 200
+        description: "TrfSubmittedEventHandler triggers Conductor with trfId, tenantId, pickup/dropoff addresses"
+        response:
+          status: 200
+          label: "Workflow instance created"
+      - id: geocode-task
+        type: sync
+        from: conductor
+        to: routing-ep
+        method: POST
+        path: "task: geocode-trf-addresses"
+        protocol: http
+        duration: 400
+        status: 200
+        description: "GeocodeTrfAddressesWorker (333 lines) -- geocodes pickup + dropoff addresses via CompositeGeocodingService. Supports pre-geocoded bypass when coordinates already present."
+        response:
+          status: 200
+          label: "pickupLat/Lng, dropoffLat/Lng, qualityScores"
+      - id: geocode-google
+        type: sync
+        from: routing-ep
+        to: google-maps
+        method: POST
+        path: "Google Maps Geocoding API"
+        protocol: http
+        duration: 180
+        status: 200
+        description: "Primary geocoding provider -- CompositeGeocodingService cascade with circuit breaker"
+        response:
+          status: 200
+          label: "Coordinates + formatted address"
+      - id: geocode-cache
+        type: async
+        from: routing-ep
+        to: redis
+        messageType: "GeocodeResultCached"
+        payload:
+          path: "SET CatalystRouting:{addressHash}"
+          duration: 5
+          description: "Cache geocoding result to prevent redundant Google Maps calls on subsequent TRFs with same address"
+      - id: route-task
+        type: sync
+        from: conductor
+        to: routing-ep
+        method: POST
+        path: "task: calculate-route"
+        protocol: http
+        duration: 500
+        status: 200
+        description: "CalculateRouteWorker (457 lines) -- creates OptimizedRoute from geocoded coordinates. Algorithm: Google Directions (<10 waypoints), Distance Matrix (10-100), Haversine fallback (25 mph)."
+        response:
+          status: 200
+          label: "totalDistanceMiles, totalDurationMinutes, algorithm"
+      - id: route-persist
+        type: sync
+        from: routing-ep
+        to: routing-db
+        method: POST
+        path: "routes + route_segments + outbox_messages"
+        duration: 40
+        description: "Atomic: OptimizedRoute + RouteSegments + RouteCalculatedEvent in outbox. Uses reflection hack for route ID assignment (CalculateRouteWorker.cs:157)."
+      - id: pricing-task
+        type: sync
+        from: conductor
+        to: routing-ep
+        method: POST
+        path: "task: calculate-pricing"
+        protocol: http
+        duration: 300
+        status: 200
+        description: "CalculatePricingWorker (419 lines) -- creates TripCost from ContractRate + PricingRules. Uses IServiceScopeFactory for per-execution DI scopes. Special needs -> Wheelchair upgrade."
+        response:
+          status: 200
+          label: "tripCostId, baseCostAmount, finalCostAmount"
+      - id: pricing-persist
+        type: sync
+        from: routing-ep
+        to: pricing-db
+        method: POST
+        path: "trip_costs + outbox_messages (TripCostCalculatedEvent)"
+        duration: 35
+        description: "Atomic: TripCost with AppliedPricingRules + TripCostCalculatedEvent in outbox"
+
+    steps:
+      - id: trf-step-1
+        title: "TRF Submitted -- Workflow Triggered"
+        narrative: >
+          A parent submits a **Transportation Request Form** in the Enrollment BC.
+          The **TrfSubmittedEvent** is published to the `enrollment-and-demand` ASB
+          topic. The Routing EP's **TrfSubmittedEventHandler** (213 lines) picks it
+          up and starts the `trf-processing-workflow` in Conductor with the TRF's
+          pickup and dropoff addresses, trfId, and tenantId. This is the entry point
+          for Routing & Pricing's participation in the TRF lifecycle -- *every
+          transportation request that enters the platform flows through these three
+          sequential task workers*.
+        activeCalls: [trf-submitted, start-workflow]
+        revealNodes: [asb, routing-ep, conductor]
+        duration: 5000
+      - id: trf-step-2
+        title: "Task 1: Geocode TRF Addresses"
+        narrative: >
+          Conductor dispatches the **geocode-trf-addresses** task to
+          **GeocodeTrfAddressesWorker** (333 lines). The worker geocodes both pickup
+          and dropoff addresses through the **CompositeGeocodingService** cascade:
+          Redis cache -> Google Maps -> Rhapsody legacy -> stub. If the TRF was
+          submitted with pre-geocoded coordinates (lat/lng already present), the
+          worker bypasses the cascade entirely -- a common case for school addresses
+          that have already been resolved. Quality scores are returned for each
+          geocode result. On failure, the worker returns `TaskResult.FAILED` and
+          Conductor retries with exponential backoff. Results are cached in Redis
+          under `CatalystRouting:` prefix for future TRFs with the same address.
+        activeCalls: [geocode-task, geocode-google, geocode-cache]
+        revealNodes: [google-maps, redis]
+        revealCalls: [trf-submitted, start-workflow]
+        duration: 6000
+      - id: trf-step-3
+        title: "Task 2: Calculate Route"
+        narrative: >
+          **CalculateRouteWorker** (457 lines) receives the geocoded coordinates and
+          creates an **OptimizedRoute** aggregate with two waypoints (pickup and
+          dropoff). The **RouteOptimizationService** selects the algorithm: Google
+          Directions API for the typical 2-waypoint TRF case, with Haversine fallback
+          at 25 mph when Google Maps is unavailable. The route is persisted atomically
+          with its **RouteSegments** and a **RouteCalculatedEvent** in the transactional
+          outbox. The worker uses a reflection hack (`typeof(OptimizedRoute).GetProperty("Id")!.SetValue`)
+          to set the route ID -- a known MVP simplification. Currently RouteId == TripId
+          (1:1 mapping); multi-trip routes are not yet supported.
+        activeCalls: [route-task, route-persist]
+        revealNodes: [routing-db]
+        revealCalls: [geocode-task, geocode-google, geocode-cache]
+        duration: 6000
+      - id: trf-step-4
+        title: "Task 3: Calculate Pricing"
+        narrative: >
+          **CalculatePricingWorker** (419 lines) is the final task in the pipeline.
+          It resolves the Active **ContractRate** for the tenant's vehicle type,
+          applies the CTTC formula (`baseRate + distance * perMileRate + duration *
+          perMinuteRate`, floor at MinimumCharge), runs the **PricingRulesEngine**
+          for surcharges/discounts, and persists the **TripCost** with its audit
+          trail. A business rule upgrades Sedan to Wheelchair when `hasSpecialNeeds`
+          is true. The worker creates per-execution DI scopes via `IServiceScopeFactory`
+          to prevent DbContext concurrency issues across concurrent Conductor task
+          executions. The **TripCostCalculatedEvent** in the outbox completes the
+          TRF processing pipeline -- the TRF now has a geocoded route and a dollar amount.
+        activeCalls: [pricing-task, pricing-persist]
+        revealNodes: [pricing-db]
+        revealCalls: [route-task, route-persist]
+        duration: 5000
+
+  # -- Section 2: Revenue-Critical Event Chain -----------------------------------
+  - renderer: service-flow
+    title: "Revenue-Critical Event Chain"
+    accentColor: "#EF4444"
+    layout: sequence
+
+    services:
+      - id: routing-api
+        name: "Routing API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: routing-db
+        name: "PostgreSQL (routing)"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+      - id: pricing-ep
+        name: "Pricing Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: pricing-db
+        name: "PostgreSQL (pricing)"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: settlement-ep
+        name: "Settlement Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: reporting-ep
+        name: "Reporting Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+
+    zones:
+      - id: route-origin
+        label: "Route Calculation"
+        members: [routing-api, routing-db]
+        color: "rgba(59, 130, 246, 0.06)"
+      - id: pricing-chain
+        label: "Pricing Engine"
+        members: [pricing-ep, pricing-db]
+        color: "rgba(34, 197, 94, 0.06)"
+      - id: revenue-consumers
+        label: "Revenue Consumers"
+        members: [asb, settlement-ep, reporting-ep]
+        color: "rgba(239, 68, 68, 0.06)"
+
+    calls:
+      - id: route-calculated-outbox
+        type: sync
+        from: routing-api
+        to: routing-db
+        method: POST
+        path: "outbox_messages (RouteCalculatedEvent)"
+        duration: 30
+        description: "OptimizedRoute.MarkAsOptimized() writes RouteCalculatedEvent to transactional outbox in same commit as route data"
+      - id: publish-route-calculated
+        type: publish
+        from: routing-api
+        to: asb
+        messageType: "RouteCalculatedEvent"
+        payload:
+          description: "RouteId, TenantId, TotalDistanceMiles, TotalDurationMinutes, WaypointCount, OptimizationAlgorithm, VehicleType, Waypoints[] -- published via outbox relay to routing-and-pricing topic"
+      - id: pricing-subscribe
+        type: subscribe
+        from: asb
+        to: pricing-ep
+        messageType: "RouteCalculatedEvent"
+        action: "RouteCalculatedEventHandler triggers CalculateTripPricingCommand via MediatR"
+      - id: pricing-calculate
+        type: sync
+        from: pricing-ep
+        to: pricing-db
+        method: POST
+        path: "CalculateTripPricingCommand -> ContractRate lookup + PricingRulesEngine"
+        duration: 200
+        description: "Full pricing pipeline: CTTC lookup, base cost formula, rule evaluation, audit trail generation. Idempotent -- checks for existing TripCost before creating."
+      - id: tripcost-outbox
+        type: sync
+        from: pricing-ep
+        to: pricing-db
+        method: POST
+        path: "trip_costs + outbox_messages (TripCostCalculatedEvent + RulesEvaluatedEvent)"
+        duration: 35
+        description: "Atomic: TripCost aggregate + TripCostCalculatedEvent + RulesEvaluatedEvent in transactional outbox"
+      - id: publish-tripcost
+        type: publish
+        from: pricing-ep
+        to: asb
+        messageType: "TripCostCalculatedEvent"
+        payload:
+          description: "TripCostId, TripId, RouteId, TenantId, BaseCost, FinalCost, DistanceMiles, DurationMinutes, AppliedRules[] -- self-contained for BC/PD/PM"
+      - id: settlement-subscribe
+        type: subscribe
+        from: asb
+        to: settlement-ep
+        messageType: "TripCostCalculatedEvent"
+        action: "Calculate BC/PD/PM -- Bill Client amount, Pay Driver amount, Pay Monitor amount"
+      - id: reporting-subscribe
+        type: subscribe
+        from: asb
+        to: reporting-ep
+        messageType: "TripCostCalculatedEvent"
+        action: "Materialize pricing analytics -- cost trends, rule effectiveness, contract utilization"
+      - id: recalc-publish
+        type: publish
+        from: pricing-ep
+        to: asb
+        messageType: "TripCostRecalculatedEvent"
+        payload:
+          description: "NewTripCostId, PreviousTripCostId, CostDifference, RecalculationReason -- triggers settlement adjustment"
+      - id: adjustment-publish
+        type: publish
+        from: pricing-ep
+        to: asb
+        messageType: "TripCostAdjustedEvent"
+        payload:
+          description: "AdjustmentAmount, AdjustmentType, AdjustmentReason, AuthorizedBy -- manual override with audit trail"
+
+    steps:
+      - id: revenue-step-1
+        title: "Route Calculated -- Outbox Relay"
+        narrative: >
+          The revenue chain begins when **OptimizedRoute.MarkAsOptimized()** writes
+          the **RouteCalculatedEvent** to the transactional outbox. This is the
+          boundary between geometry and money. The outbox relay publishes the event
+          to the `routing-and-pricing` ASB topic. The event carries everything the
+          pricing engine needs: TotalDistanceMiles, TotalDurationMinutes, VehicleType,
+          WaypointCount, and the full Waypoints array. The **Pricing EP** subscribes
+          via `pricing-event-processor` subscription. The **RouteCalculatedEventHandler**
+          extracts the route metrics and dispatches a `CalculateTripPricingCommand`
+          via MediatR. MVP simplification: RouteId == TripId (1:1 mapping).
+        activeCalls: [route-calculated-outbox, publish-route-calculated, pricing-subscribe]
+        revealNodes: [routing-api, routing-db, asb, pricing-ep]
+        duration: 5000
+      - id: revenue-step-2
+        title: "Pricing Pipeline -- Three Revenue Events"
+        narrative: >
+          The **CalculateTripPricingCommand** handler runs the full pricing pipeline:
+          ContractRate lookup, base cost formula, PricingRulesEngine evaluation, and
+          TripCost persistence. The handler is **idempotent** -- it checks for an
+          existing TripCost before creating a new one. Three revenue-critical events
+          emerge from the pricing engine: (1) **TripCostCalculatedEvent** -- the
+          standard path, carries BaseCost, FinalCost, and AppliedRules for initial
+          settlement. (2) **TripCostRecalculatedEvent** -- fired when route changes
+          trigger repricing, carries CostDifference for settlement adjustment.
+          (3) **TripCostAdjustedEvent** -- manual override with AuthorizedBy for
+          audit. All three are written to the transactional outbox atomically with
+          the TripCost state change.
+        activeCalls: [pricing-calculate, tripcost-outbox, publish-tripcost, recalc-publish, adjustment-publish]
+        revealNodes: [pricing-db]
+        revealCalls: [route-calculated-outbox, publish-route-calculated, pricing-subscribe]
+        duration: 6000
+      - id: revenue-step-3
+        title: "Settlement & Reporting Consumption"
+        narrative: >
+          The **TripCostCalculatedEvent** fans out to two independent consumers on
+          the `routing-and-pricing` ASB topic. **Settlement EP** receives the event
+          and calculates **BC/PD/PM** -- Bill Client (district invoice amount), Pay
+          Driver (driver compensation), Pay Monitor (ride monitor pay). The event is
+          self-contained with all settlement-relevant data -- no cross-service queries
+          needed. **Reporting EP** materializes pricing analytics: cost trends per
+          district, rule effectiveness metrics, contract utilization rates. For
+          recalculations, Settlement adjusts the existing settlement record using the
+          CostDifference from **TripCostRecalculatedEvent**. For manual adjustments,
+          the **TripCostAdjustedEvent** includes AuthorizedBy for compliance audit.
+          {color:red|These three events collectively drive every dollar that flows through
+          the platform -- from district billing to driver paychecks.}
+        activeCalls: [settlement-subscribe, reporting-subscribe]
+        revealNodes: [settlement-ep, reporting-ep]
+        revealCalls: [pricing-calculate, tripcost-outbox, publish-tripcost]
+        duration: 5000

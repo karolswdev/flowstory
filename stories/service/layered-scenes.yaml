@@ -1,0 +1,149 @@
+id: layered-scenes
+title: "Layered Architecture — Multi-Scene Layout"
+renderer: service-flow
+schemaVersion: "2.0"
+description: >-
+  Demonstrates layout scenes: the ingress layer flows horizontally (LR),
+  while the domain layer spawns vertically (TB) beneath it.
+
+services:
+  # Ingress layer (LR)
+  - id: client
+    name: Mobile App
+    type: client
+  - id: gateway
+    name: API Gateway
+    type: gateway
+  - id: auth
+    name: Auth Service
+    type: firewall
+
+  # Domain layer (TB)
+  - id: order-agg
+    name: Order Aggregate
+    type: aggregate
+    substates: [idle, validating, confirmed, failed]
+    initialSubstate: idle
+  - id: payment-svc
+    name: Payment Service
+    type: api
+  - id: inventory
+    name: Inventory Service
+    type: api
+  - id: order-db
+    name: Order Store
+    type: database
+
+queues:
+  - id: events
+    name: Domain Events
+    type: topic
+    broker: kafka
+
+scenes:
+  - id: ingress
+    direction: LR
+    members: [client, gateway, auth]
+  - id: domain
+    direction: TB
+    members: [order-agg, payment-svc, inventory, order-db, events]
+
+calls:
+  - id: client-to-gw
+    type: sync
+    from: client
+    to: gateway
+    method: POST
+    path: /api/orders
+  - id: gw-to-auth
+    type: sync
+    from: gateway
+    to: auth
+    method: POST
+    path: /verify
+  - id: gw-to-order
+    type: sync
+    from: gateway
+    to: order-agg
+    method: POST
+    path: /orders
+    critical: true
+  - id: order-to-payment
+    type: sync
+    from: order-agg
+    to: payment-svc
+    method: POST
+    path: /charge
+    coupling: tight
+    critical: true
+  - id: order-to-inventory
+    type: sync
+    from: order-agg
+    to: inventory
+    method: POST
+    path: /reserve
+  - id: order-to-db
+    type: sync
+    from: order-agg
+    to: order-db
+    method: PUT
+    path: /persist
+  - id: order-emit
+    type: publish
+    from: order-agg
+    to: events
+    messageType: OrderConfirmed
+
+zones:
+  - id: ingress-zone
+    label: Ingress Layer
+    members: [client, gateway, auth]
+  - id: domain-zone
+    label: Domain Layer
+    members: [order-agg, payment-svc, inventory, order-db]
+
+steps:
+  - id: step-1
+    title: "Client Request"
+    narrative: >-
+      The **Mobile App** sends a `POST /api/orders` request
+      through the {color:amber|API Gateway}.
+    activeCalls: [client-to-gw]
+    focusNodes: [client, gateway]
+
+  - id: step-2
+    title: "Authentication"
+    narrative: >-
+      Gateway verifies the request with the {color:rose|Auth Service}
+      before forwarding downstream.
+    activeCalls: [gw-to-auth]
+    focusNodes: [gateway, auth]
+
+  - id: step-3
+    title: "Into the Domain"
+    narrative: >-
+      The gateway routes the validated request to the
+      {color:indigo|Order Aggregate} — crossing from the
+      **ingress scene** (LR) into the **domain scene** (TB).
+    activeCalls: [gw-to-order]
+    focusNodes: [gateway, order-agg]
+    substates:
+      order-agg: validating
+
+  - id: step-4
+    title: "Domain Processing"
+    narrative: >-
+      The Order Aggregate orchestrates {color:red|payment} and
+      {color:blue|inventory} checks in the vertical domain layer.
+    activeCalls: [order-to-payment, order-to-inventory]
+    focusNodes: [order-agg, payment-svc, inventory]
+    substates:
+      order-agg: confirmed
+
+  - id: step-5
+    title: "Persist & Emit"
+    narrative: >-
+      Order is persisted to the {color:stone|database} and an
+      {color:orange|OrderConfirmed} event is published.
+    activeCalls: [order-to-db, order-emit]
+    focusNodes: [order-agg, order-db, events]

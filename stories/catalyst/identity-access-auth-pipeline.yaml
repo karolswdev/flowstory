@@ -1,0 +1,574 @@
+id: identity-access-auth-pipeline
+title: "Identity & Access — Authentication Pipeline & Tenant Provisioning"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  The Identity & Access bounded context implements ADR-014's dual pattern: CQRS (MediatR)
+  for synchronous admin operations completing within HTTP timeout, and Conductor task workflows
+  for asynchronous multi-step sagas requiring compensation. FusionAuth serves as the primary
+  identity provider with Azure AD B2C federation for enterprise SSO. Tenant provisioning
+  orchestrates database creation, default role seeding, and activation through a Conductor saga
+  with full compensation rollback. The transactional outbox (R076) ensures domain events reach
+  the `identity-and-access` ASB topic reliably.
+
+sections:
+  # -- Section 1: Authentication & Token Pipeline ------------------------------------
+  - renderer: service-flow
+    title: "Authentication & Token Management"
+    accentColor: "#7C3AED"
+    layout: sequence
+
+    services:
+      - id: identity-api
+        name: "Identity & Access API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: identity-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: fusionauth
+        name: "FusionAuth"
+        type: external
+        technology: "FusionAuth IdP"
+        status: healthy
+      - id: azure-ad
+        name: "Azure AD B2C"
+        type: external
+        technology: "Azure AD B2C"
+        status: healthy
+      - id: redis
+        name: "Redis"
+        type: cache
+        technology: "Redis"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+
+    zones:
+      - id: identity-core
+        label: "Identity & Access"
+        members: [identity-api, identity-db, redis]
+        color: "rgba(124, 58, 237, 0.06)"
+      - id: idp-federation
+        label: "Identity Providers"
+        members: [fusionauth, azure-ad]
+        color: "rgba(245, 158, 11, 0.06)"
+      - id: events-zone
+        label: "Event Bus"
+        members: [asb]
+        color: "rgba(34, 197, 94, 0.06)"
+
+    calls:
+      - id: token-refresh
+        type: sync
+        from: identity-api
+        to: fusionauth
+        method: POST
+        path: /v1/tokens/refresh
+        protocol: http
+        duration: 80
+        description: "TokenController delegates to ITokenService.RefreshTokenAsync — AllowAnonymous, validates refresh token with FusionAuth and returns new JWT pair"
+      - id: token-validate
+        type: sync
+        from: identity-api
+        to: fusionauth
+        method: POST
+        path: /v1/tokens/validate
+        protocol: http
+        duration: 50
+        description: "ITokenService.ValidateTokenAsync — validates JWT signature, expiry, and tenant_id claim extraction"
+      - id: token-revoke
+        type: sync
+        from: identity-api
+        to: redis
+        method: POST
+        path: /v1/tokens/revoke
+        protocol: http
+        duration: 30
+        description: "ITokenRevocationService.RevokeTokenAsync — stores JTI in Redis for revocation check. Also supports revoke-all-user-tokens via /revoke-user/{userId}"
+      - id: revoke-check
+        type: sync
+        from: identity-api
+        to: redis
+        method: GET
+        path: /v1/tokens/status/{jti}
+        protocol: http
+        duration: 10
+        description: "IsTokenRevokedAsync — O(1) Redis lookup by JTI. If Redis is down, revoked tokens may be accepted until natural expiry"
+      - id: azure-authorize
+        type: sync
+        from: identity-api
+        to: azure-ad
+        method: POST
+        path: /v1/identity/azure-ad/authorize
+        protocol: http
+        duration: 120
+        description: "IAzureAdB2CService.GetAuthorizationUrlAsync — generates OAuth2 authorization URL for enterprise SSO redirect (AllowAnonymous)"
+      - id: azure-callback
+        type: sync
+        from: identity-api
+        to: azure-ad
+        method: POST
+        path: /v1/identity/azure-ad/callback
+        protocol: http
+        duration: 250
+        description: "ExchangeCodeForTokensAsync + ProvisionUserAsync — exchanges authorization code, JIT provisions user in Catalyst if not exists, maps AD groups to Catalyst roles"
+      - id: azure-group-sync
+        type: sync
+        from: identity-api
+        to: azure-ad
+        method: POST
+        path: /v1/identity/azure-ad/groups/sync
+        protocol: http
+        duration: 300
+        description: "SyncUserGroupsToRolesAsync — synchronizes Azure AD group memberships to Catalyst role assignments (SYSTEM_ADMIN/DISTRICT_ADMIN only)"
+      - id: permission-cache
+        type: sync
+        from: identity-api
+        to: redis
+        method: POST
+        path: "IPermissionCacheInvalidator"
+        protocol: http
+        duration: 15
+        description: "PermissionCacheInvalidator flushes cached permission lookups when roles or permissions change"
+
+    steps:
+      - id: auth-step-1
+        title: "FusionAuth Token Lifecycle"
+        narrative: >
+          The **TokenController** (`v1/tokens`, 7 endpoints) manages the JWT lifecycle through
+          two infrastructure services: **ITokenService** (validate, refresh, introspect) backed
+          by **FusionAuthService**, and **ITokenRevocationService** (revoke, revoke-all, status-check)
+          backed by Redis. Token refresh and validation are `[AllowAnonymous]` — the refresh token
+          itself is the credential. Introspection and revocation require `SYSTEM_ADMIN` or
+          `DISTRICT_ADMIN` roles. Every authenticated request across all 15 BCs carries a JWT with a
+          `tenant_id` claim extracted by the shared **TenantIdClaimTransformer** — this is Layer 1
+          of the three-layer tenant isolation defense model.
+
+          {color:red|Risk: Token revocation depends entirely on Redis (Risk #5). If Redis is unavailable,
+          revoked tokens remain valid until natural expiry. No fallback mechanism exists.}
+
+          {color:green|Good: Token operations are separated from user CRUD — the TokenController owns
+          the full token lifecycle independently of MediatR command/query handlers.}
+        activeCalls: [token-refresh, token-validate, token-revoke, revoke-check]
+        revealNodes: [identity-api, fusionauth, redis]
+        duration: 5000
+
+      - id: auth-step-2
+        title: "Azure AD B2C Federation & JIT Provisioning"
+        narrative: >
+          The **AzureAdB2CController** (`v1/identity/azure-ad`, 7 endpoints) enables enterprise SSO
+          via **IAzureAdB2CService** implemented by **AzureAdB2CService**. The flow begins with
+          `POST /authorize` generating an OAuth2 authorization URL using the tenant's
+          **AzureAdB2CTenantConfig** (nested VO inside **TenantConfiguration** — AzureTenantId,
+          ClientId, SignInPolicy, DomainHints). The callback endpoint (`POST /callback`) exchanges
+          the authorization code for tokens and performs JIT (Just-In-Time) user provisioning:
+          if the Azure AD user doesn't exist in Catalyst, **ProvisionUserAsync** creates the
+          **User** aggregate with `User.Create(id, tenantId, email, fusionAuthUserId, correlationId)`.
+
+          Group-to-role mapping (`POST /groups/map`) configures which Azure AD groups map to which
+          Catalyst roles. Group sync (`POST /groups/sync`) then reconciles memberships — adding
+          or removing **RoleAssignedEvent** / **RoleRevokedEvent** domain events as needed. The
+          **IdentityProviderConfiguration** VO (`Domain/ValueObjects/IdentityProviderConfiguration.cs`)
+          holds ProviderType (FusionAuth, AzureAdB2C, SAML, OIDC), FederationEnabled flag,
+          GroupToRoleMapping dictionary, and JIT provisioning flags.
+
+          {color:blue|Cross-ref: FusionAuth role sync handled by RoleAssignedEventHandler and
+          RoleRevokedEventHandler in Application/Handlers/ — eventual consistency between Catalyst
+          and FusionAuth (Risk #3).}
+        activeCalls: [azure-authorize, azure-callback, azure-group-sync]
+        revealNodes: [azure-ad]
+        revealCalls: [token-refresh, token-validate, token-revoke, revoke-check]
+        duration: 6000
+
+      - id: auth-step-3
+        title: "Permission Model & Cross-BC Authorization"
+        narrative: >
+          The authorization model uses a `{resource}:{action}` permission format with wildcard
+          support — `*:*` grants superadmin access, `{resource}:*` grants all actions on a resource.
+          12 system roles (SYSTEM_ADMIN through READ_ONLY) are seeded via
+          `Role.CreateSystemRole(id, name, description)` with `TenantId = Guid.Empty`. Custom
+          tenant roles use `Role.CreateCustomRole(id, tenantId, name, description)`. Each permission
+          assignment via **RolePermission** carries a **DataScope** (Global, Tenant, Assigned, Self)
+          controlling data visibility.
+
+          The **InternalPermissionsController** (`v1/internal/permissions`, 3 endpoints) serves M2M
+          permission lookups — `GetPermissionCodesForRolesAsync` and `GetPermissionsWithScopesForRolesAsync`
+          enable other BCs to resolve user permissions without direct database access.
+          {color:red|Risk: These endpoints are `[AllowAnonymous]`, secured only by Kubernetes network
+          policy (Risk #2). If network policy is misconfigured, permission lookups are unauthenticated.}
+
+          **PermissionCacheInvalidator** (Redis-backed) flushes cached lookups when roles or permissions
+          change, ensuring cross-BC authorization checks reflect the latest state. The **Permission**
+          aggregate (`Domain/Aggregates/Permission.cs`, 274 lines) uses `TenantId = Guid.Empty` —
+          permissions are global, not tenant-scoped.
+
+          {color:green|Good: Hierarchical scope model (Global > Tenant > Assigned > Self) prevents
+          privilege escalation — a DISTRICT_ADMIN with Tenant scope cannot grant Global scope.}
+        activeCalls: [permission-cache]
+        revealCalls: [azure-authorize, azure-callback, azure-group-sync]
+        duration: 5000
+
+      - id: auth-step-4
+        title: "API Key Security & Machine-to-Machine Access"
+        narrative: >
+          The **ApiKey** entity (`Domain/Entities/ApiKey.cs`, 441 lines) provides M2M authentication
+          with SHA-256 hashed storage — plaintext is returned exactly once from
+          `ApiKey.Create()` which returns `(ApiKey Entity, string PlaintextKey)`. Key format:
+          `catalyst_{tenantPrefix4}_{random32chars}`. The **ApiKeyController** (`v1/identity/api-keys`,
+          6 endpoints) supports full lifecycle: create, list, get, revoke, by-user lookup, and
+          validate. Validation (`POST /validate`) is `[AllowAnonymous]` — it hashes the presented
+          key and compares against stored hashes.
+
+          Each API key carries **ApiKeyScope** VOs (`ValueObjects/ApiKeyScope.cs`) combining
+          **ApiKeyScopeType** (ReadOnly, ReadWrite, Admin) with **ResourceType** (All, or one of
+          13 BC-specific resources: EnrollmentDemand through IncidentsSafety). The scope hierarchy
+          is: Admin >= ReadWrite >= ReadOnly. `HasScope()`, `HasReadAccess()`, `HasWriteAccess()`,
+          `HasAdminAccess()` methods enforce hierarchical authorization.
+
+          The **CreateApiKeyCommand** handler returns **ApiKeyCreatedDto** containing the plaintext
+          key. The **RevokeApiKeyCommand** records `RevokedAt`, `RevokedByUserId`, and
+          `RevocationReason` — raising **ApiKeyRevokedEvent** for audit trail. Optional expiration
+          via `ExpiresAt` with `IsExpired()` runtime check and `LastUsedAt` tracking for key rotation.
+
+          {color:green|Good: SHA-256 hashed storage with single-exposure plaintext follows security
+          best practices. Scoped access prevents M2M keys from exceeding their intended permissions.}
+        activeCalls: []
+        revealCalls: [permission-cache]
+        duration: 5000
+
+  # -- Section 2: Tenant Provisioning & User Onboarding Sagas ----------------------
+  - renderer: service-flow
+    title: "Conductor Sagas: Tenant Provisioning & User Onboarding"
+    accentColor: "#F59E0B"
+    layout: sequence
+
+    services:
+      - id: identity-api
+        name: "Identity & Access API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: identity-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: conductor
+        name: "Conductor"
+        type: workflow
+        technology: "Orkes Conductor"
+        status: healthy
+      - id: fusionauth
+        name: "FusionAuth"
+        type: external
+        technology: "FusionAuth IdP"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+      - id: redis
+        name: "Redis"
+        type: cache
+        technology: "Redis"
+        status: healthy
+
+    zones:
+      - id: identity-core
+        label: "Identity & Access"
+        members: [identity-api, identity-db]
+        color: "rgba(124, 58, 237, 0.06)"
+      - id: orchestration
+        label: "Saga Orchestration"
+        members: [conductor, redis]
+        color: "rgba(245, 158, 11, 0.06)"
+      - id: external-zone
+        label: "External Systems"
+        members: [fusionauth, asb]
+        color: "rgba(34, 197, 94, 0.06)"
+
+    calls:
+      - id: create-tenant-api
+        type: sync
+        from: identity-api
+        to: conductor
+        method: POST
+        path: /v1/tenants
+        protocol: http
+        duration: 100
+        description: "CreateTenantCommand triggers tenant-provisioning-workflow in Conductor — async saga with 4 task workers"
+      - id: validate-tenant
+        type: sync
+        from: conductor
+        to: identity-api
+        method: POST
+        path: "ValidateTenantRequestTask"
+        protocol: http
+        duration: 50
+        description: "Validates tenant creation input — name length, contact format via CreateTenantCommandValidator"
+      - id: create-tenant-aggregate
+        type: sync
+        from: conductor
+        to: identity-db
+        method: POST
+        path: "CreateTenantTask"
+        protocol: http
+        duration: 120
+        description: "Creates Tenant aggregate via Tenant.Create(id, name, contactEmail, contactPhone, correlationId) — initial status Pending. Self-referential: TenantId = id"
+      - id: create-default-roles
+        type: sync
+        from: conductor
+        to: identity-db
+        method: POST
+        path: "CreateDefaultRoleTask"
+        protocol: http
+        duration: 150
+        description: "Seeds 12 system roles for the new tenant — SYSTEM_ADMIN through READ_ONLY via Role.CreateSystemRole()"
+      - id: activate-tenant
+        type: sync
+        from: conductor
+        to: identity-db
+        method: POST
+        path: "ActivateTenantTask"
+        protocol: http
+        duration: 80
+        description: "Transitions tenant Pending -> Active. State machine: Pending -> Active -> Suspended -> Inactive (permanent)"
+      - id: notify-tenant-created
+        type: publish
+        from: conductor
+        to: asb
+        messageType: "TenantCreatedEvent"
+        description: "NotifyTenantCreatedTask publishes TenantCreatedEvent via transactional outbox to identity-and-access ASB topic"
+      - id: tenant-compensation
+        type: sync
+        from: conductor
+        to: identity-db
+        method: POST
+        path: "tenant-provisioning-compensation-workflow"
+        protocol: http
+        duration: 200
+        description: "Compensation saga: rolls back tenant creation, deletes seeded roles, logs failure for admin review"
+      - id: create-user-api
+        type: sync
+        from: identity-api
+        to: conductor
+        method: POST
+        path: "/v1/identity/users (via onboarding)"
+        protocol: http
+        duration: 80
+        description: "User creation can trigger user-onboarding-workflow for full saga with FusionAuth + Catalyst + role + invitation"
+      - id: validate-user
+        type: sync
+        from: conductor
+        to: identity-api
+        method: POST
+        path: "ValidateUserRequestTask"
+        protocol: http
+        duration: 40
+        description: "Validates email regex (100 char max), non-empty TenantId, role existence"
+      - id: create-fusionauth-user
+        type: sync
+        from: conductor
+        to: fusionauth
+        method: POST
+        path: "CreateFusionAuthUserTask"
+        protocol: http
+        duration: 200
+        description: "Creates user in FusionAuth IdP — returns fusionAuthUserId for domain user linkage"
+      - id: create-domain-user
+        type: sync
+        from: conductor
+        to: identity-db
+        method: POST
+        path: "CreateDomainUserTask"
+        protocol: http
+        duration: 100
+        description: "User.Create(id, tenantId, email, fusionAuthUserId, correlationId) — creates User aggregate with Active status"
+      - id: assign-role
+        type: sync
+        from: conductor
+        to: identity-db
+        method: POST
+        path: "AssignRoleToUserTask"
+        protocol: http
+        duration: 60
+        description: "Assigns initial role to user via User.AssignRole() — raises RoleAssignedEvent"
+      - id: send-invitation
+        type: sync
+        from: conductor
+        to: fusionauth
+        method: POST
+        path: "SendInvitationEmailTask"
+        protocol: http
+        duration: 150
+        description: "Triggers invitation email through FusionAuth email templates"
+      - id: publish-user-created
+        type: publish
+        from: conductor
+        to: asb
+        messageType: "UserCreatedEvent"
+        description: "PublishUserCreatedEventTask publishes UserCreatedEvent via transactional outbox to identity-and-access ASB topic"
+      - id: user-compensation-fa
+        type: sync
+        from: conductor
+        to: fusionauth
+        method: DELETE
+        path: "DeleteFusionAuthUserTask"
+        protocol: http
+        duration: 100
+        description: "Compensation: deletes user from FusionAuth if downstream steps fail"
+      - id: user-compensation-db
+        type: sync
+        from: conductor
+        to: identity-db
+        method: DELETE
+        path: "DeleteDomainUserTask"
+        protocol: http
+        duration: 60
+        description: "Compensation: deletes domain user from Catalyst DB"
+      - id: notify-failure
+        type: sync
+        from: conductor
+        to: identity-api
+        method: POST
+        path: "NotifyOnboardingFailureTask"
+        protocol: http
+        duration: 80
+        description: "Compensation: notifies administrators of onboarding failure with error details"
+
+    steps:
+      - id: saga-step-1
+        title: "Tenant Provisioning Saga (4 Tasks + Compensation)"
+        narrative: >
+          Tenant creation follows the Conductor saga pattern (ADR-014). The **TenantController**
+          (`v1/tenants`, 6 endpoints, `[Authorize(Roles = "SYSTEM_ADMIN")]`) initiates the
+          `tenant-provisioning-workflow` defined in `src/workflows/identity-access/tenant-provisioning-workflow.json`.
+          The saga executes 4 task workers sequentially:
+
+          1. **ValidateTenantRequestTask** — validates input via **CreateTenantCommandValidator**
+          (name length, contact email format, contact phone format).
+
+          2. **CreateTenantTask** — creates the **Tenant** aggregate (`Domain/Aggregates/Tenant.cs`,
+          548 lines) in `Pending` status via `Tenant.Create()`. The tenant is self-referential:
+          `TenantId = id`. Raises **TenantCreatedEvent**.
+
+          3. **CreateDefaultRoleTask** — seeds the 12 system roles for the new tenant. System roles
+          use `Role.CreateSystemRole()` with `TenantId = Guid.Empty` (global). The **TenantConfiguration**
+          VO (`ValueObjects/TenantConfiguration.cs`) holds TimeZone, Branding, NotificationSettings,
+          FeatureFlags, and BusinessHours.
+
+          4. **ActivateTenantTask** — transitions `Pending` -> `Active`. The tenant state machine is
+          strict: `Pending -> Active -> Suspended -> Inactive`. {color:red|Deactivation is PERMANENT —
+          throws TENANT_PERMANENTLY_INACTIVE if reactivation is attempted.}
+
+          {color:green|Good: Full compensation workflow (`tenant-provisioning-compensation-workflow.json`)
+          rolls back all steps if any task fails — no orphaned tenants.}
+        activeCalls: [create-tenant-api, validate-tenant, create-tenant-aggregate, create-default-roles, activate-tenant, notify-tenant-created]
+        revealNodes: [identity-api, identity-db, conductor, asb]
+        duration: 7000
+
+      - id: saga-step-2
+        title: "User Onboarding Saga (6 Tasks + Dual Compensation)"
+        narrative: >
+          User onboarding is the most complex saga in Identity & Access — the
+          `user-onboarding-workflow` (`src/workflows/identity-access/user-onboarding-workflow.json`)
+          coordinates FusionAuth and Catalyst DB with 6 task workers from the 14 total registered
+          in `Application/Tasks/`:
+
+          1. **ValidateUserRequestTask** — email regex validation (100 char max), TenantId presence,
+          role existence check.
+
+          2. **CreateFusionAuthUserTask** — creates user in FusionAuth IdP, returns
+          `fusionAuthUserId`. This is the critical external call — if it succeeds but later steps
+          fail, the **DeleteFusionAuthUserTask** compensation rolls it back.
+
+          3. **CreateDomainUserTask** — `User.Create(id, tenantId, email, fusionAuthUserId, correlationId)`
+          creates the **User** aggregate (`Domain/Aggregates/User.cs`, 458 lines) with `Active` status.
+          Compensation: **DeleteDomainUserTask** removes the domain user.
+
+          4. **AssignRoleToUserTask** — `User.AssignRole()` assigns the initial role, raising
+          **RoleAssignedEvent**. The **RoleAssignedEventHandler** (`Application/Handlers/`) syncs
+          the role to FusionAuth {color:blue|(eventual consistency — Risk #3)}.
+
+          5. **SendInvitationEmailTask** — triggers invitation email through FusionAuth templates.
+
+          6. **PublishUserCreatedEventTask** — publishes **UserCreatedEvent** via the transactional
+          outbox to the `identity-and-access` ASB topic.
+
+          {color:green|Good: Dual compensation path — DeleteFusionAuthUserTask and DeleteDomainUserTask
+          ensure no orphaned users across systems. NotifyOnboardingFailureTask alerts admins.}
+        activeCalls: [create-user-api, validate-user, create-fusionauth-user, create-domain-user, assign-role, send-invitation, publish-user-created]
+        revealNodes: [fusionauth]
+        revealCalls: [create-tenant-api, validate-tenant, create-tenant-aggregate, create-default-roles, activate-tenant, notify-tenant-created]
+        duration: 7000
+
+      - id: saga-step-3
+        title: "Compensation & Failure Handling"
+        narrative: >
+          Each primary workflow has a matching compensation workflow — 6 JSON definitions total
+          in `src/workflows/identity-access/`:
+
+          **Tenant provisioning compensation** (`tenant-provisioning-compensation-workflow.json`):
+          Rolls back tenant creation, deletes seeded roles, and logs the failure. Since the tenant
+          aggregate starts in `Pending` status, downstream BCs have not yet consumed any events —
+          clean rollback with no cross-BC impact.
+
+          **User onboarding compensation** (`user-onboarding-compensation-workflow.json`): Executes
+          **DeleteFusionAuthUserTask** to remove the IdP user, **DeleteDomainUserTask** to remove
+          the Catalyst user, and **NotifyOnboardingFailureTask** to alert administrators. The
+          compensation order matters — FusionAuth deletion first prevents the user from authenticating
+          while cleanup proceeds.
+
+          **User deactivation** (`user-deactivation-workflow.json` + compensation): Multi-step
+          deactivation through `User.Deactivate()` raising **UserDeactivatedEvent**. The soft-delete
+          pattern means no physical deletion — `UserStatus.Inactive` blocks login but preserves
+          audit trail. Reactivation via `User.Activate()` raises **UserReactivatedEvent**.
+
+          {color:red|All 14 Conductor task workers use Redis-based WorkerIdempotencyService for
+          exactly-once processing — critical for compensation correctness.}
+        activeCalls: [tenant-compensation, user-compensation-fa, user-compensation-db, notify-failure]
+        revealCalls: [create-fusionauth-user, create-domain-user, assign-role, send-invitation, publish-user-created]
+        duration: 6000
+
+      - id: saga-step-4
+        title: "ADR-014 Pattern Selection Decision Tree"
+        narrative: >
+          ADR-014 establishes clear criteria for choosing between the two patterns:
+
+          **Use CQRS (MediatR)** when ALL conditions apply: operation completes within HTTP timeout
+          (~30s), immediate response required (admin UI), rollback is DB-only, no parallel execution
+          needed. This covers 28 command handlers and 20+ query handlers — user CRUD, role management,
+          permission management, preferences, API key lifecycle, audit log queries.
+
+          **Use Conductor Tasks** when ANY condition applies: operation may exceed HTTP timeout,
+          multi-step workflow with compensation needs, parallel execution benefits, progress
+          visibility required, external system coordination (FusionAuth + Catalyst DB). This covers
+          the 3 primary workflows (user onboarding, tenant provisioning, user deactivation) with
+          14 task workers.
+
+          {color:green|In practice, the split is clean: 48 MediatR handlers for synchronous admin
+          operations, 14 Conductor task workers for distributed sagas. No overlap or ambiguity.}
+
+          The 6 validators (**CreateUserCommandValidator**, **UpdateUserCommandValidator**,
+          **InviteUserCommandValidator**, **CreateTenantCommandValidator**, **UpdateTenantCommandValidator**,
+          **DeactivateTenantCommandValidator**) gate the MediatR pipeline — FluentValidation runs
+          before the handler, preventing invalid data from reaching domain logic. Conductor tasks
+          duplicate some validation (e.g., **ValidateUserRequestTask**) because saga steps execute
+          outside the MediatR pipeline.
+
+          {color:blue|Cross-ref: This BC has NO EventProcessor project — all inbound event handling
+          is via 3 Application-layer handlers (UserCreated, RoleAssigned, RoleRevoked) and Conductor
+          task workers. This is by design per ADR-014.}
+        activeCalls: []
+        revealCalls: [tenant-compensation, user-compensation-fa, user-compensation-db, notify-failure]
+        duration: 5000

@@ -1,0 +1,400 @@
+id: trip-ops-generation-engine
+title: "Trip Operations — Generation Engine & Dual Pattern"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  The nightly generation engine and the architectural pattern that governs Trip
+  Operations' execution model. From the Conductor-orchestrated SGR workflow,
+  through the 6-step TripGenerationApplicationService algorithm, to the dual
+  CQRS + Conductor decision that splits real-time from batch processing. Three
+  perspectives: orchestration, algorithm, and pattern rationale.
+
+sections:
+  # ── Section 1: Pipeline — SGR Conductor Workflow ───────────────────
+  - renderer: pipeline
+    title: "SGR Pipeline"
+    accentColor: "#F59E0B"
+
+    pipeline:
+      name: "sgr-generation-workflow"
+      trigger:
+        type: schedule
+        scheduledTime: "Day-5 @ 9PM local"
+      status: success
+      duration: 600000
+
+    stages:
+      - id: stage-init
+        name: Initialize
+      - id: stage-generate
+        name: Generate
+        needs: [stage-init]
+      - id: stage-complete
+        name: Complete
+        needs: [stage-generate]
+      - id: stage-publish
+        name: Publish
+        needs: [stage-complete]
+      - id: stage-compensate
+        name: Compensation
+
+    jobs:
+      - id: create-sgr
+        stage: stage-init
+        name: CreateSgrInstanceTask
+        status: success
+        duration: 200
+      - id: gen-trips
+        stage: stage-generate
+        name: GenerateSubscriptionTripsTask
+        status: success
+        duration: 300000
+        needs: [create-sgr]
+      - id: complete-sgr
+        stage: stage-complete
+        name: CompleteSgrTask
+        status: success
+        duration: 100
+        needs: [gen-trips]
+      - id: publish-event
+        stage: stage-publish
+        name: PublishSgrCompletionTask
+        status: success
+        duration: 50
+        needs: [complete-sgr]
+      - id: fail-sgr
+        stage: stage-compensate
+        name: FailSgrCompensationTask
+        status: failed
+
+    steps:
+      - id: pipe-trigger
+        title: "Nightly Trigger — Day-5 at 9 PM"
+        narrative: "The Conductor scheduler fires **sgr-generation-workflow** at 9 PM local time, generating trips for Day+5. This gives the **Assignment** engine 5 full days to match drivers to VRs. Manual trigger via `POST v1/sgr/trigger` is available for reruns."
+        activeJobs: []
+        duration: 4000
+
+      - id: pipe-init
+        title: "CreateSgrInstanceTask — Birth"
+        narrative: "The first Conductor task creates the **ScheduledGenerationRun** aggregate with `targetDate` and `tenantId`. The SGR state machine transitions `Queued` to `Running`. This task is idempotent — re-running creates a new SGR with a fresh ID."
+        activeJobs: [create-sgr]
+        duration: 4000
+
+      - id: pipe-generate
+        title: "GenerateSubscriptionTripsTask — The Core"
+        narrative: "The heavyweight task. Invokes **TripGenerationApplicationService** with its 6-step algorithm and 8 repository dependencies. For 500K daily trips across multiple tenants, this can run for 5-10 minutes. Conductor provides timeout (30 min) and retry (3x exponential backoff)."
+        activeJobs: [gen-trips]
+        duration: 5000
+
+      - id: pipe-complete
+        title: "CompleteSgrTask + PublishSgrCompletionTask"
+        narrative: "**CompleteSgrTask** records the metrics (VRs created, PTs created, conflicts detected, execution duration) and transitions SGR to `Completed`. Then **PublishSgrCompletionTask** fires **SgrCompletedEvent** — Assignment's trigger for batch matching."
+        activeJobs: [complete-sgr, publish-event]
+        duration: 4000
+
+      - id: pipe-compensation
+        title: "Compensation — Failure Path"
+        narrative: "If any task fails, the compensation workflow transitions SGR to `Failed` with a `FailureReason` string. **SgrFailedEvent** fires, which Monitoring consumes to create a {color:red|P1 PagerDuty alert}. The atomic commit in **GenerateSubscriptionTripsTask** means *no partial VRs or PTs are left behind*."
+        activeJobs: [fail-sgr]
+        duration: 4000
+
+      - id: pipe-bridge
+        title: "Inside the Algorithm"
+        narrative: "**GenerateSubscriptionTripsTask** is a thin wrapper. The real logic lives in **TripGenerationApplicationService** — a 435-line application service with 8 repository dependencies and a 6-step pipeline. Let's trace the algorithm."
+        activeJobs: [gen-trips]
+        duration: 3000
+
+  # ── Section 2: Service Flow — TripGenerationApplicationService ─────
+  - renderer: service-flow
+    title: "Generation Algorithm"
+    accentColor: "#22C55E"
+    layout: sequence
+
+    services:
+      - id: conductor
+        name: Conductor Worker
+        type: worker
+        technology: "GenerateSubscriptionTripsTask"
+        status: healthy
+
+      - id: gen-service
+        name: TripGenerationApplicationService
+        type: api
+        technology: "435 LOC, 8 repos"
+        status: healthy
+
+      - id: calendar-repo
+        name: CalendarExclusionRepo
+        type: database
+        technology: "6 ExclusionTypes"
+        status: healthy
+
+      - id: sr-repo
+        name: SubscriptionRunRepo
+        type: database
+        technology: "DaysOfWeekBitmask"
+        status: healthy
+
+      - id: cep-repo
+        name: CEP Repository
+        type: database
+        technology: "Eligibility check"
+        status: healthy
+
+      - id: vr-repo
+        name: VR Repository
+        type: database
+        technology: "Duplicate check"
+        status: healthy
+
+      - id: pt-repo
+        name: PT Repository
+        type: database
+        technology: "Batch insert"
+        status: healthy
+
+      - id: uow
+        name: UnitOfWork
+        type: database
+        technology: "Atomic commit"
+        status: healthy
+
+    calls:
+      - id: invoke-gen
+        type: sync
+        from: conductor
+        to: gen-service
+        method: INVOKE
+        path: "GenerateTripsForDateAsync(tenantId, targetDate)"
+        duration: 300000
+
+      - id: check-calendar
+        type: sync
+        from: gen-service
+        to: calendar-repo
+        method: QUERY
+        path: "IsDateExcludedAsync(tenantId, targetDate)"
+        duration: 5
+
+      - id: fetch-srs
+        type: sync
+        from: gen-service
+        to: sr-repo
+        method: QUERY
+        path: "GetActiveForDate(targetDate) + DaysOfWeekBitmask filter"
+        duration: 50
+
+      - id: check-eligibility
+        type: sync
+        from: gen-service
+        to: cep-repo
+        method: QUERY
+        path: "IsStudentEligible(studentId)"
+        duration: 20
+
+      - id: create-vrs
+        type: sync
+        from: gen-service
+        to: vr-repo
+        method: INSERT
+        path: "1:1 from SR — placeholder stop IDs"
+        duration: 100
+
+      - id: create-pts
+        type: sync
+        from: gen-service
+        to: pt-repo
+        method: INSERT
+        path: "N per VR, TripOrigin.ScheduledGeneration"
+        duration: 200
+
+      - id: atomic-commit
+        type: sync
+        from: gen-service
+        to: uow
+        method: COMMIT
+        path: "VRs + PTs + outbox events (single txn)"
+        duration: 50
+
+    steps:
+      - id: gen-entry
+        title: "Step 1 — Calendar Exclusion Gate"
+        narrative: "First check: is the target date excluded? 6 exclusion types — `Holiday`, `DistrictClosure`, `SchoolBreak`, `TeacherWorkDay`, `WeatherClosure`, `Custom`. Weekends are also excluded. If the date is excluded, the pipeline {color:green|short-circuits with zero VRs/PTs}."
+        activeCalls: [invoke-gen, check-calendar]
+        duration: 4000
+
+      - id: gen-fetch
+        title: "Step 2 — Active SubscriptionRun Filter"
+        narrative: "Query all **SubscriptionRuns** where `status=Active`, `effectiveStartDate <= targetDate <= effectiveEndDate`, AND **DaysOfWeekBitmask** matches the target day (M=1, T=2, W=4, Th=8, F=16, Sa=32, Su=64). Also check **CEP** eligibility for each student."
+        activeCalls: [fetch-srs, check-eligibility]
+        duration: 5000
+
+      - id: gen-create-vr
+        title: "Step 3 — Create VehicleRuns (1:1 from SR)"
+        narrative: "Each active **SubscriptionRun** produces exactly one **VehicleRun**. The VR is created with placeholder stop IDs (`SubscriptionTrip.Id` as temporary `PassengerTripId`). A duplicate check prevents re-generating VRs for the same SR + targetDate combination."
+        activeCalls: [create-vrs]
+        duration: 4000
+
+      - id: gen-create-pt
+        title: "Step 4 — Create PTs + Back-Patch Stops"
+        narrative: "Each **SubscriptionTrip** within the SR becomes a **PassengerTrip** (`TripOrigin.ScheduledGeneration`). After PT creation, the VR's stops are back-patched: `WithPassengerTripId(realPtId)` replaces the placeholder IDs using *immutable copy-with-change semantics*."
+        activeCalls: [create-pts]
+        duration: 5000
+
+      - id: gen-commit
+        title: "Step 5 — Conflict Detection + Atomic Commit"
+        narrative: "Pairwise conflict detection scans all PTs per student for time-window overlaps. Overlap <30 min = `Warning`, >=30 min = `Critical`. Then a *single atomic commit* writes all VRs, PTs, and **transactional outbox** events in one PostgreSQL transaction. O(SR x ST + PT^2) per student for conflicts."
+        activeCalls: [atomic-commit]
+        duration: 5000
+
+      # BRIDGE → Dual Pattern
+      - id: gen-bridge
+        title: "Why Conductor for This?"
+        narrative: "This 6-step pipeline can run for 10+ minutes for 500K trips. It *can't* live in an HTTP request handler. But the driver boarding a student? That's sub-100ms. Trip Operations uses both patterns — and **ADR-008** documents exactly when to use which."
+        activeCalls: []
+        duration: 3000
+
+  # ── Section 3: Service Flow — Dual CQRS + Conductor Pattern ────────
+  - renderer: service-flow
+    title: "Dual Pattern (ADR-008)"
+    accentColor: "#A855F7"
+    layout: sequence
+
+    services:
+      - id: http-client
+        name: HTTP Client
+        type: external
+        technology: "Trip HQ / Driver App"
+
+      - id: mediatr
+        name: MediatR Pipeline
+        type: api
+        technology: "ICommandHandler<T>"
+        status: healthy
+
+      - id: domain-agg
+        name: Domain Aggregate
+        type: worker
+        technology: "VR/PT State Machine"
+        status: healthy
+
+      - id: trip-db
+        name: trip_operations DB
+        type: database
+        technology: "PostgreSQL"
+        status: healthy
+
+      - id: conductor-server
+        name: Conductor Server
+        type: external
+        technology: "Orkes Conductor"
+
+      - id: task-workers
+        name: "22 Task Workers"
+        type: worker
+        technology: "IWorkflowTask"
+        status: healthy
+
+      - id: compensation
+        name: Compensation
+        type: worker
+        technology: "Rollback workflows"
+        status: degraded
+
+    queues:
+      - id: asb-out
+        name: trip-operations
+        type: topic
+        broker: servicebus
+        consumers: 7
+
+    calls:
+      - id: sync-request
+        type: sync
+        from: http-client
+        to: mediatr
+        method: POST
+        path: "v1/pt/{id}/board (or /dropoff, /start)"
+        protocol: http
+        duration: 35
+        status: 200
+
+      - id: sync-domain
+        type: sync
+        from: mediatr
+        to: domain-agg
+        method: INVOKE
+        path: "Guard → Mutate → Event"
+        duration: 1
+
+      - id: sync-persist
+        type: sync
+        from: mediatr
+        to: trip-db
+        method: COMMIT
+        path: "State + outbox event"
+        duration: 8
+
+      - id: sync-publish
+        type: publish
+        from: mediatr
+        to: asb-out
+        messageType: "PtBoardedEvent / PtDroppedOffEvent"
+
+      - id: async-trigger
+        type: sync
+        from: http-client
+        to: conductor-server
+        method: POST
+        path: "sgr-generation-workflow (returns workflow ID)"
+        protocol: http
+        duration: 100
+        status: 202
+
+      - id: async-dispatch
+        type: sync
+        from: conductor-server
+        to: task-workers
+        method: POLL
+        path: "22 workers polling for tasks"
+        duration: 300000
+
+      - id: async-compensate
+        type: sync
+        from: conductor-server
+        to: compensation
+        method: INVOKE
+        path: "Rollback on failure"
+        duration: 1000
+
+    steps:
+      - id: dual-decision
+        title: "The Decision Rule (ADR-008)"
+        narrative: "Use **MediatR** when ALL apply: completes within HTTP timeout, immediate response required, rollback is DB-only. Use **Conductor** when ANY apply: may exceed timeout, multi-step with compensation, progress visibility required, external system coordination."
+        activeCalls: []
+        duration: 5000
+
+      - id: dual-sync
+        title: "Sync Path — MediatR"
+        narrative: "Driver boards a student: `POST v1/pt/{id}/board` → MediatR handler → `PassengerTrip.BoardPassenger()` validates `ATPU` → `ONBOARD` via **PtStateMachine** → `SaveChanges` (state + outbox) → {color:green|HTTP 200}. The driver's app gets instant confirmation."
+        activeCalls: [sync-request, sync-domain, sync-persist, sync-publish]
+        duration: 5000
+
+      - id: dual-async
+        title: "Async Path — Conductor"
+        narrative: "Nightly SGR: `POST v1/sgr/trigger` → returns workflow ID (`HTTP 202`). Conductor dispatches 4 sequential tasks to the 22 registered workers. **GenerateSubscriptionTripsTask** runs for 5-10 minutes creating hundreds of VRs and PTs. Progress is visible in the Conductor UI."
+        activeCalls: [async-trigger, async-dispatch]
+        duration: 5000
+
+      - id: dual-compensation
+        title: "Why Conductor? — Compensation & Durability"
+        narrative: "If **GenerateSubscriptionTripsTask** fails mid-batch, Conductor runs the compensation workflow: SGR → `Failed`, **SgrFailedEvent** → Monitoring P1 alert. The atomic commit ensures *no partial VRs exist*. Conductor retries with exponential backoff. {color:red|MediatR can't do this — it has no durability beyond the HTTP request}."
+        activeCalls: [async-compensate]
+        duration: 5000
+
+      - id: dual-complete
+        title: "Both Patterns, One BC"
+        narrative: "Trip Operations uses both patterns simultaneously. During the operational day: hundreds of MediatR commands per minute (state transitions, GPS, offers). At night: one Conductor workflow creates tomorrow's trips. *The critical real-time path is never delayed by batch workload*."
+        activeCalls: [sync-request, sync-domain, sync-persist, async-trigger, async-dispatch]
+        focusNodes: [http-client, mediatr, conductor-server]
+        duration: 5000

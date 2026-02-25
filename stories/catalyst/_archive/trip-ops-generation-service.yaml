@@ -1,0 +1,377 @@
+id: trip-ops-generation-service
+title: "TripGenerationApplicationService — The 6-Step Nightly Engine"
+description: >
+  The PRODUCTION implementation of ITripGenerationService — the 6-step algorithm inside
+  GenerateSubscriptionTripsTask that transforms SubscriptionRun templates into live
+  VehicleRuns and PassengerTrips every night. Calendar exclusion gating, active SR
+  bitmask filtering, VR/PT creation, stop-to-PT linkage, and pairwise conflict detection.
+  This is what runs inside the Conductor workflow — the domain service that creates tomorrow's trips.
+renderer: service-flow
+schemaVersion: "2.0"
+layout: sequence
+
+services:
+  - id: conductor-task
+    name: GenerateSubscriptionTripsTask
+    type: workflow
+    technology: "Conductor Task Worker"
+    status: healthy
+
+  - id: gen-service
+    name: TripGenerationApplicationService
+    type: worker
+    technology: ".NET 10 — ITripGenerationService"
+    status: healthy
+
+  - id: calendar-repo
+    name: CalendarExclusionRepository
+    type: database
+    technology: "PostgreSQL — calendar_exclusions"
+
+  - id: sr-repo
+    name: SubscriptionRunRepository
+    type: database
+    technology: "PostgreSQL — subscription_runs"
+
+  - id: st-repo
+    name: SubscriptionTripRepository
+    type: database
+    technology: "PostgreSQL — subscription_trips"
+
+  - id: cep-repo
+    name: CEP Repository
+    type: database
+    technology: "PostgreSQL (cross-BC HTTP)"
+
+  - id: vr-factory
+    name: VehicleRun Factory
+    type: worker
+    technology: "Domain Aggregate — VehicleRun.cs (980 LOC)"
+    status: healthy
+
+  - id: pt-factory
+    name: PassengerTrip Factory
+    type: worker
+    technology: "Domain Aggregate — PassengerTrip.cs (600+ LOC)"
+    status: healthy
+
+  - id: conflict-detector
+    name: Conflict Detection
+    type: worker
+    technology: "TripConflict VO — pairwise O(PT²)"
+    status: healthy
+
+  - id: trip-ops-db
+    name: trip_operations DB
+    type: database
+    technology: "PostgreSQL 16 — BATCH INSERT"
+
+  - id: outbox
+    name: outbox_messages
+    type: database
+    technology: "Transactional Outbox"
+
+zones:
+  - id: domain-zone
+    label: "Domain Layer (zero dependencies)"
+    members: [vr-factory, pt-factory, conflict-detector]
+    color: "rgba(5, 150, 105, 0.06)"
+  - id: infra-zone
+    label: "Infrastructure — Repositories"
+    members: [calendar-repo, sr-repo, st-repo, cep-repo, trip-ops-db, outbox]
+    color: "rgba(59, 130, 246, 0.05)"
+
+calls:
+  # Step 0: Conductor dispatches
+  - id: conductor-dispatch
+    type: sync
+    from: conductor-task
+    to: gen-service
+    method: INVOKE
+    path: "GenerateTripsForDateAsync(tenantId, targetDate, ct)"
+    duration: 600000
+    status: ok
+    note: "Up to 10 min. Returns GenerationResult { VehicleRunsCreated, PassengerTripsCreated, Conflicts, Duration }"
+
+  # Step 1: Calendar exclusion check
+  - id: check-exclusions
+    type: sync
+    from: gen-service
+    to: calendar-repo
+    method: SELECT
+    path: "IsDateExcludedAsync(tenantId, targetDate)"
+    duration: 8
+    status: ok
+    note: "Checks: weekends (M-F only), Holiday, DistrictClosure, SchoolBreak, TeacherWorkDay, WeatherClosure, Custom"
+
+  # Step 2: Active SubscriptionRuns
+  - id: fetch-active-srs
+    type: sync
+    from: gen-service
+    to: sr-repo
+    method: SELECT
+    path: "GetActiveForDateAsync(tenantId, targetDate)"
+    duration: 45
+    status: ok
+    note: "IsActiveForDate: Status==Active, EffectiveStartDate ≤ target ≤ EffectiveEndDate, DaysOfWeekBitmask matches (M=1,T=2,W=4,Th=8,F=16)"
+
+  # Step 2b: Subscription trips per SR
+  - id: fetch-sts
+    type: sync
+    from: gen-service
+    to: st-repo
+    method: SELECT
+    path: "GetBySubscriptionRunIds(srIds)"
+    duration: 120
+    status: ok
+    note: "All SubscriptionTrips across active SRs. Each ST = 1 student route template with pickup/dropoff coords + times."
+
+  # Step 2c: CEP eligibility check
+  - id: check-cep
+    type: sync
+    from: gen-service
+    to: cep-repo
+    method: SELECT
+    path: "ValidateCepEligibilityAsync(studentIds)"
+    duration: 85
+    status: ok
+    note: "Cross-BC: verify each student's CEP is Active. Inactive CEPs skip trip creation (no error — graceful omission)."
+
+  # Step 3: Create VehicleRuns
+  - id: create-vrs
+    type: sync
+    from: gen-service
+    to: vr-factory
+    method: INVOKE
+    path: "VehicleRun.Create(tenantId, srId, scheduledDate, startTime, endTime, stops)"
+    duration: 200
+    status: ok
+    note: "1:1 SR → VR mapping. Stops created from SubscriptionTrips with placeholder PassengerTripIds. VehicleRunCreatedEvent raised."
+
+  # Step 4: Create PassengerTrips
+  - id: create-pts
+    type: sync
+    from: gen-service
+    to: pt-factory
+    method: INVOKE
+    path: "PassengerTrip.Create(tenantId, vrId, studentId, pickup, dropoff, origin: ScheduledGeneration)"
+    duration: 350
+    status: ok
+    note: "N PTs per VR (one per student). TripOrigin=ScheduledGeneration. PassengerTripCreatedEvent raised per PT."
+
+  # Step 5: Link stops to PTs
+  - id: link-stops
+    type: sync
+    from: gen-service
+    to: vr-factory
+    method: INVOKE
+    path: "VehicleRun.LinkStopsBySubscriptionTripId(ptLookup)"
+    duration: 15
+    status: ok
+    note: "Back-patch: Stop.WithPassengerTripId(realPtId) replaces placeholder GUIDs. Immutable — returns new Stop instances."
+
+  # Step 6: Conflict detection
+  - id: detect-conflicts
+    type: sync
+    from: gen-service
+    to: conflict-detector
+    method: INVOKE
+    path: "DetectConflicts(passengerTrips) — pairwise per student"
+    duration: 180
+    status: ok
+    note: "O(PT²) per student. ±15 min overlap window. Warning <30 min, Critical ≥30 min. Does NOT block trip creation."
+
+  # Atomic commit
+  - id: atomic-commit
+    type: sync
+    from: gen-service
+    to: trip-ops-db
+    method: "BATCH INSERT"
+    path: "VRs + PTs + Stops (JSONB) + domain events → outbox_messages"
+    duration: 2500
+    status: ok
+    note: "Single atomic transaction: all VRs, all PTs, all outbox events. Rollback on any failure."
+
+  # Outbox events
+  - id: outbox-write
+    type: sync
+    from: gen-service
+    to: outbox
+    method: INSERT
+    path: "VehicleRunCreatedEvent × N + PassengerTripCreatedEvent × M + SgrCompletedEvent"
+    duration: 50
+    status: ok
+    note: "Same transaction as batch insert. Events published AFTER commit by background relay."
+
+  # Return result
+  - id: return-result
+    type: sync
+    from: gen-service
+    to: conductor-task
+    method: RESPONSE
+    path: "GenerationResult { VehicleRunsCreated, PassengerTripsCreated, Conflicts[], Duration }"
+    duration: 1
+    status: ok
+    note: "Conductor records metrics in SGR aggregate via CompleteSgrTask."
+
+steps:
+  - id: step-1
+    title: "Conductor Invokes the Generation Engine"
+    narrative: >
+      GenerateSubscriptionTripsTask — the second Conductor task in the sgr-generation-workflow —
+      calls TripGenerationApplicationService.GenerateTripsForDateAsync(). This is the PRODUCTION
+      implementation of ITripGenerationService (the Domain layer stub is DEPRECATED and not registered
+      in DI). The service has 8 repository dependencies and implements a deterministic 6-step pipeline.
+    activeCalls:
+      - conductor-dispatch
+    focusNodes: [conductor-task, gen-service]
+    duration: 5500
+    narration:
+      speaker: Architecture Lead
+      message: "The domain stub (504 LOC) documents the algorithm. The application service (8 repositories) executes it. Clean Architecture in action."
+
+  - id: step-2
+    title: "Step 1 — Calendar Exclusion Gate"
+    narrative: >
+      The first gate: IsDateExcludedAsync checks if the target date should be skipped.
+      Six exclusion types: Holiday, DistrictClosure, SchoolBreak, TeacherWorkDay,
+      WeatherClosure, Custom. Weekends are always excluded (M-F only). If excluded,
+      the service returns GenerationResult.Empty — zero VRs, zero PTs, zero errors.
+      This is not a failure — it's a graceful skip.
+    activeCalls:
+      - check-exclusions
+    focusNodes: [gen-service, calendar-repo]
+    duration: 5500
+    narration:
+      speaker: Domain Expert
+      message: "Snow day? Holiday? District closure? The calendar exclusion gate catches it before any expensive work begins. ExclusionType has 6 values — all checked."
+
+  - id: step-3
+    title: "Step 2 — Active SubscriptionRun Query"
+    narrative: >
+      Fetch all SubscriptionRuns where: Status==Active, EffectiveStartDate ≤ targetDate ≤ EffectiveEndDate,
+      AND DaysOfWeekBitmask matches the target day (Monday=1, Tuesday=2, Wednesday=4, Thursday=8, Friday=16).
+      The bitmask is an int — bitwise AND determines if this SR runs on the target day-of-week. Then load all
+      SubscriptionTrips across those SRs — each ST is a student's recurring pickup/dropoff template. Finally,
+      validate each student's CEP eligibility — inactive CEPs are silently omitted (not errors).
+    activeCalls:
+      - fetch-active-srs
+      - fetch-sts
+      - check-cep
+    focusNodes: [gen-service, sr-repo, st-repo, cep-repo]
+    duration: 6500
+    narration:
+      speaker: Architect
+      message: "DaysOfWeekBitmask: Monday=1, Tuesday=2, Wednesday=4. A Tuesday-Thursday SR has bitmask=10 (2+8). Bitwise AND with target day = instant filtering."
+
+  - id: step-4
+    title: "Step 3 — Create VehicleRuns from Templates"
+    narrative: >
+      For each active SubscriptionRun, create one VehicleRun via VehicleRun.Create().
+      The VR is initialized in NEW state with ScheduledDate, ScheduledStartTime, ScheduledEndTime,
+      DispatchAreaId, and a Stops collection built from the SR's SubscriptionTrips. At this point,
+      Stop.PassengerTripId contains placeholder GUIDs — the real PTs don't exist yet.
+      VehicleRunCreatedEvent is raised per VR.
+    activeCalls:
+      - create-vrs
+    focusNodes: [gen-service, vr-factory]
+    duration: 5500
+    narration:
+      speaker: Domain Expert
+      message: "1:1 mapping — one SubscriptionRun becomes one VehicleRun. Stops created with placeholder PT IDs. The real linkage happens in Step 5."
+
+  - id: step-5
+    title: "Step 4 — Create PassengerTrips with CEP Validation"
+    narrative: >
+      For each SubscriptionTrip with a valid CEP, create a PassengerTrip via PassengerTrip.Create().
+      TripOrigin = ScheduledGeneration. Each PT carries denormalized pickup/dropoff coordinates,
+      scheduled times, and StudentId. PassengerTripCreatedEvent is raised per PT.
+      The PT is created in NEW state — no VehicleRunId assignment yet (that's Assignment BC's job).
+      But the VR already has Stop VOs pointing at SubscriptionTripIds for later back-patching.
+    activeCalls:
+      - create-pts
+    focusNodes: [gen-service, pt-factory]
+    duration: 5500
+    narration:
+      speaker: Architecture Lead
+      message: "N PTs per VR — one per enrolled student. TripOrigin.ScheduledGeneration distinguishes SGR-created from AdHoc and Rescue trips."
+
+  - id: step-6
+    title: "Step 5 — Back-Patch Stop-to-PT Linkage"
+    narrative: >
+      The critical back-patch: VehicleRun.LinkStopsBySubscriptionTripId() matches each Stop's
+      original SubscriptionTripId to the newly-created PassengerTrip. Stop.WithPassengerTripId(realPtId)
+      returns a new immutable Stop record — the placeholder GUID is replaced with the real PT ID.
+      This is why Stop is an immutable record with copy-with-change semantics — we never mutate, we replace.
+    activeCalls:
+      - link-stops
+    focusNodes: [gen-service, vr-factory]
+    duration: 5500
+    narration:
+      speaker: Architect
+      message: "WithPassengerTripId() returns a NEW Stop instance. The VR.Stops collection is rebuilt with the real PT IDs. Immutability guarantees audit trail integrity."
+
+  - id: step-7
+    title: "Step 6 — Conflict Detection (Pairwise)"
+    narrative: >
+      Group all newly-created PTs by StudentId. For each student with 2+ trips, run pairwise
+      overlap detection: does Pickup1 < Dropoff2 AND Pickup2 < Dropoff1? The overlap window
+      is ±15 minutes. Severity: Warning if overlap < 30 min, Critical if ≥ 30 min. Conflicts
+      produce TripConflict VOs (StudentId, Pt1Id, Pt2Id, OverlapWindow, Severity) and are REPORTED
+      but do NOT block trip creation. SgrConflictDetectedEvent fires for monitoring.
+    activeCalls:
+      - detect-conflicts
+    focusNodes: [gen-service, conflict-detector]
+    duration: 6000
+    narration:
+      speaker: Domain Expert
+      message: "O(PT²) per student — but students rarely have >3 trips, so it's effectively O(N). Conflicts are warnings, not blockers."
+
+  - id: step-8
+    title: "Atomic Commit — VRs + PTs + Events"
+    narrative: >
+      The entire batch — all VehicleRuns, all PassengerTrips, all outbox events — commits in
+      a single PostgreSQL transaction. If ANY insert fails, EVERYTHING rolls back. The outbox_messages
+      table receives VehicleRunCreatedEvent × N, PassengerTripCreatedEvent × M, and SgrCompletedEvent.
+      A background relay publishes these to ASB after the transaction commits.
+      GenerationResult returns to Conductor with VehicleRunsCreated, PassengerTripsCreated, Conflicts, Duration.
+    activeCalls:
+      - atomic-commit
+      - outbox-write
+      - return-result
+    focusNodes: [gen-service, trip-ops-db, outbox, conductor-task]
+    duration: 6000
+    narration:
+      speaker: Architecture Lead
+      message: "Single atomic transaction. 500K trip records. All or nothing. The transactional outbox guarantees event delivery after commit."
+
+  - id: step-9
+    title: "The Complete 6-Step Generation Engine"
+    narrative: >
+      Calendar exclusion gate → active SR bitmask filtering → VR creation (1:1 from SR) →
+      PT creation (N per VR, CEP-validated) → back-patch stop-to-PT linkage (immutable copy-with-change) →
+      pairwise conflict detection → atomic commit with transactional outbox.
+      This pipeline runs every night for every tenant. For 500K daily trips, the generation
+      step (Step 3+4) dominates at ~10 minutes. Steps 1-2 are sub-second. Step 5-6 are O(N).
+      The result flows back to Conductor → CompleteSgrTask → SgrCompletedEvent → Assignment BC.
+    activeCalls:
+      - conductor-dispatch
+      - check-exclusions
+      - fetch-active-srs
+      - fetch-sts
+      - check-cep
+      - create-vrs
+      - create-pts
+      - link-stops
+      - detect-conflicts
+      - atomic-commit
+      - outbox-write
+      - return-result
+    duration: 7500
+    narration:
+      speaker: Architect
+      message: "The 6-step engine. Calendar gate → bitmask filter → VR creation → PT creation → stop linkage → conflict detection → atomic commit. Every night, every tenant."
+
+camera:
+  center: [0, 0]
+  zoom: 1

@@ -9,6 +9,7 @@ interface C4ContextCanvasProps {
   story: C4ContextStory;
   currentStepIndex: number;
   onStepChange?: (step: number) => void;
+  hideOverlay?: boolean;
 }
 
 interface PositionedElement {
@@ -194,10 +195,11 @@ function ExternalNodeSVG({ system, x, y, isHighlighted, isDimmed, delay }: {
 /**
  * C4ContextCanvas - Main canvas for C4 Context diagram visualization
  */
-export function C4ContextCanvas({ 
-  story, 
+export function C4ContextCanvas({
+  story,
   currentStepIndex,
-  onStepChange 
+  onStepChange,
+  hideOverlay = false,
 }: C4ContextCanvasProps) {
   const currentStep = story.steps[currentStepIndex] as C4ContextStep | undefined;
   
@@ -327,40 +329,44 @@ export function C4ContextCanvas({
         </AnimatePresence>
       </svg>
       
-      {/* Info panel */}
-      <AnimatePresence mode="wait">
-        {currentStep && (
-          <motion.div 
-            className="c4-context-info"
-            variants={fadeUp}
-            initial="initial"
-            animate="animate"
-            exit="exit"
-            transition={TRANSITION.default}
-            key={currentStepIndex}
-          >
-            <h3>{currentStep.title}</h3>
-            <p>{currentStep.description}</p>
-          </motion.div>
-        )}
-      </AnimatePresence>
-      
-      {/* Navigation */}
-      <div className="c4-context-nav">
-        <button 
-          onClick={() => onStepChange?.(Math.max(0, currentStepIndex - 1))}
-          disabled={currentStepIndex === 0}
-        >
-          ← Previous
-        </button>
-        <span>{currentStepIndex + 1} / {story.steps.length}</span>
-        <button 
-          onClick={() => onStepChange?.(Math.min(story.steps.length - 1, currentStepIndex + 1))}
-          disabled={currentStepIndex >= story.steps.length - 1}
-        >
-          Next →
-        </button>
-      </div>
+      {!hideOverlay && (
+        <>
+          {/* Info panel */}
+          <AnimatePresence mode="wait">
+            {currentStep && (
+              <motion.div
+                className="c4-context-info"
+                variants={fadeUp}
+                initial="initial"
+                animate="animate"
+                exit="exit"
+                transition={TRANSITION.default}
+                key={currentStepIndex}
+              >
+                <h3>{currentStep.title}</h3>
+                <p>{currentStep.description}</p>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Navigation */}
+          <div className="c4-context-nav">
+            <button
+              onClick={() => onStepChange?.(Math.max(0, currentStepIndex - 1))}
+              disabled={currentStepIndex === 0}
+            >
+              ← Previous
+            </button>
+            <span>{currentStepIndex + 1} / {story.steps.length}</span>
+            <button
+              onClick={() => onStepChange?.(Math.min(story.steps.length - 1, currentStepIndex + 1))}
+              disabled={currentStepIndex >= story.steps.length - 1}
+            >
+              Next →
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

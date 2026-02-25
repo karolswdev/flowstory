@@ -1,0 +1,189 @@
+id: ddd-order-domain
+title: "DDD Order Domain — Domain Model Showcase"
+renderer: service-flow
+schemaVersion: "2.0"
+description: "Demonstrates all 10 domain-level node types in a realistic Order bounded context"
+
+services:
+  - id: customer
+    name: Customer
+    type: actor
+    technology: Web App
+
+  - id: order-aggregate
+    name: Order
+    type: aggregate
+    technology: Domain Root
+
+  - id: order-line
+    name: OrderLine
+    type: value-object
+
+  - id: product
+    name: Product
+    type: entity
+    technology: Catalog BC
+
+  - id: order-placed
+    name: OrderPlaced
+    type: domain-event
+
+  - id: payment-collected
+    name: PaymentCollected
+    type: domain-event
+
+  - id: pricing-policy
+    name: PricingPolicy
+    type: policy
+    technology: Strategy Pattern
+
+  - id: order-repo
+    name: OrderRepository
+    type: repository
+    technology: PostgreSQL
+
+  - id: order-summary
+    name: OrderSummary
+    type: read-model
+    technology: Elasticsearch
+
+  - id: fulfillment-saga
+    name: FulfillmentSaga
+    type: saga
+    technology: Orchestrator
+
+  - id: order-context
+    name: Order Management
+    type: bounded-context
+
+zones:
+  - id: order-bc
+    label: Order Bounded Context
+    members: [order-aggregate, order-line, order-placed, payment-collected, pricing-policy, order-repo, order-summary]
+
+calls:
+  - id: place-order
+    type: sync
+    from: customer
+    to: order-aggregate
+    method: POST
+    path: /orders
+    coupling: tight
+    critical: true
+
+  - id: add-line
+    type: sync
+    from: order-aggregate
+    to: order-line
+    method: create
+    path: addLine()
+    coupling: tight
+
+  - id: check-product
+    type: sync
+    from: order-aggregate
+    to: product
+    method: GET
+    path: /products/{id}
+    coupling: loose
+
+  - id: apply-pricing
+    type: sync
+    from: order-aggregate
+    to: pricing-policy
+    method: evaluate
+    path: calculatePrice()
+    coupling: tight
+
+  - id: emit-placed
+    type: publish
+    from: order-aggregate
+    to: order-placed
+    messageType: OrderPlacedEvent
+
+  - id: persist-order
+    type: sync
+    from: order-aggregate
+    to: order-repo
+    method: save
+    path: save()
+    coupling: tight
+    critical: true
+
+  - id: project-summary
+    type: async
+    from: order-placed
+    to: order-summary
+    messageType: ProjectOrderSummary
+    coupling: eventual
+
+  - id: start-fulfillment
+    type: async
+    from: order-placed
+    to: fulfillment-saga
+    messageType: StartFulfillment
+    coupling: eventual
+
+  - id: saga-payment
+    type: publish
+    from: fulfillment-saga
+    to: payment-collected
+    messageType: CollectPayment
+
+  - id: context-boundary
+    type: async
+    from: order-context
+    to: fulfillment-saga
+    messageType: ContextIntegration
+    coupling: loose
+
+steps:
+  - id: step-1
+    title: "Customer Places Order"
+    narrative: >-
+      The **Customer** (actor) submits an order through the web app.
+      The {color:indigo|Order Aggregate} is the domain root that coordinates all order logic.
+    activeCalls: [place-order]
+    focusNodes: [customer, order-aggregate]
+
+  - id: step-2
+    title: "Aggregate Builds Order"
+    narrative: >-
+      The aggregate creates **OrderLine** {color:lime|value objects},
+      validates against the {color:sky|Product} entity,
+      and applies the {color:rose|PricingPolicy}.
+    activeCalls: [add-line, check-product, apply-pricing]
+    focusNodes: [order-aggregate, order-line, product, pricing-policy]
+
+  - id: step-3
+    title: "Persistence & Events"
+    narrative: >-
+      The aggregate persists via the {color:stone|Repository}
+      and emits an {color:amber|OrderPlaced} domain event.
+    activeCalls: [persist-order, emit-placed]
+    focusNodes: [order-aggregate, order-repo, order-placed]
+
+  - id: step-4
+    title: "Event-Driven Projections"
+    narrative: >-
+      The domain event drives the {color:cyan|OrderSummary} read model projection
+      and kicks off the {color:violet|FulfillmentSaga} orchestration.
+    activeCalls: [project-summary, start-fulfillment]
+    focusNodes: [order-placed, order-summary, fulfillment-saga]
+    camera:
+      zoom: 0.9
+      easing: ease-out
+      duration: 1200
+
+  - id: step-5
+    title: "Saga Orchestrates Payment"
+    narrative: >-
+      The {color:violet|FulfillmentSaga} orchestrates cross-BC coordination,
+      emitting a {color:amber|PaymentCollected} event.
+      The {color:emerald|Bounded Context} boundary is explicit.
+    activeCalls: [saga-payment, context-boundary]
+    focusNodes: [fulfillment-saga, payment-collected, order-context]
+    camera:
+      fitAll: true
+      duration: 1500
+      easing: ease-in-out

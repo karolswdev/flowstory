@@ -3,8 +3,8 @@
  * Based on SPEC-030
  */
 
-import { useMemo, useState } from 'react';
-import { StepOverlay } from '../shared';
+import { useMemo, useState, useCallback, useEffect } from 'react';
+import { StepOverlay, EdgeReadinessGate } from '../shared';
 import {
   ReactFlow,
   Background,
@@ -47,15 +47,20 @@ interface HttpFlowCanvasProps {
   story: HttpFlowStory;
   currentStepIndex?: number;
   className?: string;
+  hideOverlay?: boolean;
 }
 
 export function HttpFlowCanvas({
   story,
   currentStepIndex = 0,
   className = '',
+  hideOverlay = false,
 }: HttpFlowCanvasProps) {
   const [showHeaders, setShowHeaders] = useState(false);
   const [showBody, setShowBody] = useState(true);
+  const [edgesReady, setEdgesReady] = useState(false);
+  const onEdgesReady = useCallback(() => setEdgesReady(true), []);
+  useEffect(() => { setEdgesReady(false); }, [story.id]);
 
   // Get current step
   const currentStep = story.steps[currentStepIndex];
@@ -294,7 +299,7 @@ export function HttpFlowCanvas({
     >
       <ReactFlow
         nodes={nodes}
-        edges={edges}
+        edges={edgesReady ? edges : []}
         nodeTypes={nodeTypes}
         fitView
         fitViewOptions={{ padding: 0.3 }}
@@ -303,6 +308,7 @@ export function HttpFlowCanvas({
       >
         <Background color="#E0E0E0" gap={20} />
         <Controls />
+        <EdgeReadinessGate onReady={onEdgesReady} />
         <MiniMap
           nodeColor={(node) => {
             if (node.type === 'participant') return '#2196F3';
@@ -325,7 +331,7 @@ export function HttpFlowCanvas({
 
       </ReactFlow>
 
-      {currentStep && (
+      {!hideOverlay && currentStep && (
         <StepOverlay
           stepIndex={currentStepIndex}
           totalSteps={story.steps.length}

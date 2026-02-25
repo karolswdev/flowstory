@@ -1,0 +1,460 @@
+id: trip-operations-state-machines
+title: "Trip Operations — VR/PT/SGR State Machines"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  The complete state transition maps for Trip Operations' three state machines — the
+  16-state VehicleRun lifecycle (pre-dispatch offer pipeline through post-service settlement),
+  the 16-state PassengerTrip lifecycle (VR-synchronized through driver-action driven), and
+  the 5-state ScheduledGenerationRun batch lifecycle. Every transition is guarded by domain
+  invariants, emits domain events, and advances the revenue pipeline toward settlement.
+
+sections:
+  # ── Section 1: VR State Machine — The Dispatch-to-Settlement Highway ──
+  - renderer: service-flow
+    title: "VR 16-State Machine"
+    accentColor: "#059669"
+    layout: sequence
+
+    services:
+      - id: vr-aggregate
+        name: "VehicleRun Aggregate"
+        type: api
+        technology: "Domain/Aggregates/VehicleRun.cs (980 LOC)"
+        status: healthy
+      - id: vr-state-machine
+        name: "VrStateMachine"
+        type: api
+        technology: "Domain/StateMachines/VrStateMachine.cs (160 LOC)"
+        status: healthy
+      - id: trip-ops-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "trip_operations DB"
+        status: healthy
+      - id: asb-topic
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "trip-operations topic"
+        status: healthy
+      - id: fleet-engine
+        name: "Fleet Engine"
+        type: external
+        technology: "Google Fleet Engine (STUB)"
+        status: degraded
+      - id: assignment-bc
+        name: "Assignment BC"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: signalr-hub
+        name: "SignalR Hub"
+        type: api
+        technology: "TripOperationsHub"
+        status: healthy
+
+    zones:
+      - id: pre-dispatch-zone
+        label: "Pre-Dispatch Phase (6 states: NEW → OFFERACCEPTED)"
+        members: [vr-aggregate, vr-state-machine, assignment-bc]
+        color: "rgba(59, 130, 246, 0.06)"
+      - id: active-zone
+        label: "Active Trip Phase (3 states: TOSTOP, ATSTOP, BREAK)"
+        members: [fleet-engine, signalr-hub]
+        color: "rgba(245, 158, 11, 0.06)"
+      - id: post-trip-zone
+        label: "Post-Trip Phase (5 states: POSTSERVICE → ARCHIVED)"
+        members: [trip-ops-db, asb-topic]
+        color: "rgba(34, 197, 94, 0.06)"
+
+    calls:
+      - id: reserve-vr
+        type: subscribe
+        from: assignment-bc
+        to: vr-aggregate
+        messageType: "TripAssignedEvent"
+        description: "Assignment BC triggers Reserve(): NEW → RESERVED. Guards: DriverId + VehicleId required."
+      - id: offer-pipeline
+        type: sync
+        from: vr-aggregate
+        to: vr-state-machine
+        method: POST
+        path: "QueueOffer → SendOffer → ConfirmOffer → AcceptOffer"
+        duration: 200
+        description: "4-step offer pipeline. AcceptOffer guard: FleetEngineVehicleId required."
+      - id: accept-fleet
+        type: sync
+        from: vr-aggregate
+        to: fleet-engine
+        method: POST
+        path: "RegisterVehicle (STUB)"
+        duration: 100
+        description: "AcceptOffer requires FleetEngineVehicleId — currently returns mock ID from FakeFleetEngineService."
+      - id: dispatch-event
+        type: publish
+        from: vr-aggregate
+        to: asb-topic
+        messageType: "VrDispatchedEvent"
+        description: "Revenue-critical: starts driver pay clock. Contains FleetEngineVehicleId."
+      - id: stop-loop
+        type: sync
+        from: vr-aggregate
+        to: trip-ops-db
+        method: POST
+        path: "ArriveAtStop / DepartFromStop loop"
+        duration: 50
+        description: "TOSTOP ↔ ATSTOP cycle. Guard: driver GPS within 0.5 miles of stop. Emits StopArrivedEvent / StopDepartedEvent."
+      - id: break-transition
+        type: sync
+        from: vr-aggregate
+        to: vr-state-machine
+        method: POST
+        path: "StartBreak / EndBreak"
+        duration: 30
+        description: "TOSTOP → BREAK → TOSTOP. Driver break cycle within active trip phase."
+      - id: post-service-chain
+        type: sync
+        from: vr-aggregate
+        to: trip-ops-db
+        method: POST
+        path: "ValidateCompleteness → ValidateReadiness → Complete → Settle → Archive"
+        duration: 150
+        description: "5-step post-service chain. Completeness guard: all stops must be completed."
+      - id: vr-completed-event
+        type: publish
+        from: vr-aggregate
+        to: asb-topic
+        messageType: "VehicleRunCompletedEvent"
+        description: "Revenue-critical: triggers settlement workflow in Settlement BC."
+      - id: broadcast-state
+        type: async
+        from: asb-topic
+        to: signalr-hub
+        description: "VrStateChangedEvent self-consumed by EP, broadcast via SignalR to district-{tenantId} group."
+      - id: cancel-vr
+        type: sync
+        from: vr-aggregate
+        to: vr-state-machine
+        method: POST
+        path: "Cancel(reason)"
+        duration: 30
+        description: "Terminal: any of NEW through ATSTOP → CANCELLED. Emits VrCancelledEvent with reason + previous status."
+
+    steps:
+      - id: vr-step-1
+        title: "Reserve: Assignment Triggers VR Creation"
+        narrative: >
+          A VehicleRun starts in NEW when the SGR engine creates it from a SubscriptionRun template.
+          The Assignment BC publishes TripAssignedEvent, which triggers Reserve() — transitioning
+          NEW to RESERVED. The guard requires both DriverId and VehicleId to be non-null.
+        activeCalls: [reserve-vr]
+        revealNodes: [vr-aggregate, assignment-bc]
+        focusNodes: [vr-aggregate, assignment-bc]
+        duration: 3500
+
+      - id: vr-step-2
+        title: "Offer Pipeline: 4-Step Driver Acceptance"
+        narrative: >
+          From RESERVED, the VR enters a strict 4-step offer pipeline: QueueOffer (RESERVED to OFFERQUEUED),
+          SendOffer (to OFFERSENT), ConfirmOffer (to OFFERCONFIRMED), AcceptOffer (to OFFERACCEPTED).
+          The state machine in VrStateMachine.cs validates each transition. {color:red|AcceptOffer has
+          the strictest guard} — FleetEngineVehicleId must be present before the driver can begin.
+        activeCalls: [offer-pipeline, accept-fleet]
+        revealNodes: [vr-state-machine, fleet-engine]
+        revealCalls: [reserve-vr]
+        focusNodes: [vr-state-machine, fleet-engine]
+        duration: 4500
+
+      - id: vr-step-3
+        title: "Dispatch: Starting the Pay Clock"
+        narrative: >
+          AcceptOffer emits VrDispatchedEvent to the trip-operations ASB topic. This is
+          {color:red|revenue-critical} — it starts the driver pay clock and contains the
+          FleetEngineVehicleId. The event flows through the transactional outbox to downstream
+          consumers including Monitoring and Communications BCs.
+        activeCalls: [dispatch-event]
+        revealNodes: [asb-topic]
+        revealCalls: [offer-pipeline, accept-fleet]
+        focusNodes: [vr-aggregate, asb-topic]
+        duration: 3000
+
+      - id: vr-step-4
+        title: "Active Trip: TOSTOP ↔ ATSTOP Stop Cycle"
+        narrative: >
+          Start() transitions OFFERACCEPTED to TOSTOP, entering the active trip phase. ArriveAtStop()
+          moves TOSTOP to ATSTOP with a {color:green|GPS proximity guard} — the driver must be within
+          0.5 miles of the stop. DepartFromStop() returns to TOSTOP. Each stop is an immutable value
+          object using WithArrival()/WithDeparture() to produce new records rather than mutating state.
+        activeCalls: [stop-loop]
+        revealNodes: [trip-ops-db]
+        revealCalls: [reserve-vr, dispatch-event]
+        focusNodes: [vr-aggregate, trip-ops-db]
+        duration: 4500
+
+      - id: vr-step-5
+        title: "Break Cycle & Real-Time Broadcasting"
+        narrative: >
+          StartBreak()/EndBreak() allow TOSTOP to BREAK to TOSTOP for driver rest periods. Each
+          state change emits VrStateChangedEvent through the outbox. The EventProcessor self-consumes
+          these events and broadcasts them via SignalR to the district-{tenantId} group for
+          real-time dispatcher visibility.
+        activeCalls: [break-transition, broadcast-state]
+        revealNodes: [signalr-hub]
+        focusNodes: [signalr-hub, vr-state-machine]
+        duration: 3500
+
+      - id: vr-step-6
+        title: "Post-Service: Validation & Settlement Chain"
+        narrative: >
+          When the last stop departs, the VR enters POSTSERVICE — beginning a strict 5-step chain.
+          ValidateCompleteness() enforces {color:red|the hardest invariant}: all stops must have
+          IsCompleted = true. ValidateReadiness() confirms booking prerequisites. Complete() emits
+          VehicleRunCompletedEvent. Settle() records BC/PD/PM data. Archive() is the true terminal state.
+        activeCalls: [post-service-chain, vr-completed-event]
+        revealCalls: [stop-loop, break-transition, broadcast-state]
+        focusNodes: [vr-aggregate, trip-ops-db, asb-topic]
+        duration: 5000
+
+      - id: vr-step-7
+        title: "Cancellation: The Escape Hatch"
+        narrative: >
+          Cancel(reason) transitions any state from NEW through ATSTOP to CANCELLED (terminal).
+          It emits VrCancelledEvent with PreviousStatus and CancellationReason. {color:green|Post-service
+          states cannot be cancelled} — once a VR enters the settlement pipeline, it must complete
+          to preserve revenue integrity.
+        activeCalls: [cancel-vr]
+        revealCalls: [post-service-chain, vr-completed-event]
+        focusNodes: [vr-aggregate, vr-state-machine]
+        duration: 3000
+
+  # ── Bridge ──
+  - renderer: service-flow
+    title: "PT 16-State Machine & SGR Lifecycle"
+    accentColor: "#8B5CF6"
+    layout: sequence
+
+    services:
+      - id: pt-aggregate
+        name: "PassengerTrip Aggregate"
+        type: api
+        technology: "Domain/Aggregates/PassengerTrip.cs (1033 LOC)"
+        status: healthy
+      - id: pt-state-machine
+        name: "PtStateMachine"
+        type: api
+        technology: "Domain/StateMachines/PtStateMachine.cs (159 LOC)"
+        status: healthy
+      - id: vr-sync
+        name: "VehicleRun (Parent)"
+        type: api
+        technology: "SyncStateFromVehicleRun()"
+        status: healthy
+      - id: driver-mdd
+        name: "Driver MDD"
+        type: external
+        technology: "Mobile Data Device"
+        status: healthy
+      - id: pt-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "trip_operations DB"
+        status: healthy
+      - id: pt-asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "trip-operations topic"
+        status: healthy
+      - id: settlement-bc
+        name: "Settlement BC"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: sgr-aggregate
+        name: "ScheduledGenerationRun"
+        type: api
+        technology: "Domain/Aggregates/ScheduledGenerationRun.cs (280 LOC)"
+        status: healthy
+
+    zones:
+      - id: pt-auto-sync
+        label: "VR-Synchronized Phase (auto: NEW → TOPU)"
+        members: [pt-aggregate, pt-state-machine, vr-sync]
+        color: "rgba(139, 92, 246, 0.06)"
+      - id: pt-driver-phase
+        label: "Driver-Action Phase (TOPU → POSTSERVICE)"
+        members: [driver-mdd, pt-db]
+        color: "rgba(245, 158, 11, 0.06)"
+      - id: pt-settlement-phase
+        label: "Settlement Phase (POSTSERVICE → SETTLED)"
+        members: [pt-asb, settlement-bc]
+        color: "rgba(34, 197, 94, 0.06)"
+      - id: sgr-zone
+        label: "SGR Batch Lifecycle (5 states)"
+        members: [sgr-aggregate]
+        color: "rgba(236, 72, 153, 0.06)"
+
+    calls:
+      - id: vr-sync-call
+        type: sync
+        from: vr-sync
+        to: pt-aggregate
+        method: POST
+        path: "SyncStateFromVehicleRun(vrStatus)"
+        duration: 10
+        description: "Automatic PT state sync: RESERVED→GROUPING, OFFERQUEUED→GROUPING, OFFERSENT→GROUPING, OFFERCONFIRMED→DISPATCHING, OFFERACCEPTED→ACCEPTED, TOSTOP→TOPU."
+      - id: arrive-pickup
+        type: sync
+        from: driver-mdd
+        to: pt-aggregate
+        method: POST
+        path: "v1/pt/{id}/arrive"
+        duration: 50
+        description: "Driver arrives at pickup: TOPU → ATPU. Records PickupArrivedAt timestamp + GPS."
+      - id: board-passenger
+        type: sync
+        from: driver-mdd
+        to: pt-aggregate
+        method: POST
+        path: "v1/pt/{id}/board"
+        duration: 50
+        description: "Student scans ID: ATPU → ONBOARD. Guard: StudentIdScanned must be true. Emits PtBoardedEvent."
+      - id: dropoff-passenger
+        type: sync
+        from: driver-mdd
+        to: pt-aggregate
+        method: POST
+        path: "v1/pt/{id}/dropoff"
+        duration: 50
+        description: "Student dropped off: ATDO → POSTSERVICE. Emits PtDroppedOffEvent (REVENUE-CRITICAL) with DriverId, ServiceProviderId, MonitorId."
+      - id: pt-dropoff-event
+        type: publish
+        from: pt-aggregate
+        to: pt-asb
+        messageType: "PtDroppedOffEvent"
+        description: "CRITICAL: Contains DriverId, ServiceProviderId, MonitorId for BC/PD/PM settlement. If lost, settlement cannot be calculated."
+      - id: settle-consume
+        type: subscribe
+        from: pt-asb
+        to: settlement-bc
+        messageType: "PtDroppedOffEvent"
+        description: "Settlement BC consumes to calculate Bill Client / Pay Driver / Pay Monitor."
+      - id: no-show
+        type: sync
+        from: driver-mdd
+        to: pt-aggregate
+        method: POST
+        path: "v1/pt/{id}/no-show"
+        duration: 30
+        description: "Terminal: ATPU → NOSHOW. Student absent at pickup. Emits PtNoShowEvent with reason + GPS."
+      - id: pt-cancel
+        type: sync
+        from: pt-aggregate
+        to: pt-state-machine
+        method: POST
+        path: "Cancel(reason)"
+        duration: 30
+        description: "Terminal: NEW through ATPU → CANCELLED. Post-ATPU states cannot be cancelled."
+      - id: sgr-lifecycle
+        type: sync
+        from: sgr-aggregate
+        to: pt-db
+        method: POST
+        path: "Create → Start → Complete|Fail|Cancel"
+        duration: 100
+        description: "SGR 5-state machine: Queued → Running → Completed|Failed|Cancelled."
+      - id: pt-post-chain
+        type: sync
+        from: pt-aggregate
+        to: pt-db
+        method: POST
+        path: "ValidateCompleteness → ValidateReadiness → Book → Settle"
+        duration: 120
+        description: "Post-service chain. Completeness guard: ActualPickupTime + ActualDropoffTime required."
+
+    steps:
+      - id: pt-step-1
+        title: "VR-Synchronized Phase: Automatic State Cascade"
+        narrative: >
+          A PassengerTrip starts in NEW when the SGR engine creates it. The first 6 state transitions
+          are {color:green|fully automatic} — driven by SyncStateFromVehicleRun(vrStatus). As the parent
+          VR moves through RESERVED, OFFERQUEUED, OFFERSENT, the PT mirrors to GROUPING, then
+          DISPATCHING at OFFERCONFIRMED, ACCEPTED at OFFERACCEPTED, and TOPU when the driver starts.
+        activeCalls: [vr-sync-call]
+        revealNodes: [pt-aggregate, pt-state-machine, vr-sync]
+        focusNodes: [vr-sync, pt-aggregate]
+        duration: 4000
+
+      - id: pt-step-2
+        title: "Arrive at Pickup: Driver Takes Control"
+        narrative: >
+          Once the PT reaches TOPU, control shifts from automatic VR sync to explicit driver actions
+          via the MDD. ArriveAtPickup() transitions TOPU to ATPU, recording the PickupArrivedAt
+          timestamp and GPS coordinates. This is the handoff point where the driver becomes
+          responsible for the student journey.
+        activeCalls: [arrive-pickup]
+        revealNodes: [driver-mdd, pt-db]
+        revealCalls: [vr-sync-call]
+        focusNodes: [driver-mdd, pt-aggregate]
+        duration: 3500
+
+      - id: pt-step-3
+        title: "Board & Transport: The Student Journey"
+        narrative: >
+          BoardPassenger() transitions ATPU to ONBOARD with {color:red|a critical guard: StudentIdScanned
+          must be true} — the student must physically scan their ID card. This emits PtBoardedEvent
+          consumed by Communications BC for parent notification. StartEnRouteToDropoff() moves to TODO,
+          then ArriveAtDropoff() reaches ATDO.
+        activeCalls: [board-passenger, dropoff-passenger]
+        focusNodes: [driver-mdd, pt-aggregate]
+        duration: 4500
+
+      - id: pt-step-4
+        title: "Dropoff: The Revenue-Critical Transition"
+        narrative: >
+          DropOffPassenger() at ATDO to POSTSERVICE is {color:red|the most revenue-critical transition
+          in the platform}. It emits PtDroppedOffEvent containing DriverId, ServiceProviderId, and
+          MonitorId — the three IDs Settlement BC needs for BC/PD/PM calculations. These IDs are
+          copied from the parent VR via UpdateSettlementData() to make the event self-contained.
+        activeCalls: [pt-dropoff-event]
+        revealNodes: [pt-asb]
+        revealCalls: [arrive-pickup, board-passenger, dropoff-passenger]
+        focusNodes: [pt-aggregate, pt-asb]
+        duration: 4000
+
+      - id: pt-step-5
+        title: "Post-Service Chain & Settlement"
+        narrative: >
+          The PT post-service chain mirrors the VR pattern. ValidateCompleteness() requires both
+          ActualPickupTime and ActualDropoffTime to be non-null. ValidateReadiness() confirms
+          settlement prerequisites. Book() finalizes the trip. Settle() is the {color:green|true
+          terminal state}. Settlement BC consumes PtDroppedOffEvent to calculate Bill Client,
+          Pay Driver, and Pay Monitor amounts.
+        activeCalls: [pt-post-chain, settle-consume]
+        revealNodes: [settlement-bc]
+        focusNodes: [pt-aggregate, settlement-bc]
+        duration: 5000
+
+      - id: pt-step-6
+        title: "Terminal Escapes: No-Show & Cancellation"
+        narrative: >
+          Two terminal escape hatches exist. RecordNoShow() transitions ATPU to NOSHOW for absent
+          students, emitting PtNoShowEvent with reason and GPS. Cancel() covers pre-ATPU cancellations.
+          {color:green|Post-ATPU states cannot be cancelled} — once a student is at the pickup
+          location, the trip must resolve via dropoff or no-show.
+        activeCalls: [no-show, pt-cancel]
+        revealCalls: [pt-post-chain, settle-consume]
+        focusNodes: [driver-mdd, pt-state-machine]
+        duration: 3500
+
+      - id: pt-step-7
+        title: "SGR 5-State Machine: Batch Generation"
+        narrative: >
+          The ScheduledGenerationRun aggregate (280 LOC) has the simplest state machine: 5 states
+          with 3 terminals. Create() initializes in Queued, Start() moves to Running. Complete()
+          records VehicleRunsCreated, PassengerTripsCreated, ConflictsDetected, and ExecutionDuration,
+          then emits SgrCompletedEvent for Assignment BC to begin driver matching.
+        activeCalls: [sgr-lifecycle]
+        revealNodes: [sgr-aggregate]
+        revealCalls: [no-show, pt-cancel]
+        focusNodes: [sgr-aggregate, pt-db]
+        duration: 5500

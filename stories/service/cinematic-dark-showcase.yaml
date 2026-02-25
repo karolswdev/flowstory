@@ -1,0 +1,618 @@
+id: cinematic-dark-showcase
+title: "Cinematic Dark Mode — Visual Showcase"
+description: >-
+  A premium visual showcase designed for the deep navy dark mode.
+  Exercises substates, coupling analysis, failure cascade, camera overrides,
+  zones, rich narration, and all 3 font tiers (DM Sans, Plus Jakarta Sans, JetBrains Mono).
+renderer: service-flow
+schemaVersion: "2.0"
+layout: sequence
+
+services:
+  # ── Ingestion Tier ──
+  - id: mobile-app
+    name: Mobile Client
+    type: client
+    technology: "React Native"
+    tags:
+      platform: iOS / Android
+      version: "6.2"
+
+  - id: cdn-waf
+    name: Edge Security
+    type: firewall
+    technology: "Cloudflare WAF"
+    status: healthy
+    tags:
+      rules: "2.4k active"
+
+  - id: api-lb
+    name: Load Balancer
+    type: load-balancer
+    technology: "Envoy"
+    tags:
+      algorithm: least-conn
+      region: us-east-1
+
+  # ── Core Platform ──
+  - id: trip-api
+    name: Trip Service
+    type: api
+    technology: "Go 1.22"
+    status: healthy
+    instances: 5
+    version: "3.8"
+    substates: [idle, validating, dispatching, monitoring, completed, failed]
+    initialSubstate: idle
+    tags:
+      SLA: "99.99%"
+      team: trip-ops
+      protocol: gRPC
+
+  - id: matching
+    name: Matching Engine
+    type: function
+    technology: "Rust Lambda"
+    substates: [idle, scoring, assigning]
+    initialSubstate: idle
+    tags:
+      p99: "12ms"
+      model: "v4.1"
+
+  - id: conductor
+    name: Trip Orchestrator
+    type: workflow
+    technology: "Temporal"
+    substates: [idle, running, waiting, compensating, completed]
+    initialSubstate: idle
+    tags:
+      team: platform
+
+  # ── Data Tier ──
+  - id: trip-db
+    name: Trip Store
+    type: database
+    technology: "PostgreSQL 16"
+    status: healthy
+    tags:
+      replicas: "3"
+      region: us-east-1
+
+  - id: geo-cache
+    name: Geo Cache
+    type: cache
+    technology: "Redis Cluster"
+    status: healthy
+    tags:
+      ttl: "30s"
+      entries: "8M"
+
+  - id: driver-store
+    name: Driver Index
+    type: storage
+    technology: "Elasticsearch"
+    tags:
+      shards: "12"
+      docs: "45k"
+
+  # ── Event Backbone ──
+  - id: event-bus
+    name: Event Stream
+    type: event-bus
+    technology: "Kafka"
+    status: healthy
+    tags:
+      partitions: "24"
+      throughput: "100k/s"
+
+  # ── Async Workers ──
+  - id: pricing
+    name: Pricing Engine
+    type: worker
+    technology: "Python 3.12"
+    substates: [idle, computing, complete]
+    initialSubstate: idle
+    tags:
+      model: surge-v2
+      team: revenue
+
+  - id: eta-service
+    name: ETA Predictor
+    type: external
+    technology: "Google Maps"
+    tags:
+      vendor: Google
+      quota: "50k/day"
+
+  - id: notifier
+    name: Notification Hub
+    type: worker
+    technology: "Node.js"
+    tags:
+      channels: "push, sms, email"
+      team: comms
+
+  - id: monitor
+    name: Live Dashboard
+    type: monitor
+    technology: "Grafana"
+    tags:
+      panels: "42"
+      refresh: "5s"
+
+  - id: compliance
+    name: Compliance Check
+    type: policy
+    technology: "OPA"
+    substates: [idle, evaluating, approved, denied]
+    initialSubstate: idle
+
+  - id: dispatch-human
+    name: Manual Review
+    type: human-task
+    technology: "Dispatch Console"
+    substates: [pending, reviewing, approved, rejected]
+    initialSubstate: pending
+
+queues:
+  - id: trip-events
+    name: trip-events
+    type: topic
+    broker: kafka
+    consumers: 6
+    tags:
+      retention: "14d"
+      tier: critical
+
+  - id: notification-queue
+    name: notification-jobs
+    type: queue
+    broker: rabbitmq
+    consumers: 3
+    tags:
+      priority: routing
+
+zones:
+  - id: edge
+    label: "Edge / Ingestion"
+    members: [mobile-app, cdn-waf, api-lb]
+    color: "rgba(99, 102, 241, 0.05)"
+
+  - id: core-platform
+    label: "Core Platform"
+    members: [trip-api, matching, conductor, compliance]
+    color: "rgba(59, 130, 246, 0.05)"
+
+  - id: data-tier
+    label: "Data Tier"
+    members: [trip-db, geo-cache, driver-store]
+    color: "rgba(16, 185, 129, 0.05)"
+
+  - id: async-workers
+    label: "Async Workers"
+    members: [pricing, notifier, eta-service, dispatch-human]
+    color: "rgba(168, 85, 247, 0.05)"
+
+calls:
+  # ── Ingestion ──
+  - id: app-to-waf
+    type: sync
+    from: mobile-app
+    to: cdn-waf
+    method: POST
+    path: /v2/trips
+    coupling: tight
+    critical: true
+
+  - id: waf-to-lb
+    type: sync
+    from: cdn-waf
+    to: api-lb
+    method: POST
+    path: /v2/trips
+    coupling: tight
+    critical: true
+
+  - id: lb-to-api
+    type: sync
+    from: api-lb
+    to: trip-api
+    method: POST
+    path: /v2/trips
+    protocol: grpc
+    duration: 180
+    coupling: tight
+    critical: true
+    response:
+      status: 202
+      label: "Trip Accepted"
+
+  # ── Orchestration ──
+  - id: api-to-conductor
+    type: sync
+    from: trip-api
+    to: conductor
+    method: POST
+    path: /workflows/trip-lifecycle
+    protocol: grpc
+    duration: 5
+    coupling: tight
+    critical: true
+
+  # ── Compliance ──
+  - id: conductor-to-compliance
+    type: sync
+    from: conductor
+    to: compliance
+    method: POST
+    path: /evaluate
+    protocol: grpc
+    duration: 8
+
+  # ── Geo + Cache ──
+  - id: api-to-geocache
+    type: sync
+    from: trip-api
+    to: geo-cache
+    method: GET
+    path: /geo/pickup
+    duration: 2
+    coupling: loose
+    fallback: "Fall back to direct geocode"
+
+  # ── Matching ──
+  - id: conductor-to-matching
+    type: sync
+    from: conductor
+    to: matching
+    method: POST
+    path: /match
+    protocol: grpc
+    duration: 12
+    coupling: tight
+    critical: true
+
+  - id: matching-to-drivers
+    type: sync
+    from: matching
+    to: driver-store
+    method: GET
+    path: /drivers/nearby
+    duration: 6
+
+  - id: matching-to-eta
+    type: sync
+    from: matching
+    to: eta-service
+    method: GET
+    path: /maps/eta
+    duration: 95
+
+  # ── Pricing ──
+  - id: conductor-to-pricing
+    type: sync
+    from: conductor
+    to: pricing
+    method: POST
+    path: /price
+    protocol: grpc
+    duration: 22
+
+  # ── Persistence ──
+  - id: api-to-db
+    type: sync
+    from: trip-api
+    to: trip-db
+    method: INSERT
+    path: "trips + outbox"
+    duration: 6
+    coupling: tight
+    critical: true
+
+  # ── Events ──
+  - id: emit-trip-created
+    type: publish
+    from: trip-api
+    to: trip-events
+    messageType: TripCreatedEvent
+    coupling: eventual
+
+  - id: emit-driver-assigned
+    type: publish
+    from: conductor
+    to: trip-events
+    messageType: DriverAssignedEvent
+    coupling: eventual
+
+  # ── Fan-out ──
+  - id: events-to-notifier
+    type: subscribe
+    from: trip-events
+    to: notifier
+    messageType: TripCreatedEvent
+    action: "Push to rider"
+    coupling: eventual
+
+  - id: events-to-monitor
+    type: subscribe
+    from: trip-events
+    to: monitor
+    messageType: "*"
+    action: "Live telemetry"
+    coupling: eventual
+
+  - id: notifier-to-queue
+    type: async
+    from: notifier
+    to: notification-queue
+    messageType: NotificationJob
+
+  # ── Human escalation ──
+  - id: conductor-to-human
+    type: async
+    from: conductor
+    to: dispatch-human
+    messageType: ManualReviewRequest
+    coupling: loose
+
+steps:
+  # ── Act I: The Request ──
+  - id: step-1
+    title: "The Request Arrives"
+    narration:
+      speaker: Architect
+      message: >-
+        A rider opens the app and taps **Request Trip**.
+        The request flows through {color:purple|Cloudflare's WAF}
+        — 2,400 active rules filtering malicious traffic —
+        then through {color:teal|Envoy} for least-connection routing
+        to one of **5 Trip Service instances**.
+    activeCalls:
+      - app-to-waf
+      - waf-to-lb
+      - lb-to-api
+    focusNodes:
+      - mobile-app
+      - cdn-waf
+      - api-lb
+      - trip-api
+    substates:
+      trip-api: validating
+    camera:
+      zoom: 1.4
+      duration: 1800
+      easing: ease-out
+    duration: 6000
+
+  # ── Act II: Orchestration Begins ──
+  - id: step-2
+    title: "Orchestration Ignites"
+    narration:
+      speaker: Architect
+      message: >-
+        The Trip Service fires a {color:blue|Temporal workflow} —
+        the **Trip Orchestrator** — which owns the entire lifecycle.
+        First step: {color:red|compliance check} via OPA.
+        The policy engine evaluates rider eligibility, service area
+        restrictions, and regulatory constraints in `8ms`.
+    activeCalls:
+      - api-to-conductor
+      - conductor-to-compliance
+    revealCalls:
+      - app-to-waf
+      - waf-to-lb
+      - lb-to-api
+    substates:
+      trip-api: dispatching
+      conductor: running
+      compliance: evaluating
+    focusNodes:
+      - trip-api
+      - conductor
+      - compliance
+    camera:
+      zoom: 1.3
+      duration: 1200
+    duration: 6000
+
+  # ── Act III: Intelligence ──
+  - id: step-3
+    title: "Intelligence Layer"
+    narration:
+      speaker: Architect
+      message: >-
+        Three parallel operations fire simultaneously:\n
+        **1.** {color:cyan|Geo Cache} lookup — `2ms` for pickup coordinates\n
+        **2.** {color:orange|Matching Engine} queries the {color:green|Driver Index}
+        for nearby drivers, then calls {color:gray|Google Maps} for ETAs (`95ms`)\n
+        **3.** {color:purple|Pricing Engine} computes surge-adjusted fare\n\n
+        The Matching Engine runs as a *Rust Lambda* — `12ms p99`.
+        This is where architecture meets performance.
+    activeCalls:
+      - api-to-geocache
+      - conductor-to-matching
+      - matching-to-drivers
+      - matching-to-eta
+      - conductor-to-pricing
+    revealCalls:
+      - app-to-waf
+      - waf-to-lb
+      - lb-to-api
+      - api-to-conductor
+      - conductor-to-compliance
+    substates:
+      conductor: running
+      matching: scoring
+      pricing: computing
+      compliance: approved
+    focusNodes:
+      - matching
+      - driver-store
+      - eta-service
+      - pricing
+      - geo-cache
+    camera:
+      fitAll: true
+      duration: 2000
+      easing: ease-in-out
+    duration: 7000
+
+  # ── Act IV: Assignment ──
+  - id: step-4
+    title: "Driver Assignment"
+    narration:
+      speaker: Architect
+      message: >-
+        The Matching Engine returns a ranked list of drivers.
+        The orchestrator assigns the top match and persists
+        the trip to {color:blue|PostgreSQL} using the
+        **transactional outbox pattern** — trip record + event
+        in a single atomic write. `6ms`. {color:green|Guaranteed consistency.}
+    activeCalls:
+      - api-to-db
+      - emit-trip-created
+    revealCalls:
+      - app-to-waf
+      - waf-to-lb
+      - lb-to-api
+      - api-to-conductor
+      - conductor-to-compliance
+      - conductor-to-matching
+      - matching-to-drivers
+      - matching-to-eta
+      - conductor-to-pricing
+      - api-to-geocache
+    substates:
+      trip-api: monitoring
+      conductor: waiting
+      matching: assigning
+      pricing: complete
+    focusNodes:
+      - trip-api
+      - trip-db
+      - trip-events
+    camera:
+      zoom: 1.2
+      duration: 1500
+    duration: 6000
+
+  # ── Act V: Event Fan-Out ──
+  - id: step-5
+    title: "Event-Driven Fan-Out"
+    narration:
+      speaker: Architect
+      message: >-
+        **TripCreatedEvent** hits the Kafka stream — 24 partitions,
+        100k/s throughput, 14-day retention.\n\n
+        The {color:purple|Notification Hub} pushes a real-time alert
+        to the rider. The {color:green|Live Dashboard} ingests all
+        events for operational telemetry — 42 Grafana panels
+        refreshing every 5 seconds.\n\n
+        *This is the decoupling point.* The critical path is done.
+        Everything downstream is eventually consistent.
+    activeCalls:
+      - emit-driver-assigned
+      - events-to-notifier
+      - events-to-monitor
+      - notifier-to-queue
+    revealCalls:
+      - app-to-waf
+      - waf-to-lb
+      - lb-to-api
+      - api-to-conductor
+      - conductor-to-matching
+      - api-to-db
+      - emit-trip-created
+    substates:
+      conductor: completed
+      matching: idle
+      trip-api: monitoring
+    focusNodes:
+      - trip-events
+      - event-bus
+      - notifier
+      - monitor
+      - notification-queue
+    camera:
+      zoom: 0.9
+      duration: 2000
+      easing: ease-in-out
+    duration: 7000
+
+  # ── Act VI: Failure Cascade ──
+  - id: step-6
+    title: "Database Failure — Blast Radius"
+    narration:
+      speaker: Architect
+      message: >-
+        **Scenario: Trip Store goes down.**\n\n
+        Because the critical path is {color:red|tightly coupled}
+        (Gateway → LB → Trip API → DB), failure cascades upstream
+        through every `critical: true` link.\n\n
+        {color:red|All affected nodes pulse red.}
+        The {color:cyan|Geo Cache} activates its {color:green|fallback}
+        — direct geocode instead of cache.\n\n
+        But the {color:gray|eventually consistent} workers?
+        *Completely unaffected.* This is why coupling analysis matters.
+    activeCalls:
+      - app-to-waf
+      - waf-to-lb
+      - lb-to-api
+      - api-to-db
+      - api-to-geocache
+      - events-to-notifier
+      - events-to-monitor
+    focusNodes:
+      - trip-db
+      - trip-api
+      - api-lb
+    simulateFailure: trip-db
+    substates:
+      trip-api: failed
+      conductor: ~
+      matching: ~
+      pricing: ~
+    camera:
+      zoom: 1.1
+      duration: 2500
+      easing: ease-out
+    duration: 8000
+
+  # ── Act VII: Recovery ──
+  - id: step-7
+    title: "Recovery & Resilience"
+    narration:
+      speaker: Architect
+      message: >-
+        Database recovers. The orchestrator resumes from its
+        last checkpoint — no replay needed, no data loss.
+        {color:green|All substates return to healthy.}\n\n
+        The architecture's strength: **tight coupling where consistency
+        matters**, **eventual coupling where availability matters**,
+        and **human escalation** via the {color:pink|Manual Review}
+        queue when automation can't decide.\n\n
+        *This is what production-grade trip operations looks like.*
+    activeCalls:
+      - app-to-waf
+      - waf-to-lb
+      - lb-to-api
+      - api-to-conductor
+      - conductor-to-matching
+      - api-to-db
+      - emit-trip-created
+      - events-to-notifier
+      - events-to-monitor
+      - conductor-to-human
+    focusNodes: []
+    substates:
+      trip-api: idle
+      conductor: idle
+      matching: idle
+      pricing: idle
+      compliance: idle
+      dispatch-human: reviewing
+    camera:
+      fitAll: true
+      duration: 2000
+      easing: ease-in-out
+    duration: 8000

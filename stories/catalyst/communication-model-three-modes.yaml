@@ -1,0 +1,913 @@
+id: communication-model-three-modes
+title: "Communication Model — Three Interaction Modes"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  The Catalyst platform uses three distinct interaction modes between its 13 bounded
+  contexts: ASB choreography (default), Conductor orchestration (when compensation
+  is required), and synchronous HTTP (enrichment only). Each mode serves a specific
+  architectural purpose — and the choice is deliberate, not accidental.
+
+sections:
+  # ══════════════════════════════════════════════════════════════════════
+  # Section 1: ASB Choreography — Fire-and-Forget, Eventual Consistency
+  # ══════════════════════════════════════════════════════════════════════
+  - renderer: service-flow
+    title: "ASB Choreography"
+    accentColor: "#3FC7A0"
+
+    services:
+      - id: asb
+        name: Azure Service Bus
+        type: event-bus
+        technology: "Premium Tier · 12 Topics"
+        status: healthy
+        substates: [idle, routing, saturated]
+        initialSubstate: idle
+        tags:
+          tier: premium
+          topics: "12"
+
+      # ── Publishers ──
+      - id: enrollment
+        name: Enrollment & Demand
+        type: bounded-context
+        technology: ".NET 10"
+        status: healthy
+        substates: [idle, publishing]
+        initialSubstate: idle
+        tags:
+          domain: "Trip Planning"
+          events: "TrfApproved, CepLinked"
+
+      - id: trip-ops
+        name: Trip Operations
+        type: bounded-context
+        technology: ".NET 10 · PostGIS"
+        status: healthy
+        substates: [idle, publishing]
+        initialSubstate: idle
+        tags:
+          domain: "Trip Execution"
+          events: "29 types"
+
+      - id: provider
+        name: Provider Network
+        type: bounded-context
+        technology: ".NET 10"
+        status: healthy
+        substates: [idle, publishing]
+        initialSubstate: idle
+        tags:
+          domain: "Supply Side"
+          events: "8 types"
+
+      - id: identity
+        name: Identity & Access
+        type: bounded-context
+        technology: ".NET 10 · FusionAuth"
+        status: healthy
+        substates: [idle, publishing]
+        initialSubstate: idle
+        tags:
+          domain: "Platform"
+          events: "17 types"
+
+      - id: monitoring
+        name: Monitoring & Exceptions
+        type: bounded-context
+        technology: ".NET 10"
+        status: healthy
+        substates: [idle, publishing]
+        initialSubstate: idle
+        tags:
+          domain: "Safety"
+          events: "5 types"
+
+      # ── Subscribers ──
+      - id: comms
+        name: Communications
+        type: event-processor
+        technology: ".NET 10 · Twilio · SendGrid"
+        status: healthy
+        substates: [idle, consuming, delivering]
+        initialSubstate: idle
+        tags:
+          subscriptions: "9 topics / 27 handlers"
+          role: "Terminal consumer"
+
+      - id: reporting
+        name: Reporting & Analytics
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+        substates: [idle, materializing]
+        initialSubstate: idle
+        tags:
+          subscriptions: "7 topics"
+          role: "Terminal sink"
+
+      - id: settlement
+        name: Settlement
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+        substates: [idle, calculating]
+        initialSubstate: idle
+        tags:
+          domain: "Financial Control"
+
+      - id: capacity
+        name: Capacity Planning
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+        substates: [idle, forecasting]
+        initialSubstate: idle
+        tags:
+          domain: "Supply Side"
+
+      - id: rescue
+        name: Rescue Orchestration
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+        substates: [idle, orchestrating]
+        initialSubstate: idle
+        tags:
+          domain: "Safety"
+
+    queues:
+      - id: topics
+        name: "12 ASB Topics"
+        type: topic
+        broker: servicebus
+        consumers: 10
+        tags:
+          throughput: "~100 events/sec peak"
+          tier: premium
+
+    zones:
+      - id: publishers
+        label: "Publishers"
+        members: [enrollment, trip-ops, provider, identity, monitoring]
+        color: "rgba(63, 199, 160, 0.06)"
+
+      - id: subscribers
+        label: "Subscribers"
+        members: [comms, reporting, settlement, capacity, rescue]
+        color: "rgba(63, 199, 160, 0.04)"
+
+    calls:
+      - id: pub-enrollment
+        type: publish
+        from: enrollment
+        to: topics
+        messageType: "TrfApproved, CepLinked"
+        coupling: eventual
+
+      - id: pub-tripops
+        type: publish
+        from: trip-ops
+        to: topics
+        messageType: "29 event types"
+        coupling: eventual
+        effect:
+          type: emoji-fan
+          emojis: ["📨", "⚡", "📦"]
+          count: 8
+          spread: 50
+          speed: 130
+          duration: 2000
+          direction: from-source
+          fade: true
+          scale: [1.2, 0.4]
+          stagger: 80
+          jitter: 0.2
+
+      - id: pub-provider
+        type: publish
+        from: provider
+        to: topics
+        messageType: "ProviderActivated, VehicleAdded"
+        coupling: eventual
+
+      - id: pub-identity
+        type: publish
+        from: identity
+        to: topics
+        messageType: "UserCreated, RoleAssigned"
+        coupling: eventual
+
+      - id: pub-monitoring
+        type: publish
+        from: monitoring
+        to: topics
+        messageType: "ExceptionDetected, AlertGenerated"
+        coupling: eventual
+
+      - id: sub-comms
+        type: subscribe
+        from: topics
+        to: comms
+        messageType: "9 topics / 27 handlers"
+        action: "SMS, email, push notifications"
+        coupling: eventual
+
+      - id: sub-reporting
+        type: subscribe
+        from: topics
+        to: reporting
+        messageType: "7 topics — all events"
+        action: "Materialize dashboards"
+        coupling: eventual
+
+      - id: sub-settlement
+        type: subscribe
+        from: topics
+        to: settlement
+        messageType: "PtDroppedOff, VrCompleted"
+        action: "Calculate BC/PD/PM"
+        coupling: eventual
+
+      - id: sub-capacity
+        type: subscribe
+        from: topics
+        to: capacity
+        messageType: "TrfApproved, ProviderActivated"
+        action: "Update demand/supply forecast"
+        coupling: eventual
+
+      - id: sub-rescue
+        type: subscribe
+        from: topics
+        to: rescue
+        messageType: "ExceptionDetected, StaleVrDetected"
+        action: "Initiate rescue saga"
+        coupling: eventual
+
+    steps:
+      - id: bus-establish
+        title: "The Default Mode: Fire-and-Forget"
+        narrative: >-
+          Azure Service Bus Premium sits at the center of the Catalyst event graph.
+          {color:green|12 topics} — one per bounded context — carry events between
+          13 services. This is the {color:green|default interaction mode}: publish an event,
+          forget about it, let subscribers react independently.
+        activeCalls: []
+        revealNodes: [asb, topics]
+        substates:
+          asb: idle
+        camera:
+          fitAll: true
+          duration: 2000
+          easing: ease-in-out
+          padding: 120
+        duration: 4000
+
+      - id: publishers-fire
+        title: "Publishers Fire Events"
+        narrative: >-
+          Five BCs are the primary event sources. Trip Operations dominates with
+          {color:green|29 event types} — every VR/PT state transition, every GPS fix,
+          every milestone. Publishers don't know (or care) who's listening.
+        activeCalls: [pub-enrollment, pub-tripops, pub-provider, pub-identity, pub-monitoring]
+        substates:
+          enrollment: publishing
+          trip-ops: publishing
+          provider: publishing
+          identity: publishing
+          monitoring: publishing
+          asb: routing
+        camera:
+          fitAll: true
+          duration: 1500
+          easing: spring-overshoot
+          padding: 100
+        duration: 5000
+
+      - id: subscribers-react
+        title: "Subscribers React Independently"
+        narrative: >-
+          Each subscriber has its own subscription on the topic — they process events
+          at their own pace. Settlement can lag behind Communications without
+          blocking anything. {color:green|Eventual consistency} means each consumer
+          scales independently.
+        activeCalls: [sub-comms, sub-reporting, sub-settlement, sub-capacity, sub-rescue]
+        revealCalls: [pub-enrollment, pub-tripops, pub-provider, pub-identity, pub-monitoring]
+        substates:
+          enrollment: idle
+          trip-ops: idle
+          provider: idle
+          identity: idle
+          monitoring: idle
+          comms: consuming
+          reporting: materializing
+          settlement: calculating
+          capacity: forecasting
+          rescue: orchestrating
+        camera:
+          fitAll: true
+          duration: 1200
+          easing: spring-overshoot
+          padding: 100
+        duration: 5000
+
+      - id: terminal-consumers
+        title: "Terminal Consumers: Comms & Reporting"
+        narrative: >-
+          Communications ({color:green|9 topics / 27 handlers}) and Reporting
+          ({color:green|7 topics}) are {color:gray|terminal consumers} — they consume
+          events but publish nothing outbound. They're the data sinks at the edges
+          of the event graph. Every other BC both publishes and subscribes.
+        activeCalls: [sub-comms, sub-reporting]
+        revealCalls: [sub-settlement, sub-capacity, sub-rescue]
+        substates:
+          comms: delivering
+          reporting: materializing
+          settlement: idle
+          capacity: idle
+          rescue: idle
+        camera:
+          zoom: 1.4
+          duration: 1500
+          easing: ease-in
+        duration: 4500
+
+      - id: choreo-bridge
+        title: "When Choreography Isn't Enough"
+        narrative: >-
+          Fire-and-forget works for 80% of interactions. But when a workflow
+          requires {color:purple|multi-step coordination with compensation} — rolling back
+          a partially-completed saga — choreography alone can't guarantee consistency.
+          That's where {color:purple|Conductor orchestration} takes over.
+        activeCalls: [pub-tripops, sub-comms, sub-reporting, sub-settlement, sub-capacity, sub-rescue]
+        substates:
+          trip-ops: publishing
+          asb: routing
+          comms: consuming
+          reporting: materializing
+          settlement: calculating
+          capacity: forecasting
+          rescue: orchestrating
+        camera:
+          fitAll: true
+          duration: 2000
+          easing: ease-in-out
+          padding: 100
+        duration: 4000
+
+  # ══════════════════════════════════════════════════════════════════════
+  # Section 2: Conductor Orchestration — Sagas with Compensation
+  # ══════════════════════════════════════════════════════════════════════
+  - renderer: service-flow
+    title: "Conductor Orchestration"
+    accentColor: "#8E3FBF"
+
+    services:
+      - id: conductor
+        name: Conductor Server
+        type: workflow
+        technology: "Orkes Conductor"
+        status: healthy
+        substates: [idle, orchestrating, compensating]
+        initialSubstate: idle
+        tags:
+          workflows: "37 definitions"
+          workers: "138 task workers"
+
+      - id: trf-workflow
+        name: TRF Processing
+        type: saga
+        technology: "15 steps · 7 workers"
+        status: healthy
+        substates: [idle, validating, geocoding, pricing, approving, compensating]
+        initialSubstate: idle
+        tags:
+          trigger: "TrfSubmittedEvent"
+
+      - id: sgr-workflow
+        name: SGR Generation
+        type: saga
+        technology: "Nightly batch"
+        status: healthy
+        substates: [idle, generating, assigning]
+        initialSubstate: idle
+        tags:
+          trigger: "Scheduler (02:00 UTC)"
+
+      - id: assignment-workflow
+        name: Assignment Decision
+        type: saga
+        technology: "Constraint pipeline"
+        status: healthy
+        substates: [idle, matching, optimizing]
+        initialSubstate: idle
+        tags:
+          trigger: "SgrCompletedEvent"
+
+      - id: rescue-workflow
+        name: Rescue Orchestration
+        type: saga
+        technology: "5 workflows · 31 workers"
+        status: healthy
+        substates: [idle, matching, offering, reassigning, compensating]
+        initialSubstate: idle
+        tags:
+          trigger: "ExceptionDetected"
+
+      - id: settlement-workflow
+        name: Settlement Processing
+        type: saga
+        technology: "calc / comp / reversal"
+        status: healthy
+        substates: [idle, calculating, reconciling, reversing]
+        initialSubstate: idle
+        tags:
+          trigger: "PtDroppedOff / VrCompleted"
+
+      - id: enrollment-bc
+        name: Enrollment & Demand
+        type: bounded-context
+        technology: ".NET 10"
+        status: healthy
+        substates: [idle, processing]
+        initialSubstate: idle
+
+      - id: routing-bc
+        name: Routing & Pricing
+        type: bounded-context
+        technology: ".NET 10 · Google Maps"
+        status: healthy
+        substates: [idle, geocoding, pricing]
+        initialSubstate: idle
+
+      - id: provider-bc
+        name: Provider Network
+        type: bounded-context
+        technology: ".NET 10"
+        status: healthy
+        substates: [idle, matching]
+        initialSubstate: idle
+
+      - id: tripops-bc
+        name: Trip Operations
+        type: bounded-context
+        technology: ".NET 10 · PostGIS"
+        status: healthy
+        substates: [idle, generating, reassigning]
+        initialSubstate: idle
+
+    calls:
+      - id: conductor-trf
+        type: sync
+        from: conductor
+        to: trf-workflow
+        method: START
+        path: "trf-processing-workflow"
+        duration: 1
+        coupling: tight
+        critical: true
+
+      - id: conductor-sgr
+        type: sync
+        from: conductor
+        to: sgr-workflow
+        method: START
+        path: "sgr-generation-workflow"
+        duration: 1
+        coupling: tight
+
+      - id: conductor-assign
+        type: sync
+        from: conductor
+        to: assignment-workflow
+        method: START
+        path: "assignment-decision-workflow"
+        duration: 1
+        coupling: tight
+
+      - id: conductor-rescue
+        type: sync
+        from: conductor
+        to: rescue-workflow
+        method: START
+        path: "rescue-orchestration-workflow"
+        duration: 1
+        coupling: tight
+        critical: true
+
+      - id: conductor-settle
+        type: sync
+        from: conductor
+        to: settlement-workflow
+        method: START
+        path: "settlement-calculation-workflow"
+        duration: 1
+        coupling: tight
+
+      - id: trf-validate
+        type: sync
+        from: trf-workflow
+        to: enrollment-bc
+        method: TASK
+        path: "Validate TRF fields"
+        duration: 5
+        coupling: tight
+
+      - id: trf-geocode
+        type: sync
+        from: trf-workflow
+        to: routing-bc
+        method: TASK
+        path: "Geocode home + school"
+        duration: 15
+        coupling: tight
+
+      - id: trf-price
+        type: sync
+        from: trf-workflow
+        to: routing-bc
+        method: TASK
+        path: "Calculate CTTC pricing"
+        duration: 8
+        coupling: tight
+
+      - id: rescue-match
+        type: sync
+        from: rescue-workflow
+        to: provider-bc
+        method: TASK
+        path: "Find replacement provider"
+        duration: 3
+        coupling: tight
+        critical: true
+
+      - id: rescue-reassign
+        type: sync
+        from: rescue-workflow
+        to: tripops-bc
+        method: TASK
+        path: "Reassign affected PTs"
+        duration: 5
+        coupling: tight
+        critical: true
+
+      - id: rescue-compensate
+        type: sync
+        from: rescue-workflow
+        to: tripops-bc
+        method: TASK
+        path: "ROLLBACK — restore original assignments"
+        duration: 3
+        coupling: tight
+        critical: true
+
+    steps:
+      - id: orch-establish
+        title: "When Choreography Isn't Enough"
+        narrative: >-
+          {color:purple|37 workflow definitions} and {color:purple|138 task workers}
+          run on Orkes Conductor. When a business process requires multi-step
+          coordination with compensation — rolling back on failure — Conductor
+          orchestrates the saga.
+        activeCalls: []
+        revealNodes: [conductor]
+        substates:
+          conductor: idle
+        camera:
+          fitAll: true
+          duration: 2000
+          easing: ease-in-out
+          padding: 120
+        duration: 4000
+
+      - id: trf-saga
+        title: "TRF Processing — The Flagship Saga"
+        narrative: >-
+          A parent submits a Transportation Request Form. Conductor orchestrates
+          {color:purple|15 steps}: validate → geocode home → geocode school →
+          calculate distance → apply eligibility rules → price via CTTC →
+          generate route → approve. If geocoding fails, the TRF is
+          {color:red|rejected with a reason code}, not left in limbo.
+        activeCalls: [conductor-trf, trf-validate, trf-geocode, trf-price]
+        substates:
+          conductor: orchestrating
+          trf-workflow: geocoding
+          enrollment-bc: processing
+          routing-bc: geocoding
+        camera:
+          zoom: 1.4
+          duration: 1500
+          easing: spring-overshoot
+        duration: 5500
+
+      - id: rescue-saga
+        title: "Rescue Saga with Compensation"
+        narrative: >-
+          A driver no-shows. Conductor starts the rescue saga: find a replacement
+          provider → make an offer → on acceptance, reassign affected PTs.
+          If the replacement {color:red|also fails}, Conductor runs the
+          {color:red|compensation workflow} — restoring original assignments and
+          escalating to dispatch. {color:purple|19 compensation workflows} exist across the platform.
+        activeCalls: [conductor-rescue, rescue-match, rescue-reassign]
+        revealCalls: [conductor-trf, trf-validate, trf-geocode, trf-price]
+        substates:
+          conductor: orchestrating
+          trf-workflow: idle
+          enrollment-bc: idle
+          routing-bc: idle
+          rescue-workflow: offering
+          provider-bc: matching
+          tripops-bc: reassigning
+        camera:
+          zoom: 1.3
+          duration: 1200
+          easing: spring-overshoot
+        duration: 5000
+
+      - id: rescue-compensate
+        title: "Compensation — The Rollback Path"
+        narrative: >-
+          When a saga step fails, Conductor automatically triggers the compensation
+          chain. For rescue: {color:red|restore original driver assignments},
+          {color:red|cancel the replacement offer}, {color:red|escalate to dispatcher}.
+          This is why orchestration exists — choreography can't guarantee rollback
+          across multiple bounded contexts.
+        activeCalls: [conductor-rescue, rescue-compensate]
+        revealCalls: [rescue-match, rescue-reassign]
+        substates:
+          rescue-workflow: compensating
+          conductor: compensating
+          tripops-bc: reassigning
+          provider-bc: idle
+        effects:
+          - target: rescue-compensate
+            type: emoji-fan
+            emojis: ["⏪", "🔄", "❌"]
+            count: 5
+            spread: 35
+            speed: 120
+            duration: 1600
+            direction: from-source
+            fade: true
+            scale: [1.1, 0.5]
+            stagger: 100
+        camera:
+          zoom: 1.5
+          duration: 1000
+          easing: ease-in
+        duration: 4500
+
+      - id: orch-bridge
+        title: "The Third Mode: Synchronous HTTP"
+        narrative: >-
+          Choreography for independent reactions. Orchestration for multi-step
+          sagas. But some operations need {color:blue|immediate data} — checking
+          if a provider has capacity, verifying a credential, resolving a user.
+          That's where synchronous HTTP enrichment comes in.
+        activeCalls: [conductor-trf, conductor-sgr, conductor-assign, conductor-rescue, conductor-settle]
+        substates:
+          conductor: orchestrating
+          trf-workflow: validating
+          sgr-workflow: generating
+          assignment-workflow: matching
+          rescue-workflow: matching
+          settlement-workflow: calculating
+        camera:
+          fitAll: true
+          duration: 2000
+          easing: ease-in-out
+          padding: 100
+        duration: 4000
+
+  # ══════════════════════════════════════════════════════════════════════
+  # Section 3: HTTP Sync — Enrichment Only, Never State Mutation
+  # ══════════════════════════════════════════════════════════════════════
+  - renderer: service-flow
+    title: "HTTP Sync"
+    accentColor: "#4A8BC5"
+
+    services:
+      - id: provider-target
+        name: Provider Network
+        type: bounded-context
+        technology: ".NET 10"
+        status: healthy
+        substates: [idle, responding]
+        initialSubstate: idle
+        tags:
+          inbound: "7 callers"
+          role: "Most-called service"
+
+      - id: tripops-target
+        name: Trip Operations
+        type: bounded-context
+        technology: ".NET 10 · PostGIS"
+        status: healthy
+        substates: [idle, responding]
+        initialSubstate: idle
+        tags:
+          inbound: "5+ callers"
+
+      - id: identity-target
+        name: Identity & Access
+        type: bounded-context
+        technology: ".NET 10 · FusionAuth"
+        status: healthy
+        substates: [idle, authenticating]
+        initialSubstate: idle
+        tags:
+          role: "Auth anchor"
+
+      - id: assignment-caller
+        name: Assignment
+        type: bounded-context
+        technology: ".NET 10"
+        status: healthy
+        substates: [idle, enriching]
+        initialSubstate: idle
+
+      - id: rescue-caller
+        name: Rescue
+        type: bounded-context
+        technology: ".NET 10"
+        status: healthy
+        substates: [idle, enriching]
+        initialSubstate: idle
+
+      - id: routing-caller
+        name: Routing & Pricing
+        type: bounded-context
+        technology: ".NET 10"
+        status: healthy
+        substates: [idle, enriching]
+        initialSubstate: idle
+
+      - id: monitoring-caller
+        name: Monitoring
+        type: bounded-context
+        technology: ".NET 10"
+        status: healthy
+        substates: [idle, enriching]
+        initialSubstate: idle
+
+      - id: settlement-caller
+        name: Settlement
+        type: bounded-context
+        technology: ".NET 10"
+        status: healthy
+        substates: [idle, enriching]
+        initialSubstate: idle
+
+      - id: comms-caller
+        name: Communications
+        type: bounded-context
+        technology: ".NET 10"
+        status: healthy
+        substates: [idle, enriching]
+        initialSubstate: idle
+
+    calls:
+      - id: assign-provider
+        type: sync
+        from: assignment-caller
+        to: provider-target
+        method: GET
+        path: "v1/providers/{id}/availability"
+        duration: 12
+        protocol: http
+        coupling: loose
+        status: 200
+
+      - id: rescue-provider
+        type: sync
+        from: rescue-caller
+        to: provider-target
+        method: GET
+        path: "v1/providers/nearby?radius=5mi"
+        duration: 18
+        protocol: http
+        coupling: loose
+        status: 200
+
+      - id: routing-provider
+        type: sync
+        from: routing-caller
+        to: provider-target
+        method: GET
+        path: "v1/vehicles/{id}/location"
+        duration: 8
+        protocol: http
+        coupling: loose
+        status: 200
+
+      - id: monitoring-tripops
+        type: sync
+        from: monitoring-caller
+        to: tripops-target
+        method: GET
+        path: "v1/vr/{id}/state"
+        duration: 10
+        protocol: http
+        coupling: loose
+        status: 200
+
+      - id: settlement-tripops
+        type: sync
+        from: settlement-caller
+        to: tripops-target
+        method: GET
+        path: "v1/pt/{id}/details"
+        duration: 8
+        protocol: http
+        coupling: loose
+        status: 200
+
+      - id: comms-identity
+        type: sync
+        from: comms-caller
+        to: identity-target
+        method: GET
+        path: "v1/users/{id}/contact-info"
+        duration: 5
+        protocol: http
+        coupling: loose
+        status: 200
+
+      - id: assign-identity
+        type: sync
+        from: assignment-caller
+        to: identity-target
+        method: GET
+        path: "v1/users/{id}/tenant"
+        duration: 4
+        protocol: http
+        coupling: loose
+        status: 200
+
+    steps:
+      - id: sync-establish
+        title: "Enrichment Only — Never State Mutation"
+        narrative: >-
+          The third interaction mode: {color:blue|synchronous HTTP}. Used exclusively
+          for enrichment — reading data from another BC to make a local decision.
+          {color:red|Never for cross-boundary state mutation}. If you need to change
+          state in another BC, publish an event.
+        activeCalls: []
+        revealNodes: [provider-target, tripops-target, identity-target]
+        substates:
+          provider-target: idle
+          tripops-target: idle
+          identity-target: idle
+        camera:
+          fitAll: true
+          duration: 2000
+          easing: ease-in-out
+          padding: 120
+        duration: 4000
+
+      - id: provider-hub
+        title: "Provider Network — The Most-Called Service"
+        narrative: >-
+          Provider Network receives {color:blue|7 inbound HTTP callers} — more than
+          any other BC. Assignment checks provider availability. Rescue searches for
+          nearby replacements. Routing reads vehicle locations. All {color:blue|GET requests} —
+          read-only enrichment that never modifies provider state.
+        activeCalls: [assign-provider, rescue-provider, routing-provider]
+        substates:
+          assignment-caller: enriching
+          rescue-caller: enriching
+          routing-caller: enriching
+          provider-target: responding
+        camera:
+          zoom: 1.4
+          duration: 1500
+          easing: spring-overshoot
+        duration: 5000
+
+      - id: all-three
+        title: "Three Modes, One Platform"
+        narrative: >-
+          {color:green|Choreography} for independent reactions (80% of interactions).
+          {color:purple|Orchestration} when compensation is required (sagas, multi-step workflows).
+          {color:blue|Synchronous HTTP} for enrichment-only reads.
+          The choice is architectural — each mode exists because the others can't
+          serve that specific need.
+        activeCalls: [assign-provider, rescue-provider, routing-provider, monitoring-tripops, settlement-tripops, comms-identity, assign-identity]
+        substates:
+          assignment-caller: enriching
+          rescue-caller: enriching
+          routing-caller: enriching
+          monitoring-caller: enriching
+          settlement-caller: enriching
+          comms-caller: enriching
+          provider-target: responding
+          tripops-target: responding
+          identity-target: authenticating
+        camera:
+          fitAll: true
+          duration: 2000
+          easing: ease-in-out
+          padding: 80
+        duration: 6000

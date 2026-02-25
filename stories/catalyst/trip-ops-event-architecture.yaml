@@ -1,0 +1,1126 @@
+id: trip-ops-event-architecture
+title: "Trip Operations — Event Architecture & Revenue Pipeline"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  The highest-fanout bounded context in the platform: 29 event types flowing
+  from Trip Operations through Azure Service Bus to 6 downstream BCs. Three
+  perspectives — the event trickle, the revenue-critical drop-off path, and
+  the self-consumption loop that powers the live fleet map.
+
+sections:
+  # ══════════════════════════════════════════════════════════════════════
+  # Section 1: Cross-BC Event Fanout
+  # ══════════════════════════════════════════════════════════════════════
+  - renderer: service-flow
+    title: "Event Fanout"
+    accentColor: "#3B82F6"
+    services:
+      - id: trip-ops
+        name: Trip Operations
+        type: bounded-context
+        technology: ".NET 10 · PostGIS · SignalR"
+        status: healthy
+        instances: 2
+        substates: [idle, processing, publishing, active]
+        initialSubstate: idle
+        tags:
+          domain: "Trip Execution"
+          events: "29 types"
+
+      - id: outbox
+        name: Transactional Outbox
+        type: database
+        technology: "PostgreSQL — same txn"
+        status: healthy
+        substates: [idle, writing, committed, relaying]
+        initialSubstate: idle
+
+      - id: settlement
+        name: Settlement
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+        substates: [idle, calculating, committed]
+        initialSubstate: idle
+        tags:
+          domain: "Financial Control"
+
+      - id: assignment
+        name: Assignment
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+        substates: [idle, matching]
+        initialSubstate: idle
+        tags:
+          domain: "Trip Execution"
+
+      - id: rescue
+        name: Rescue Orchestration
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+        substates: [idle, orchestrating]
+        initialSubstate: idle
+        tags:
+          domain: "Safety & Response"
+
+      - id: comms
+        name: Communications
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+        substates: [idle, delivering]
+        initialSubstate: idle
+        tags:
+          domain: "Safety & Response"
+
+      - id: monitoring
+        name: Monitoring & Exceptions
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+        substates: [idle, detecting]
+        initialSubstate: idle
+        tags:
+          domain: "Safety & Response"
+
+      - id: incidents
+        name: Incidents & Safety
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+        substates: [idle, investigating]
+        initialSubstate: idle
+        tags:
+          domain: "Safety & Response"
+
+      - id: reporting
+        name: Reporting & Analytics
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+        substates: [idle, materializing]
+        initialSubstate: idle
+        tags:
+          domain: "Financial Control"
+
+      - id: trip-hq
+        name: Trip HQ
+        type: client
+        technology: "Next.js 15 · SignalR"
+        substates: [idle, streaming]
+        initialSubstate: idle
+
+    queues:
+      - id: trip-ops-topic
+        name: trip-operations
+        type: topic
+        broker: servicebus
+        consumers: 7
+        tags:
+          throughput: "29 types"
+          tier: premium
+
+    zones:
+      - id: revenue
+        label: "Revenue Path"
+        members: [settlement]
+        color: "rgba(245, 158, 11, 0.06)"
+
+      - id: safety
+        label: "Safety & Response"
+        members: [monitoring, rescue, comms, incidents]
+        color: "rgba(239, 68, 68, 0.06)"
+
+      - id: analytics
+        label: "Analytics & UI"
+        members: [reporting, trip-hq]
+        color: "rgba(34, 197, 94, 0.06)"
+
+    calls:
+      - id: outbox-write
+        type: sync
+        from: trip-ops
+        to: outbox
+        method: INSERT
+        path: "Domain event → outbox_messages"
+        duration: 3
+        coupling: tight
+        critical: true
+
+      - id: outbox-relay
+        type: publish
+        from: outbox
+        to: trip-ops-topic
+        messageType: "29 Event Types"
+        coupling: tight
+        critical: true
+        effect:
+          type: emoji-fan
+          emojis: ["📨", "📦", "⚡"]
+          count: 10
+          spread: 55
+          speed: 140
+          duration: 2200
+          direction: from-source
+          gravity: 0
+          fade: true
+          scale: [1.3, 0.4]
+          stagger: 80
+          jitter: 0.25
+
+      - id: settle-dropoff
+        type: subscribe
+        from: trip-ops-topic
+        to: settlement
+        messageType: PtDroppedOffEvent
+        action: "Calculate BC/PD/PM"
+        coupling: eventual
+
+      - id: settle-complete
+        type: subscribe
+        from: trip-ops-topic
+        to: settlement
+        messageType: VrCompletedEvent
+        action: "Finalize run settlement"
+        coupling: eventual
+
+      - id: assign-sgr
+        type: subscribe
+        from: trip-ops-topic
+        to: assignment
+        messageType: SgrCompletedEvent
+        action: "Trigger batch matching"
+        coupling: eventual
+
+      - id: assign-cancel
+        type: subscribe
+        from: trip-ops-topic
+        to: assignment
+        messageType: VrCancelledEvent
+        action: "Re-match orphaned PTs"
+        coupling: eventual
+
+      - id: rescue-noshow
+        type: subscribe
+        from: trip-ops-topic
+        to: rescue
+        messageType: PtNoShowEvent
+        action: "Initiate rescue saga"
+        coupling: eventual
+
+      - id: comms-milestone
+        type: subscribe
+        from: trip-ops-topic
+        to: comms
+        messageType: MilestoneReachedEvent
+        action: "SMS parent notifications"
+        coupling: eventual
+
+      - id: monitor-state
+        type: subscribe
+        from: trip-ops-topic
+        to: monitoring
+        messageType: VrStateChangedEvent
+        action: "Anomaly detection pipeline"
+        coupling: eventual
+
+      - id: incident-reported
+        type: subscribe
+        from: trip-ops-topic
+        to: incidents
+        messageType: TripIncidentReportedEvent
+        action: "Open investigation"
+        coupling: eventual
+
+      - id: reporting-sink
+        type: subscribe
+        from: trip-ops-topic
+        to: reporting
+        messageType: "All 29 event types"
+        action: "Materialize dashboards"
+        coupling: eventual
+
+      - id: signalr-gps
+        type: subscribe
+        from: trip-ops-topic
+        to: trip-hq
+        messageType: GpsLocationUpdatedEvent
+        action: "Live fleet map"
+        coupling: eventual
+
+    steps:
+      - id: establish
+        title: "The Highest-Fanout Bounded Context"
+        narrative: >-
+          **Trip Operations** is the hub of the Catalyst event graph.
+          Every VR/PT state transition, every GPS fix, every milestone —
+          {color:blue|29 event types} published to a single ASB topic,
+          consumed by {color:purple|7 downstream subscribers}.
+        activeCalls: []
+        revealNodes: [trip-ops, trip-ops-topic]
+        substates:
+          trip-ops: idle
+        camera:
+          fitAll: true
+          duration: 2000
+          easing: ease-in-out
+          padding: 120
+        duration: 4000
+
+      - id: publish-burst
+        title: "Events Hit the Wire"
+        narrative: >-
+          State changes commit to the {color:purple|transactional outbox} in the same
+          PostgreSQL transaction as the domain mutation. The relay polls and publishes
+          to Azure Service Bus — {color:green|guaranteed delivery}, zero lost events.
+        activeCalls: [outbox-write, outbox-relay]
+        substates:
+          trip-ops: publishing
+          outbox: relaying
+        camera:
+          zoom: 1.6
+          duration: 1200
+          easing: spring-overshoot
+        duration: 5000
+
+      - id: revenue-path
+        title: "Settlement — Where Drivers Get Paid"
+        narrative: >-
+          {color:orange|PtDroppedOffEvent} carries denormalized DriverId, ServiceProviderId,
+          and MonitorId — everything Settlement needs to calculate
+          {color:orange|BC/PD/PM} without a single cross-service query.
+          A lost event here means an {color:red|unpaid driver}.
+        activeCalls: [settle-dropoff, settle-complete]
+        revealCalls: [outbox-write, outbox-relay]
+        substates:
+          trip-ops: active
+          outbox: committed
+          settlement: calculating
+        effects:
+          - target: settle-dropoff
+            type: emoji-fan
+            emojis: ["💰", "💳", "🏦"]
+            count: 6
+            spread: 40
+            speed: 120
+            duration: 1800
+            direction: from-source
+            fade: true
+            scale: [1.1, 0.5]
+            stagger: 120
+        camera:
+          zoom: 1.4
+          duration: 1500
+          easing: ease-in
+        duration: 5000
+
+      - id: assignment-react
+        title: "Assignment Reacts to Schedule Changes"
+        narrative: >-
+          `SgrCompletedEvent` triggers {color:blue|nightly batch matching} — the OR-Tools
+          optimizer assigns drivers to new VRs. `VrCancelledEvent` triggers
+          {color:red|emergency re-matching} for orphaned passenger trips.
+        activeCalls: [assign-sgr, assign-cancel]
+        revealCalls: [settle-dropoff, settle-complete]
+        substates:
+          settlement: committed
+          assignment: matching
+        camera:
+          zoom: 1.4
+          duration: 1000
+          easing: spring-overshoot
+        duration: 4000
+
+      - id: safety-net
+        title: "The Safety Net Activates"
+        narrative: >-
+          Four BCs react in {color:red|parallel}: Rescue initiates a provider replacement saga,
+          Monitoring runs anomaly detection, Communications notifies parents,
+          and Incidents opens an investigation if safety-relevant.
+          One event — four independent responses.
+        activeCalls: [rescue-noshow, comms-milestone, monitor-state, incident-reported]
+        revealCalls: [assign-sgr, assign-cancel]
+        substates:
+          assignment: idle
+          rescue: orchestrating
+          comms: delivering
+          monitoring: detecting
+          incidents: investigating
+        effects:
+          - target: rescue-noshow
+            type: emoji-fan
+            emojis: ["🚨", "🆘", "🚑"]
+            count: 5
+            spread: 35
+            speed: 160
+            duration: 1600
+            direction: from-source
+            fade: true
+            scale: [1.2, 0.5]
+            stagger: 90
+        camera:
+          zoom: 1.1
+          duration: 1800
+          easing: ease-in-out
+        duration: 5500
+
+      - id: analytics-ui
+        title: "Reporting Sink and Live Fleet Map"
+        narrative: >-
+          Reporting materializes {color:green|all 29 event types} into real-time dashboards.
+          Trip HQ receives `GpsLocationUpdatedEvent` via the same topic —
+          the {color:cyan|self-consumption pattern} powers the dispatch board's live map.
+          Both are {color:gray|terminal consumers} — they publish nothing outbound.
+        activeCalls: [reporting-sink, signalr-gps]
+        revealCalls: [rescue-noshow, comms-milestone, monitor-state, incident-reported]
+        substates:
+          rescue: idle
+          comms: idle
+          monitoring: idle
+          incidents: idle
+          reporting: materializing
+          trip-hq: streaming
+        camera:
+          zoom: 1.3
+          duration: 1200
+          easing: spring-overshoot
+        duration: 4500
+
+      - id: full-fanout
+        title: "Complete Event Architecture"
+        narrative: >-
+          One bounded context. One ASB topic. **7 subscribers**.
+          The transactional outbox guarantees every event reaches the bus.
+          Eventual consistency means each consumer scales independently —
+          Settlement can lag without blocking the dispatch portal.
+        activeCalls: [outbox-write, outbox-relay, settle-dropoff, assign-sgr, rescue-noshow, comms-milestone, monitor-state, incident-reported, reporting-sink, signalr-gps]
+        substates:
+          trip-ops: active
+          outbox: relaying
+          settlement: calculating
+          assignment: matching
+          rescue: orchestrating
+          comms: delivering
+          monitoring: detecting
+          incidents: investigating
+          reporting: materializing
+          trip-hq: streaming
+        effects:
+          - target: outbox-relay
+            type: emoji-fan
+            emojis: ["📨", "📦", "⚡", "🔔", "📊"]
+            count: 14
+            spread: 70
+            speed: 130
+            duration: 2800
+            direction: from-source
+            gravity: 0
+            fade: true
+            scale: [1.4, 0.3]
+            stagger: 60
+            jitter: 0.35
+        camera:
+          fitAll: true
+          duration: 2000
+          easing: ease-in-out
+          padding: 100
+        duration: 6000
+
+      - id: bridge-revenue
+        title: "Next: The Revenue-Critical Path"
+        narrative: >-
+          Among 29 event types, {color:orange|PtDroppedOffEvent} is the most critical —
+          it's the event that makes drivers get paid. Next: the complete pipeline
+          from a driver tapping "Drop Off" to settlement calculation.
+        activeCalls: [outbox-write, outbox-relay, settle-dropoff]
+        substates:
+          trip-ops: processing
+          outbox: relaying
+          settlement: calculating
+        camera:
+          zoom: 1.5
+          duration: 1800
+          easing: ease-in
+        duration: 3500
+
+  # ══════════════════════════════════════════════════════════════════════
+  # Section 2: Revenue-Critical Path (PtDroppedOffEvent)
+  # ══════════════════════════════════════════════════════════════════════
+  - renderer: service-flow
+    title: "Revenue Pipeline"
+    accentColor: "#F59E0B"
+    layout: sequence
+
+    services:
+      - id: driver-app
+        name: Driver App
+        type: client
+        technology: "Mobile (MDD)"
+        substates: [idle, tapping, confirmed]
+        initialSubstate: idle
+
+      - id: trip-api
+        name: Trip Ops API
+        type: api
+        technology: ".NET 10"
+        status: healthy
+        substates: [idle, validating, persisting, committed]
+        initialSubstate: idle
+
+      - id: pt-aggregate
+        name: PassengerTrip
+        type: aggregate
+        technology: "16-state machine"
+        substates: [idle, guarding, mutating, event-raised]
+        initialSubstate: idle
+
+      - id: trip-db
+        name: trip_operations
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+        substates: [idle, writing, committed]
+        initialSubstate: idle
+
+      - id: outbox-table
+        name: outbox_messages
+        type: database
+        technology: "Same transaction"
+        status: healthy
+        substates: [idle, writing, committed, relayed]
+        initialSubstate: idle
+
+      - id: outbox-relay
+        name: Outbox Relay
+        type: worker
+        technology: "BackgroundService"
+        status: healthy
+        substates: [polling, publishing, done]
+        initialSubstate: polling
+
+      - id: settlement-ep
+        name: Settlement EP
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+        substates: [idle, calculating, committed]
+        initialSubstate: idle
+        tags:
+          action: "BC/PD/PM"
+
+      - id: comms-ep
+        name: Communications EP
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+        substates: [idle, delivering]
+        initialSubstate: idle
+
+      - id: monitoring-ep
+        name: Monitoring EP
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+        substates: [idle, recording]
+        initialSubstate: idle
+
+    queues:
+      - id: asb-topic
+        name: trip-operations
+        type: topic
+        broker: servicebus
+        consumers: 4
+        tags:
+          tier: premium
+
+    zones:
+      - id: atomic
+        label: "Atomic Transaction Boundary"
+        members: [trip-db, outbox-table]
+        color: "rgba(139, 92, 246, 0.06)"
+
+      - id: consumers
+        label: "Independent Consumers"
+        members: [settlement-ep, comms-ep, monitoring-ep]
+        color: "rgba(245, 158, 11, 0.06)"
+
+    calls:
+      - id: dropoff-request
+        type: sync
+        from: driver-app
+        to: trip-api
+        method: POST
+        path: "v1/pt/{id}/dropoff"
+        protocol: http
+        duration: 35
+        status: 200
+        coupling: tight
+        critical: true
+        response:
+          status: 200
+          label: "200 OK"
+
+      - id: validate-transition
+        type: sync
+        from: trip-api
+        to: pt-aggregate
+        method: INVOKE
+        path: "DropOffPassenger(lat, lng)"
+        duration: 1
+        coupling: tight
+        critical: true
+
+      - id: persist-state
+        type: sync
+        from: trip-api
+        to: trip-db
+        method: UPDATE
+        path: "Status → POSTSERVICE"
+        duration: 8
+        coupling: tight
+        critical: true
+
+      - id: write-outbox
+        type: sync
+        from: trip-api
+        to: outbox-table
+        method: INSERT
+        path: "PtDroppedOffEvent"
+        duration: 2
+        coupling: tight
+        critical: true
+
+      - id: relay-to-asb
+        type: publish
+        from: outbox-relay
+        to: asb-topic
+        messageType: PtDroppedOffEvent
+        coupling: tight
+        critical: true
+        effect:
+          type: emoji-fan
+          emojis: ["💰", "💳", "📨"]
+          count: 6
+          spread: 40
+          speed: 130
+          duration: 1800
+          direction: from-source
+          fade: true
+          scale: [1.2, 0.4]
+          stagger: 100
+
+      - id: settlement-consume
+        type: subscribe
+        from: asb-topic
+        to: settlement-ep
+        messageType: PtDroppedOffEvent
+        action: "Calculate BC/PD/PM"
+        coupling: eventual
+
+      - id: comms-consume
+        type: subscribe
+        from: asb-topic
+        to: comms-ep
+        messageType: PtDroppedOffEvent
+        action: "SMS: Student dropped off"
+        coupling: eventual
+
+      - id: monitoring-consume
+        type: subscribe
+        from: asb-topic
+        to: monitoring-ep
+        messageType: PtDroppedOffEvent
+        action: "Record completion metric"
+        coupling: eventual
+
+    steps:
+      - id: rev-tap
+        title: "Driver Taps Drop Off"
+        narrative: >-
+          The driver confirms the student is safely at the destination.
+          `POST v1/pt/{id}/dropoff` with GPS coordinates and correlation ID.
+          This single tap starts the {color:orange|revenue pipeline}.
+        activeCalls: [dropoff-request]
+        substates:
+          driver-app: tapping
+          trip-api: validating
+        camera:
+          zoom: 1.6
+          duration: 1200
+          easing: spring-overshoot
+        duration: 3500
+
+      - id: rev-domain
+        title: "Guard, Mutate, Raise Event"
+        narrative: >-
+          The {color:purple|PassengerTrip aggregate} validates the transition against
+          the 16-state machine — only `IN_TRANSIT_TO_DROPOFF` can become `POSTSERVICE`.
+          On success: status mutated, `PtDroppedOffEvent` raised with denormalized
+          DriverId, ServiceProviderId, and MonitorId.
+        activeCalls: [validate-transition]
+        revealCalls: [dropoff-request]
+        substates:
+          driver-app: confirmed
+          trip-api: persisting
+          pt-aggregate: event-raised
+        camera:
+          zoom: 1.8
+          duration: 1500
+          easing: ease-in
+        duration: 4000
+
+      - id: rev-atomic
+        title: "Atomic Commit — State + Outbox"
+        narrative: >-
+          **One transaction, two writes.** The PT status change and the outbox row
+          commit together. If either fails, both roll back.
+          The event is now {color:green|durable} — it will reach the bus
+          even if the process crashes after commit.
+        activeCalls: [persist-state, write-outbox]
+        revealCalls: [validate-transition]
+        substates:
+          pt-aggregate: idle
+          trip-db: committed
+          outbox-table: committed
+        camera:
+          zoom: 1.5
+          duration: 1000
+          easing: spring-overshoot
+        duration: 4000
+
+      - id: rev-relay
+        title: "Outbox Relay Publishes to ASB"
+        narrative: >-
+          A `BackgroundService` polls `outbox_messages`, publishes to Azure Service Bus,
+          and marks the row processed. Exponential backoff on failure.
+          After 10 retries: {color:red|dead-letter queue + PagerDuty P1 alert}.
+        activeCalls: [relay-to-asb]
+        revealCalls: [persist-state, write-outbox]
+        substates:
+          outbox-table: relayed
+          outbox-relay: publishing
+        camera:
+          zoom: 1.4
+          duration: 1200
+          easing: spring-overshoot
+        duration: 4500
+
+      - id: rev-settlement
+        title: "Settlement Calculates BC/PD/PM"
+        narrative: >-
+          The Settlement EP consumes `PtDroppedOffEvent`. The denormalized payload
+          means {color:green|zero cross-service queries} — Bill Client, Pay Driver,
+          Pay Monitor calculated immediately. This is the event that
+          {color:orange|makes drivers get paid}.
+        activeCalls: [settlement-consume]
+        revealCalls: [relay-to-asb]
+        substates:
+          outbox-relay: done
+          settlement-ep: calculating
+        effects:
+          - target: settlement-consume
+            type: emoji-fan
+            emojis: ["💰", "💵", "✅"]
+            count: 5
+            spread: 35
+            speed: 120
+            duration: 1500
+            direction: from-source
+            fade: true
+            scale: [1.1, 0.5]
+            stagger: 100
+        camera:
+          zoom: 1.4
+          duration: 1000
+          easing: ease-out
+        duration: 4500
+
+      - id: rev-parallel
+        title: "Three Consumers, One Event"
+        narrative: >-
+          Settlement, Communications, and Monitoring all process the same event
+          {color:blue|independently}. SMS confirms drop-off to the parent.
+          Monitoring records the completion metric. If one consumer fails,
+          the others are unaffected — eventual consistency at work.
+        activeCalls: [settlement-consume, comms-consume, monitoring-consume]
+        revealCalls: [relay-to-asb]
+        substates:
+          settlement-ep: committed
+          comms-ep: delivering
+          monitoring-ep: recording
+        camera:
+          fitAll: true
+          duration: 1800
+          easing: ease-in-out
+          padding: 100
+        duration: 5000
+
+      - id: rev-bridge
+        title: "Next: The Self-Consumption Loop"
+        narrative: >-
+          Trip Operations doesn't just publish events — it also
+          {color:cyan|consumes its own}. The API pod writes state;
+          the EP pod broadcasts to the live fleet map via SignalR.
+        activeCalls: []
+        substates:
+          settlement-ep: idle
+          comms-ep: idle
+          monitoring-ep: idle
+        camera:
+          fitAll: true
+          duration: 1500
+          easing: ease-in-out
+        duration: 3000
+
+  # ══════════════════════════════════════════════════════════════════════
+  # Section 3: Self-Consumption — API → EP → SignalR
+  # ══════════════════════════════════════════════════════════════════════
+  - renderer: service-flow
+    title: "Self-Consumption"
+    accentColor: "#22C55E"
+    layout: sequence
+
+    services:
+      - id: api-pod
+        name: Trip Ops API Pod
+        type: api
+        technology: ".NET 10"
+        status: healthy
+        substates: [idle, ingesting, persisting, committed]
+        initialSubstate: idle
+        tags:
+          rate: "33 GPS/sec"
+
+      - id: trip-db
+        name: trip_operations
+        type: database
+        technology: "PostgreSQL + PostGIS"
+        status: healthy
+        substates: [idle, writing, committed]
+        initialSubstate: idle
+
+      - id: outbox
+        name: outbox_messages
+        type: database
+        technology: "Same txn"
+        status: healthy
+        substates: [idle, writing, committed]
+        initialSubstate: idle
+
+      - id: relay
+        name: Outbox Relay
+        type: worker
+        technology: "BackgroundService"
+        status: healthy
+        substates: [polling, publishing]
+        initialSubstate: polling
+
+      - id: ep-pod
+        name: Trip Ops EP Pod
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+        substates: [idle, receiving, broadcasting]
+        initialSubstate: idle
+        tags:
+          pattern: "Self-consumption"
+
+      - id: redis-idemp
+        name: Redis Idempotency
+        type: cache
+        technology: "30s TTL (GPS) / 1h (state)"
+        status: healthy
+        substates: [idle, checking, hit, miss]
+        initialSubstate: idle
+
+      - id: signalr-hub
+        name: SignalR Hub
+        type: gateway
+        technology: "IHubContext<TripHub>"
+        substates: [idle, broadcasting]
+        initialSubstate: idle
+
+      - id: dispatch-ui
+        name: Dispatch Board
+        type: client
+        technology: "Trip HQ"
+        substates: [idle, streaming]
+        initialSubstate: idle
+
+      - id: parent-ui
+        name: Parent Portal
+        type: client
+        technology: "Trip HQ"
+        substates: [idle, tracking]
+        initialSubstate: idle
+
+    queues:
+      - id: asb
+        name: trip-operations
+        type: topic
+        broker: servicebus
+        consumers: 7
+        tags:
+          throughput: "33 GPS/sec peak"
+
+    zones:
+      - id: write-path
+        label: "Write Path (API Pod)"
+        members: [api-pod, trip-db, outbox]
+        color: "rgba(139, 92, 246, 0.06)"
+
+      - id: broadcast-path
+        label: "Broadcast Path (EP Pod)"
+        members: [ep-pod, signalr-hub]
+        color: "rgba(34, 197, 94, 0.06)"
+
+    calls:
+      - id: state-persist
+        type: sync
+        from: api-pod
+        to: trip-db
+        method: UPDATE
+        path: "VR/PT state + GPS point"
+        duration: 8
+        coupling: tight
+        critical: true
+
+      - id: event-outbox
+        type: sync
+        from: api-pod
+        to: outbox
+        method: INSERT
+        path: "GpsLocationUpdated / VrStateChanged"
+        duration: 2
+        coupling: tight
+        critical: true
+
+      - id: outbox-publish
+        type: publish
+        from: relay
+        to: asb
+        messageType: "State + GPS events"
+        coupling: tight
+        effect:
+          type: particle-stream
+          count: 12
+          speed: 90
+          direction: along-edge
+          stagger: 40
+          duration: 2200
+          jitter: 0.15
+          fade: true
+
+      - id: ep-subscribe
+        type: subscribe
+        from: asb
+        to: ep-pod
+        messageType: "GpsLocationUpdated, VrStateChanged"
+        action: "Self-consumption handlers"
+        coupling: eventual
+
+      - id: idemp-check
+        type: sync
+        from: ep-pod
+        to: redis-idemp
+        method: CHECK
+        path: "EventId — dedup"
+        duration: 1
+        coupling: loose
+        fallback: "Process anyway (idempotent handlers)"
+
+      - id: broadcast-vr
+        type: sync
+        from: ep-pod
+        to: signalr-hub
+        method: SEND
+        path: "vr-{vrId} group"
+        duration: 2
+        coupling: loose
+
+      - id: broadcast-district
+        type: sync
+        from: ep-pod
+        to: signalr-hub
+        method: SEND
+        path: "district-{tenantId} group"
+        duration: 2
+        coupling: loose
+
+      - id: ws-dispatch
+        type: sync
+        from: signalr-hub
+        to: dispatch-ui
+        method: PUSH
+        path: "GPS + state changes"
+        duration: 1
+        coupling: eventual
+
+      - id: ws-parent
+        type: sync
+        from: signalr-hub
+        to: parent-ui
+        method: PUSH
+        path: "parent-{userId} scope"
+        duration: 1
+        coupling: eventual
+
+    steps:
+      - id: sc-establish
+        title: "Decoupling Write from Broadcast"
+        narrative: >-
+          The API pod ingests GPS at {color:cyan|33 events/second} at peak.
+          Broadcasting to WebSocket clients synchronously would block the thread pool.
+          {color:green|Self-consumption} separates the write path from the broadcast path —
+          two pods, one topic, zero coupling.
+        activeCalls: []
+        revealNodes: [api-pod, ep-pod, asb]
+        substates:
+          api-pod: idle
+          ep-pod: idle
+        camera:
+          fitAll: true
+          duration: 2000
+          easing: ease-in-out
+          padding: 120
+        duration: 4000
+
+      - id: sc-write
+        title: "API Pod Persists State + Outbox"
+        narrative: >-
+          GPS fix arrives. The API pod writes the state change and the outbox row
+          in a {color:purple|single atomic transaction}. The driver's position is safely stored.
+          Response returns to the MDD in under 15ms.
+        activeCalls: [state-persist, event-outbox]
+        substates:
+          api-pod: persisting
+          trip-db: writing
+          outbox: writing
+        camera:
+          zoom: 1.6
+          duration: 1000
+          easing: spring-overshoot
+        duration: 3500
+
+      - id: sc-relay
+        title: "Relay Publishes to ASB"
+        narrative: >-
+          The outbox relay polls and publishes. The event is now on the bus —
+          available to {color:blue|all 7 subscribers}, including the EP pod
+          from the same bounded context.
+        activeCalls: [outbox-publish]
+        revealCalls: [state-persist, event-outbox]
+        substates:
+          api-pod: committed
+          trip-db: committed
+          outbox: committed
+          relay: publishing
+        camera:
+          zoom: 1.3
+          duration: 1200
+          easing: spring-overshoot
+        duration: 3500
+
+      - id: sc-receive
+        title: "EP Pod Receives Its Own Events"
+        narrative: >-
+          The EP pod subscribes to the same topic its API pod published to.
+          Redis idempotency prevents duplicate processing:
+          {color:cyan|30s TTL} for GPS (next fix supersedes),
+          {color:amber|1h TTL} for state changes.
+        activeCalls: [ep-subscribe, idemp-check]
+        revealCalls: [outbox-publish]
+        substates:
+          relay: polling
+          ep-pod: receiving
+          redis-idemp: checking
+        camera:
+          zoom: 1.5
+          duration: 1000
+          easing: spring-overshoot
+        duration: 4000
+
+      - id: sc-broadcast
+        title: "SignalR Fan-Out to Groups"
+        narrative: >-
+          The EP injects `IHubContext` and broadcasts to two SignalR groups:
+          `vr-{vrId}` for per-run tracking, `district-{tenantId}` for the ops dashboard.
+          {color:green|Group-scoped delivery} — a DPS dispatcher never sees JeffCo's vehicles.
+        activeCalls: [broadcast-vr, broadcast-district]
+        revealCalls: [ep-subscribe]
+        substates:
+          redis-idemp: miss
+          ep-pod: broadcasting
+          signalr-hub: broadcasting
+        effects:
+          - target: broadcast-vr
+            type: emoji-fan
+            emojis: ["📍", "🚐", "📡"]
+            count: 5
+            spread: 30
+            speed: 120
+            duration: 1500
+            direction: from-source
+            fade: true
+            scale: [1.0, 0.5]
+            stagger: 100
+        camera:
+          zoom: 1.4
+          duration: 1000
+          easing: ease-out
+        duration: 4000
+
+      - id: sc-delivery
+        title: "Live Map Updates"
+        narrative: >-
+          The Dispatch Board shows the vehicle marker move in real-time.
+          The Parent Portal shows ETA for their child's bus.
+          Errors are {color:gray|swallowed} — the next GPS fix supersedes any missed broadcast.
+        activeCalls: [ws-dispatch, ws-parent]
+        revealCalls: [broadcast-vr, broadcast-district]
+        substates:
+          signalr-hub: idle
+          dispatch-ui: streaming
+          parent-ui: tracking
+        camera:
+          zoom: 1.5
+          duration: 1200
+          easing: spring-overshoot
+        duration: 3500
+
+      - id: sc-complete
+        title: "Full Self-Consumption Loop"
+        narrative: >-
+          API persists → outbox relays → EP broadcasts via SignalR.
+          **33 GPS events/second** flow through this loop at peak
+          without blocking the API thread pool. The write path and broadcast path
+          scale independently — {color:green|zero coupling between pods}.
+        activeCalls: [state-persist, event-outbox, outbox-publish, ep-subscribe, broadcast-vr, broadcast-district, ws-dispatch, ws-parent]
+        substates:
+          api-pod: ingesting
+          trip-db: writing
+          outbox: writing
+          relay: publishing
+          ep-pod: broadcasting
+          signalr-hub: broadcasting
+          dispatch-ui: streaming
+          parent-ui: tracking
+        effects:
+          - target: outbox-publish
+            type: particle-stream
+            count: 18
+            speed: 110
+            direction: along-edge
+            stagger: 30
+            duration: 3000
+            jitter: 0.12
+            fade: true
+        camera:
+          fitAll: true
+          duration: 2000
+          easing: ease-in-out
+          padding: 80
+        duration: 6000

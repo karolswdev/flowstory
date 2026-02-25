@@ -1,0 +1,494 @@
+id: reporting-analytics-events
+title: "Reporting & Analytics — Cross-BC Event Materialization"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  The Reporting & Analytics EventProcessor subscribes to 8 Azure Service Bus topics spanning
+  7 source bounded contexts, running 18 inbound event handlers that materialize operational
+  data into 7 read model projections. This event-driven materialization pipeline is the
+  backbone of the reporting dashboard — every trip completion, settlement calculation, route
+  optimization, rescue request, and credential expiration is projected into denormalized
+  read models optimized for aggregation queries. The EventProcessor uses Redis-based
+  idempotency, Prometheus metrics decoration on all 18 handlers, and Polly resilience
+  patterns. Settlement alone contributes 8 event handlers — the largest single-BC fan-in
+  in the platform.
+
+sections:
+  # -- Section 1: Trip Operations, Routing & Enrollment Materialization ----------------
+  - renderer: service-flow
+    title: "Operational Event Materialization (Trip Ops, Routing, Enrollment, Rescue)"
+    accentColor: "#3B82F6"
+    layout: sequence
+
+    services:
+      - id: trip-ops-api
+        name: "Trip Operations"
+        type: api
+        technology: ".NET 10"
+        status: healthy
+      - id: routing-api
+        name: "Routing & Pricing"
+        type: api
+        technology: ".NET 10"
+        status: healthy
+      - id: enrollment-api
+        name: "Enrollment & Demand"
+        type: api
+        technology: ".NET 10"
+        status: healthy
+      - id: rescue-api
+        name: "Rescue Orchestration"
+        type: api
+        technology: ".NET 10"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+      - id: reporting-ep
+        name: "Reporting EventProcessor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: reporting-read-db
+        name: "ReportingDbContext"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: redis
+        name: "Redis"
+        type: cache
+        technology: "Redis"
+        status: healthy
+
+    zones:
+      - id: source-bcs
+        label: "Source Bounded Contexts (4 BCs)"
+        members: [trip-ops-api, routing-api, enrollment-api, rescue-api]
+        color: "rgba(59, 130, 246, 0.06)"
+      - id: event-mesh
+        label: "Event Mesh"
+        members: [asb]
+        color: "rgba(245, 158, 11, 0.06)"
+      - id: reporting-sink
+        label: "Reporting & Analytics (Materialization)"
+        members: [reporting-ep, reporting-read-db, redis]
+        color: "rgba(124, 58, 237, 0.06)"
+
+    calls:
+      - id: pt-dropped-off-publish
+        type: publish
+        from: trip-ops-api
+        to: asb
+        messageType: "PtDroppedOffEvent"
+        payload:
+          description: "PtId, VrId, TenantId, DistrictId, DropoffTime — published on trip-operations topic"
+      - id: vr-completed-publish
+        type: publish
+        from: trip-ops-api
+        to: asb
+        messageType: "VehicleRunCompletedEvent"
+        payload:
+          description: "VrId, TenantId, ServiceProviderId, CompletedAt, OnTimePercentage — published on trip-operations topic"
+      - id: route-optimized-publish
+        type: publish
+        from: routing-api
+        to: asb
+        messageType: "RouteOptimizedEvent"
+        payload:
+          description: "RouteId, TenantId, ServiceDate, Algorithm, OptimizationMetrics — published on routing-and-pricing topic"
+      - id: stop-sequenced-publish
+        type: publish
+        from: routing-api
+        to: asb
+        messageType: "StopSequencedEvent"
+        payload:
+          description: "RouteId, TenantId, StopSequence — published on routing-and-pricing topic"
+      - id: trf-approved-publish
+        type: publish
+        from: enrollment-api
+        to: asb
+        messageType: "TrfApprovedEvent"
+        payload:
+          description: "TrfId, TenantId, DistrictId, ServiceType, ApprovedAt — published on enrollment-and-demand topic"
+      - id: rescue-requested-publish
+        type: publish
+        from: rescue-api
+        to: asb
+        messageType: "RescueRequestedEvent"
+        payload:
+          description: "RescueRequestId, TenantId, Reason, AffectedTrips — published on rescue-orchestration topic"
+      - id: rescue-completed-publish
+        type: publish
+        from: rescue-api
+        to: asb
+        messageType: "RescueCompletedEvent"
+        payload:
+          description: "RescueRequestId, TenantId, Resolution, CompletedAt — published on rescue-orchestration topic"
+      - id: subscribe-trip-ops
+        type: subscribe
+        from: asb
+        to: reporting-ep
+        messageType: "PtDroppedOffEvent, VehicleRunCompletedEvent"
+        action: "reporting-trip-subscriber subscription on trip-operations topic"
+      - id: subscribe-routing
+        type: subscribe
+        from: asb
+        to: reporting-ep
+        messageType: "RouteOptimizedEvent, StopSequencedEvent"
+        action: "reporting-routing-subscriber subscription on routing-and-pricing topic"
+      - id: subscribe-enrollment
+        type: subscribe
+        from: asb
+        to: reporting-ep
+        messageType: "TrfApprovedEvent"
+        action: "reporting-enrollment-subscriber subscription on enrollment-and-demand topic"
+      - id: subscribe-rescue
+        type: subscribe
+        from: asb
+        to: reporting-ep
+        messageType: "RescueRequestedEvent, RescueCompletedEvent"
+        action: "reporting-rescue-subscriber subscription on rescue-orchestration topic"
+      - id: upsert-trip-volume
+        type: sync
+        from: reporting-ep
+        to: reporting-read-db
+        method: POST
+        path: "TripVolumeReadModel UPSERT"
+        duration: 20
+        description: "PtDroppedOffEventHandler upserts TripVolumeReadModel keyed by TenantId + DistrictId + Date"
+      - id: upsert-otp
+        type: sync
+        from: reporting-ep
+        to: reporting-read-db
+        method: POST
+        path: "OnTimePerformanceReadModel UPSERT"
+        duration: 20
+        description: "VehicleRunCompletedEventHandler upserts OnTimePerformanceReadModel keyed by TenantId + Date + ServiceProvider"
+      - id: upsert-route-metrics
+        type: sync
+        from: reporting-ep
+        to: reporting-read-db
+        method: POST
+        path: "RouteOptimizationMetricsReadModel UPSERT"
+        duration: 20
+        description: "RouteOptimizedEventHandler upserts RouteOptimizationMetricsReadModel keyed by TenantId + ServiceDate + Algorithm"
+      - id: upsert-rescue-metrics
+        type: sync
+        from: reporting-ep
+        to: reporting-read-db
+        method: POST
+        path: "RescueMetricsReadModel UPSERT"
+        duration: 20
+        description: "RescueRequestCreatedEventHandler + RescueResolvedEventHandler upsert RescueMetricsReadModel keyed by TenantId + Date + RescueReason"
+      - id: upsert-demand
+        type: sync
+        from: reporting-ep
+        to: reporting-read-db
+        method: POST
+        path: "DemandTrackingReadModel UPSERT"
+        duration: 20
+        description: "TrfApprovedEventHandler upserts DemandTrackingReadModel keyed by TenantId + Date + District + ServiceType"
+      - id: idempotency-check
+        type: sync
+        from: reporting-ep
+        to: redis
+        method: GET
+        path: "CatalystReporting:idempotency:{eventId}"
+        duration: 2
+        description: "Redis-based idempotency check (1-hour TTL) prevents duplicate event processing"
+
+    steps:
+      - id: events-step-1
+        title: "Trip Operations: Volume & On-Time Performance"
+        narrative: >
+          The Trip Operations BC publishes two key events consumed by the Reporting EP via the
+          `reporting-trip-subscriber` subscription on the `trip-operations` ASB topic.
+          **PtDroppedOffEventHandler** (`EventProcessor/Handlers/PtDroppedOffEventHandler.cs`)
+          materializes each passenger trip completion into the **TripVolumeReadModel** — a
+          denormalized projection keyed by `TenantId + DistrictId + Date` that powers the
+          operational dashboard's trip volume metrics. **VehicleRunCompletedEventHandler**
+          (`EventProcessor/Handlers/VehicleRunCompletedEventHandler.cs`) materializes vehicle
+          run completions into the **OnTimePerformanceReadModel** keyed by
+          `TenantId + Date + ServiceProvider`. Both handlers follow the standard idempotency
+          pattern: {color:green|Redis check with 1-hour TTL before processing, Redis set after
+          commit}. All 18 handlers are decorated with `DecorateEventHandlerWithMetrics<T>()`
+          for Prometheus instrumentation, reporting processing time and success/failure counts
+          at the `/metrics` endpoint on port 8081. {color:red|OnTimePerformanceReadModel has
+          no materialized view fallback} — it relies entirely on real-time event upserts.
+        activeCalls: [pt-dropped-off-publish, vr-completed-publish, subscribe-trip-ops, upsert-trip-volume, upsert-otp, idempotency-check]
+        revealNodes: [trip-ops-api, asb, reporting-ep, reporting-read-db, redis]
+        duration: 6000
+      - id: events-step-2
+        title: "Routing, Enrollment & Rescue: Route Optimization, Demand & Rescue Metrics"
+        narrative: >
+          Three additional source BCs feed operational read models. **RouteOptimizedEventHandler**
+          (`EventProcessor/Handlers/RouteOptimizedEventHandler.cs`) consumes from the
+          `routing-and-pricing` topic via `reporting-routing-subscriber` and upserts
+          **RouteOptimizationMetricsReadModel** keyed by `TenantId + ServiceDate + Algorithm`.
+          **StopSequencedEventHandler** handles stop-level sequencing events from the same topic.
+          **TrfApprovedEventHandler** (`EventProcessor/Handlers/TrfApprovedEventHandler.cs`)
+          consumes from `enrollment-and-demand` via `reporting-enrollment-subscriber` and upserts
+          **DemandTrackingReadModel** keyed by `TenantId + Date + District + ServiceType` —
+          tracking enrollment demand as TRFs are approved. The rescue pipeline contributes two
+          handlers: **RescueRequestCreatedEventHandler** and **RescueResolvedEventHandler**
+          consume from `rescue-orchestration` via `reporting-rescue-subscriber` and jointly
+          maintain **RescueMetricsReadModel** keyed by `TenantId + Date + RescueReason`.
+          {color:red|All 4 of these read models (RouteOptimization, Demand, Rescue, OnTimePerformance)
+          lack materialized view nightly reconciliation} — unlike TripVolume, Settlement, and
+          Compliance which have `REFRESH MATERIALIZED VIEW CONCURRENTLY` fallbacks. If events
+          are lost or processing fails, these read models will drift from source of truth.
+        activeCalls: [route-optimized-publish, stop-sequenced-publish, trf-approved-publish, rescue-requested-publish, rescue-completed-publish, subscribe-routing, subscribe-enrollment, subscribe-rescue, upsert-route-metrics, upsert-demand, upsert-rescue-metrics]
+        revealNodes: [routing-api, enrollment-api, rescue-api]
+        revealCalls: [pt-dropped-off-publish, vr-completed-publish, subscribe-trip-ops, upsert-trip-volume, upsert-otp]
+        duration: 6000
+
+  # -- Section 2: Settlement, Provider Network & Identity Materialization --------------
+  - renderer: service-flow
+    title: "Settlement, Provider & Identity Event Materialization"
+    accentColor: "#10B981"
+    layout: sequence
+
+    services:
+      - id: settlement-api
+        name: "Settlement"
+        type: api
+        technology: ".NET 10"
+        status: healthy
+      - id: provider-api
+        name: "Provider Network"
+        type: api
+        technology: ".NET 10"
+        status: healthy
+      - id: identity-api
+        name: "Identity & Access"
+        type: api
+        technology: ".NET 10"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+      - id: reporting-ep
+        name: "Reporting EventProcessor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: reporting-read-db
+        name: "ReportingDbContext"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: redis
+        name: "Redis"
+        type: cache
+        technology: "Redis"
+        status: healthy
+
+    zones:
+      - id: settlement-zone
+        label: "Settlement BC (8 Event Handlers)"
+        members: [settlement-api]
+        color: "rgba(16, 185, 129, 0.06)"
+      - id: other-sources
+        label: "Provider Network & Identity"
+        members: [provider-api, identity-api]
+        color: "rgba(59, 130, 246, 0.06)"
+      - id: event-mesh
+        label: "Event Mesh"
+        members: [asb]
+        color: "rgba(245, 158, 11, 0.06)"
+      - id: reporting-sink
+        label: "Reporting & Analytics (Materialization)"
+        members: [reporting-ep, reporting-read-db, redis]
+        color: "rgba(124, 58, 237, 0.06)"
+
+    calls:
+      - id: settlement-approved-publish
+        type: publish
+        from: settlement-api
+        to: asb
+        messageType: "SettlementApprovedEvent"
+        payload:
+          description: "SettlementId, TenantId, Amount, BillingPeriod — published on settlement topic"
+      - id: settlement-batch-publish
+        type: publish
+        from: settlement-api
+        to: asb
+        messageType: "SettlementBatchCreatedEvent"
+        payload:
+          description: "BatchId, TenantId, SettlementCount, TotalAmount — published on settlement topic"
+      - id: settlement-calculated-publish
+        type: publish
+        from: settlement-api
+        to: asb
+        messageType: "SettlementCalculatedEvent"
+        payload:
+          description: "SettlementId, TenantId, BC/PD/PM amounts — published on settlement topic"
+      - id: settlement-reconciled-publish
+        type: publish
+        from: settlement-api
+        to: asb
+        messageType: "SettlementReconciledEvent"
+        payload:
+          description: "SettlementId, TenantId, ReconciliationResult — published on settlement topic"
+      - id: settlement-dispute-created-publish
+        type: publish
+        from: settlement-api
+        to: asb
+        messageType: "SettlementDisputeCreatedEvent"
+        payload:
+          description: "DisputeId, SettlementId, TenantId, Reason — published on settlement topic"
+      - id: settlement-dispute-resolved-publish
+        type: publish
+        from: settlement-api
+        to: asb
+        messageType: "SettlementDisputeResolvedEvent"
+        payload:
+          description: "DisputeId, TenantId, Resolution — published on settlement topic"
+      - id: settlement-adj-requested-publish
+        type: publish
+        from: settlement-api
+        to: asb
+        messageType: "SettlementAdjustmentRequestedEvent"
+        payload:
+          description: "AdjustmentId, SettlementId, TenantId, RequestedAmount — published on settlement topic"
+      - id: settlement-adj-applied-publish
+        type: publish
+        from: settlement-api
+        to: asb
+        messageType: "SettlementAdjustmentAppliedEvent"
+        payload:
+          description: "AdjustmentId, TenantId, AppliedAmount — published on settlement topic"
+      - id: credential-expired-publish
+        type: publish
+        from: provider-api
+        to: asb
+        messageType: "CredentialExpiredEvent"
+        payload:
+          description: "CredentialId, ProviderId, TenantId, CredentialType, ExpiredAt — published on provider-network-and-assignment topic"
+      - id: user-created-publish
+        type: publish
+        from: identity-api
+        to: asb
+        messageType: "UserCreatedEvent"
+        payload:
+          description: "UserId, TenantId, Roles — published on identity-and-access topic"
+      - id: user-role-changed-publish
+        type: publish
+        from: identity-api
+        to: asb
+        messageType: "UserRoleChangedEvent"
+        payload:
+          description: "UserId, TenantId, OldRoles, NewRoles — published on identity-and-access topic"
+      - id: subscribe-settlement
+        type: subscribe
+        from: asb
+        to: reporting-ep
+        messageType: "Settlement*Events (8 types)"
+        action: "reporting-settlement-subscriber subscription on settlement topic — largest single-BC fan-in"
+      - id: subscribe-provider
+        type: subscribe
+        from: asb
+        to: reporting-ep
+        messageType: "CredentialExpiredEvent"
+        action: "reporting-provider-subscriber subscription on provider-network-and-assignment topic"
+      - id: subscribe-identity
+        type: subscribe
+        from: asb
+        to: reporting-ep
+        messageType: "UserCreatedEvent, UserRoleChangedEvent"
+        action: "reporting-identity-subscriber subscription on identity-and-access topic"
+      - id: upsert-settlement-summary
+        type: sync
+        from: reporting-ep
+        to: reporting-read-db
+        method: POST
+        path: "SettlementSummaryReadModel UPSERT"
+        duration: 20
+        description: "8 settlement event handlers jointly maintain SettlementSummaryReadModel keyed by TenantId + billing period"
+      - id: upsert-compliance-rate
+        type: sync
+        from: reporting-ep
+        to: reporting-read-db
+        method: POST
+        path: "ComplianceRateReadModel UPSERT"
+        duration: 20
+        description: "CredentialExpiredEventHandler upserts ComplianceRateReadModel keyed by TenantId + credential type"
+      - id: idempotency-check
+        type: sync
+        from: reporting-ep
+        to: redis
+        method: GET
+        path: "CatalystReporting:idempotency:{eventId}"
+        duration: 2
+        description: "Redis-based idempotency check (1-hour TTL) prevents duplicate event processing across all 18 handlers"
+
+    steps:
+      - id: events-step-3
+        title: "Settlement: The 8-Handler Fan-In"
+        narrative: >
+          The Settlement BC contributes the {color:red|largest single-BC event fan-in in the
+          Reporting EP} — 8 distinct event handlers consuming from the `settlement` topic via
+          `reporting-settlement-subscriber`. **SettlementApprovedEventHandler**,
+          **SettlementBatchCreatedEventHandler**, **SettlementCalculatedEventHandler**,
+          **SettlementReconciledEventHandler**, **SettlementDisputeCreatedEventHandler**,
+          **SettlementDisputeResolvedEventHandler**, **SettlementAdjustmentRequestedEventHandler**,
+          and **SettlementAdjustmentAppliedEventHandler** (all in
+          `EventProcessor/Handlers/Settlement*.cs`) jointly maintain the
+          **SettlementSummaryReadModel** keyed by `TenantId + billing period`. This read model
+          powers `GET /v1/dashboard/financial` via **GetFinancialMetricsQuery**.
+          {color:green|SettlementSummaryReadModel has a materialized view with nightly
+          CONCURRENTLY refresh} — one of only 3 read models with this reconciliation safety net.
+          {color:red|However, the Settlement BC itself is rated STUB with 1 NotImplementedException}
+          — these 8 handlers may receive limited real event data until Settlement reaches production
+          completeness. The settlement event handlers track the full BC/PD/PM (Bill Client / Pay
+          Driver / Pay Monitor) lifecycle from calculation through approval, reconciliation,
+          disputes, and adjustments.
+        activeCalls: [settlement-approved-publish, settlement-batch-publish, settlement-calculated-publish, settlement-reconciled-publish, settlement-dispute-created-publish, settlement-dispute-resolved-publish, settlement-adj-requested-publish, settlement-adj-applied-publish, subscribe-settlement, upsert-settlement-summary, idempotency-check]
+        revealNodes: [settlement-api, asb, reporting-ep, reporting-read-db, redis]
+        duration: 6000
+      - id: events-step-4
+        title: "Provider Network & Identity: Compliance & User Tracking"
+        narrative: >
+          **CredentialExpiredEventHandler** (`EventProcessor/Handlers/CredentialExpiredEventHandler.cs`)
+          consumes from the `provider-network-and-assignment` topic via `reporting-provider-subscriber`
+          and upserts **ComplianceRateReadModel** keyed by `TenantId + credential type`. This read
+          model tracks the percentage of providers with valid credentials by type — powering the
+          compliance section of the operational dashboard. {color:green|ComplianceRateReadModel
+          has a materialized view with nightly CONCURRENTLY refresh}, making it one of the 3 read
+          models with full reconciliation coverage. The Identity & Access BC contributes 2 handlers:
+          **UserCreatedEventHandler** and **UserRoleChangedEventHandler** consume from the
+          `identity-and-access` topic via `reporting-identity-subscriber`. These handlers track
+          user provisioning and role changes for audit reporting, though they do not directly
+          feed a named read model — they support the audit trail report category
+          (`ReportCategory.AuditTrail = 204`).
+        activeCalls: [credential-expired-publish, user-created-publish, user-role-changed-publish, subscribe-provider, subscribe-identity, upsert-compliance-rate]
+        revealNodes: [provider-api, identity-api]
+        revealCalls: [settlement-approved-publish, subscribe-settlement, upsert-settlement-summary]
+        duration: 5000
+      - id: events-step-5
+        title: "Event Materialization Summary: 18 Handlers, 7 Read Models, 8 Topics"
+        narrative: >
+          The complete Reporting & Analytics event materialization pipeline spans
+          {color:blue|18 inbound event handlers} across {color:blue|8 ASB topic subscriptions}
+          from {color:blue|7 source bounded contexts}, materializing into {color:blue|7 read
+          model projections}. The subscription naming follows a consistent pattern:
+          `reporting-{bc-slug}-subscriber` (e.g., `reporting-trip-subscriber`,
+          `reporting-settlement-subscriber`). The EventProcessor registers
+          `AddCatalystEpMetrics("catalyst-reporting")` and all 18 handlers are decorated with
+          `DecorateEventHandlerWithMetrics<T>()` for Prometheus observability. The EP exposes
+          `/metrics` on the standard Prometheus scrape port and `/health/live` on port 8081.
+          {color:green|The outbox pattern (outbox_messages table via IOutboxDbContext) ensures
+          at-least-once delivery for outbound events}. Inbound idempotency is handled by
+          Redis-based deduplication with 1-hour TTL. The read model / materialized view
+          coverage breakdown: 3 with nightly refresh (TripVolume, Settlement, Compliance),
+          {color:red|4 without nightly refresh (RouteOptimization, Rescue, OnTimePerformance,
+          DemandTracking)}. The 83-file test suite includes 4 dedicated event handler test
+          files (CredentialExpired, PtDroppedOff, SettlementApproved, RouteOptimized) plus
+          6 integration tests covering the full materialization pipeline.
+        activeCalls: [idempotency-check]
+        revealCalls: [credential-expired-publish, user-created-publish, user-role-changed-publish, subscribe-provider, subscribe-identity, upsert-compliance-rate]
+        duration: 5000

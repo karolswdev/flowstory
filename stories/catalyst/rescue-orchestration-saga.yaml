@@ -1,0 +1,486 @@
+id: rescue-orchestration-saga
+title: "Rescue Orchestration — Saga Lifecycle & Provider Matching"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  The rescue pipeline from anomaly detection through Conductor saga execution.
+  Section 1 traces the trigger path: Monitoring EP detects a driver no-show or
+  at-risk condition, publishes to ASB, Rescue EP creates the RescueRequest aggregate
+  and walks it through the 8-state machine. Section 2 follows the Conductor saga:
+  provider matching via coverage zones, the offer-accept-reject cycle, trip
+  reassignment to replacement VR, and compensation workflows for rollback.
+
+sections:
+  # -- Section 1: Rescue Detection & Request Creation --------------------------
+  - renderer: service-flow
+    title: "Rescue Detection & Request Creation"
+    accentColor: "#EF4444"
+    layout: sequence
+
+    services:
+      - id: monitoring-ep
+        name: "Monitoring Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+      - id: rescue-ep
+        name: "Rescue Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: rescue-api
+        name: "Rescue Orchestration API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: rescue-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: conductor
+        name: "Conductor"
+        type: workflow
+        technology: "Orkes Conductor"
+        status: healthy
+      - id: redis
+        name: "Redis"
+        type: cache
+        technology: "Redis 7"
+        status: healthy
+
+    zones:
+      - id: detection-zone
+        label: "Anomaly Detection"
+        members: [monitoring-ep, asb]
+        color: "rgba(239, 68, 68, 0.06)"
+      - id: rescue-zone
+        label: "Rescue Orchestration"
+        members: [rescue-ep, rescue-api, rescue-db, conductor, redis]
+        color: "rgba(251, 146, 60, 0.06)"
+
+    calls:
+      - id: publish-anomaly
+        type: publish
+        from: monitoring-ep
+        to: asb
+        messageType: "DriverNoShowDetectedEvent | VehicleBreakdownDetectedEvent | LatePickupDetectedEvent"
+        payload:
+          description: "Monitoring detects anomaly via exception threshold rules, publishes to monitoring-and-exceptions topic. 7 event types map to 7 RescueTypes."
+      - id: consume-anomaly
+        type: subscribe
+        from: asb
+        to: rescue-ep
+        messageType: "DriverNoShowDetectedEvent"
+        action: "DriverNoShowEventHandler creates RescueRequest via InitiateRescueCommand"
+      - id: create-rescue
+        type: sync
+        from: rescue-ep
+        to: rescue-api
+        method: POST
+        path: /v1/rescues
+        protocol: http
+        duration: 150
+        status: 201
+        description: "InitiateRescueCommand -> RescueRequest.Create(). Status: Detected. SLA timer starts."
+        response:
+          status: 201
+          label: "RescueRequest created"
+      - id: persist-rescue
+        type: sync
+        from: rescue-api
+        to: rescue-db
+        method: POST
+        path: "rescue.rescue_requests + rescue.outbox_messages"
+        duration: 30
+        description: "Atomic: RescueRequest aggregate + RescueInitiatedEvent in outbox. Transactional outbox pattern."
+      - id: trigger-workflow
+        type: sync
+        from: rescue-api
+        to: conductor
+        method: POST
+        path: "/api/workflow/rescue-orchestration-workflow"
+        protocol: http
+        duration: 200
+        status: 200
+        description: "Start Conductor saga. WorkflowInstanceId stored on aggregate. 600s timeout."
+        response:
+          status: 200
+          label: "Workflow started"
+      - id: idempotency-check
+        type: sync
+        from: rescue-ep
+        to: redis
+        method: GET
+        path: "GET CatalystRescue:{eventId}"
+        duration: 5
+        description: "Redis idempotency check (1-hour TTL). Prevents duplicate rescue creation from redelivered events."
+      - id: publish-initiated
+        type: publish
+        from: rescue-api
+        to: asb
+        messageType: "RescueInitiatedEvent"
+        payload:
+          description: "Outbox relay publishes to rescue-orchestration topic. SignalR broadcast handlers pick up for real-time UI."
+      - id: sla-set
+        type: sync
+        from: rescue-api
+        to: rescue-db
+        method: POST
+        path: "rescue.rescue_requests SET sla"
+        duration: 15
+        description: "RescueSla attached: Normal(15/30), High(10/20), Critical(5/10) minutes response/escalation."
+
+    steps:
+      - id: detect-step-1
+        title: "Anomaly Detection & Event Publishing"
+        narrative: >
+          Monitoring EP continuously evaluates trip operations for 7 anomaly types:
+          **DriverNoShow**, **VehicleBreakdown**, **PassengerNoShow**, **LatePickup**,
+          **ProviderSuspended**, **RouteDeviation**, and **DriverEmergency**. When a
+          threshold is breached, Monitoring publishes the corresponding event to the
+          `monitoring-and-exceptions` ASB topic. Each event type maps 1:1 to a
+          `RescueType` enum value. The **StaleVrDetectedEvent** (added in R076) also
+          feeds this pipeline for VRs that have gone silent.
+        activeCalls: [publish-anomaly]
+        revealNodes: [monitoring-ep, asb]
+        duration: 5000
+      - id: detect-step-2
+        title: "Rescue EP Consumption & Idempotency"
+        narrative: >
+          Rescue EP subscribes to `monitoring-and-exceptions` and
+          `provider-network-and-assignment` topics via 8 cross-context handlers:
+          **DriverNoShowEventHandler**, **VehicleBreakdownEventHandler**,
+          **PassengerNoShowEventHandler**, **LatePickupEventHandler**,
+          **RouteDeviationEventHandler**, **DriverEmergencyEventHandler**,
+          **ProviderSuspendedEventHandler**, and **StaleVrDetectedEventHandler**.
+          Each handler checks Redis for idempotency (`CatalystRescue:{eventId}`,
+          1-hour TTL) before dispatching `InitiateRescueCommand` via MediatR.
+          All handlers are decorated with `DecorateEventHandlerWithMetrics<T>()`
+          for Prometheus instrumentation.
+        activeCalls: [consume-anomaly, idempotency-check]
+        revealNodes: [rescue-ep, redis]
+        duration: 5000
+      - id: detect-step-3
+        title: "RescueRequest Aggregate Creation"
+        narrative: >
+          `InitiateRescueCommand` invokes `RescueRequest.Create()` factory method.
+          The aggregate initializes in `Detected` status with: `OriginalVehicleRunId`,
+          `RescueType`, `AffectedPassengerTripIds` (stored as `Guid[]` in PostgreSQL),
+          and `DetectedAt` timestamp. The **RescueSla** value object is attached based
+          on priority: Normal (15 min response / 30 min escalation), High (10/20),
+          Critical (5/10). The aggregate and **RescueInitiatedEvent** are persisted
+          atomically via transactional outbox (`rescue.outbox_messages`). Polling
+          interval: 5 seconds, max retries: 5, batch size: 100.
+        activeCalls: [create-rescue, persist-rescue, sla-set]
+        revealNodes: [rescue-api, rescue-db]
+        revealCalls: [consume-anomaly, idempotency-check]
+        duration: 6000
+      - id: detect-step-4
+        title: "Conductor Workflow Trigger"
+        narrative: >
+          After persistence, the command handler starts the Conductor saga via
+          `IWorkflowClient.StartWorkflow("rescue-orchestration-workflow")`. The
+          `WorkflowInstanceId` is stored on the aggregate for correlation. The saga
+          has a 600-second timeout. If Conductor is unavailable, `StubWorkflowService`
+          logs the failure but does not block -- manual API endpoints (`POST /v1/rescues/{id}/match`,
+          `POST /v1/rescues/{id}/dispatch`) remain operational. The
+          **RescueInitiatedEvent** is broadcast via SignalR (`RescueNotificationsHub`)
+          to connected dispatchers. {color:red|Next: the saga takes over provider matching.}
+        activeCalls: [trigger-workflow, publish-initiated]
+        revealNodes: [conductor]
+        revealCalls: [create-rescue, persist-rescue, sla-set]
+        duration: 5000
+
+  # -- Section 2: Conductor Rescue Saga ----------------------------------------
+  - renderer: service-flow
+    title: "Conductor Rescue Saga"
+    accentColor: "#22C55E"
+    layout: sequence
+
+    services:
+      - id: conductor
+        name: "Conductor"
+        type: workflow
+        technology: "Orkes Conductor"
+        status: healthy
+      - id: rescue-api
+        name: "Rescue Orchestration API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: provider-api
+        name: "Provider Network API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: trip-ops-api
+        name: "Trip Operations API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: assignment-api
+        name: "Assignment API"
+        type: api
+        technology: ".NET 10"
+        version: "v1"
+        status: healthy
+      - id: comms-ep
+        name: "Communications Event Processor"
+        type: event-processor
+        technology: ".NET 10"
+        status: healthy
+      - id: rescue-db
+        name: "PostgreSQL 16"
+        type: database
+        technology: "PostgreSQL 16"
+        status: healthy
+      - id: redis
+        name: "Redis"
+        type: cache
+        technology: "Redis 7"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+
+    zones:
+      - id: saga-zone
+        label: "Conductor Saga"
+        members: [conductor, rescue-api, rescue-db, redis]
+        color: "rgba(34, 197, 94, 0.06)"
+      - id: cross-bc-zone
+        label: "Cross-BC Coordination"
+        members: [provider-api, trip-ops-api, assignment-api, comms-ep, asb]
+        color: "rgba(59, 130, 246, 0.06)"
+
+    calls:
+      - id: find-provider
+        type: sync
+        from: conductor
+        to: rescue-api
+        method: POST
+        path: "FindReplacementProviderWorker"
+        protocol: http
+        duration: 300
+        status: 200
+        description: "Step 2: find-replacement-provider task. 6-criterion weighted scoring: Proximity 30%, Availability 25%, Capacity 15%, Equipment 15%, Reliability 10%, Cost 5%."
+        response:
+          status: 200
+          label: "Provider candidates ranked"
+      - id: query-providers
+        type: sync
+        from: rescue-api
+        to: provider-api
+        method: GET
+        path: "/v1/providers?available=true&lat={lat}&lng={lng}&radiusMiles=25"
+        protocol: http
+        duration: 200
+        status: 200
+        description: "ProviderNetworkHttpClient: fetch available providers within MaxProximityMiles (25). Polly: 3 retries, circuit breaker, 15s timeout."
+        response:
+          status: 200
+          label: "Available providers"
+      - id: coverage-zone-check
+        type: sync
+        from: rescue-api
+        to: redis
+        method: GET
+        path: "GET rescue:coverage:{dispatchAreaId}"
+        duration: 10
+        description: "RescueCoverageZone: pre-computed coverage with provider counts at 5/10/25 mi. 5-min TTL. Refreshed by CoverageZoneRefreshJob."
+      - id: send-offer
+        type: sync
+        from: conductor
+        to: rescue-api
+        method: POST
+        path: "SendRescueOfferWorker"
+        protocol: http
+        duration: 100
+        status: 200
+        description: "RescueRequest.SendOffer(providerId, vehicleId) -> AwaitingAcceptance. Raises RescueOfferSentEvent."
+      - id: accept-offer
+        type: sync
+        from: rescue-api
+        to: rescue-db
+        method: POST
+        path: "rescue.rescue_requests SET status = Dispatched"
+        duration: 30
+        description: "AcceptByProvider: sets RescueProviderId + RescueVehicleId, status Dispatched. Raises RescueAcceptedEvent + RescueDispatchedEvent."
+      - id: reject-offer
+        type: sync
+        from: rescue-api
+        to: rescue-db
+        method: POST
+        path: "rescue.rescue_requests SET status = Matching"
+        duration: 30
+        description: "RejectByProvider: status back to Matching, clears AwaitingProviderId. Raises RescueRejectedEvent. Conductor retries next candidate."
+      - id: reassign-trips
+        type: sync
+        from: conductor
+        to: rescue-api
+        method: POST
+        path: "ReassignTripsWorker"
+        protocol: http
+        duration: 400
+        status: 200
+        description: "Step 4a: reassign-trips task. Moves AffectedPassengerTripIds from original VR to rescue VR via Trip Operations HTTP client."
+      - id: reassign-http
+        type: sync
+        from: rescue-api
+        to: trip-ops-api
+        method: POST
+        path: "/v1/pt/{id}/reassign"
+        protocol: http
+        duration: 150
+        status: 200
+        description: "RescueTripHttpClient: reassign each PT to replacement VR. 3 retries, circuit breaker, 15s timeout."
+        response:
+          status: 200
+          label: "PT reassigned"
+      - id: validate-assignment
+        type: sync
+        from: rescue-api
+        to: assignment-api
+        method: POST
+        path: "/v1/assignments/validate"
+        protocol: http
+        duration: 100
+        status: 200
+        description: "ConstraintValidationHttpClient: validate replacement provider meets assignment constraints. 2 retries, 10s timeout."
+        response:
+          status: 200
+          label: "Constraints valid"
+      - id: notify-stakeholders
+        type: publish
+        from: rescue-api
+        to: asb
+        messageType: "RescueDispatchedEvent + RescueResolvedEvent"
+        payload:
+          description: "Step 5: notify-stakeholders task. Communications EP dispatches SMS/push to parents, schools, dispatch. Optional task -- failure does not block resolution."
+      - id: comms-consume
+        type: subscribe
+        from: asb
+        to: comms-ep
+        messageType: "RescueDispatchedEvent"
+        action: "Send 'Replacement driver dispatched' SMS to affected parents via Twilio"
+      - id: resolve-rescue
+        type: sync
+        from: conductor
+        to: rescue-api
+        method: POST
+        path: "ResolveRescueWorker"
+        protocol: http
+        duration: 100
+        status: 200
+        description: "Step 6: resolve-rescue task. RescueRequest.Resolve(ResolutionOutcome.Reassigned). Terminal state."
+      - id: escalate-manual
+        type: sync
+        from: conductor
+        to: rescue-api
+        method: POST
+        path: "EscalateManualDispatchWorker"
+        protocol: http
+        duration: 100
+        status: 200
+        description: "Step 4b: escalate-manual-dispatch. No provider found -- creates Conductor human task. 5-tier model: None -> Dispatcher -> Supervisor -> OpsManager -> Exhausted."
+      - id: compensation-revert
+        type: sync
+        from: conductor
+        to: rescue-api
+        method: POST
+        path: "RevertTripAssignmentWorker"
+        protocol: http
+        duration: 200
+        status: 200
+        description: "Compensation Step 1: revert-trip-assignment. Returns PTs to original VR. 5x retry with exponential backoff."
+
+    steps:
+      - id: saga-step-1
+        title: "Provider Matching & Scoring"
+        narrative: >
+          Conductor fires **FindReplacementProviderWorker** (Step 2, 300s timeout, 2x retry).
+          The worker delegates to `RescueMatchingService` which orchestrates the
+          `ProximityMatchingAlgorithm`. First, **RescueCoverageZone** is checked in Redis
+          (5-min TTL, pre-computed by `CoverageZoneRefreshJob`). Then `ProviderNetworkHttpClient`
+          fetches available providers within `MaxProximityMiles` (25). Each candidate is scored
+          across 6 weighted criteria via `MatchingScore`: **Proximity** (30%), **Availability** (25%),
+          **Capacity** (15%), **Equipment** (15%), **Reliability** (10%), **Cost** (5%).
+          Hard constraints: `MinReliabilityScore` (70), capacity match, equipment match.
+          Soft constraints: proximity distance, availability window, cost preference.
+          Three preset profiles: `Default`, `UrgentRescue`, `CostOptimized`. The `CompositeScore`
+          determines ranking. Conductor SWITCH task (`check-match-found`) routes to
+          reassignment (true), escalation (false), or safety fallback (default).
+        activeCalls: [find-provider, query-providers, coverage-zone-check]
+        revealNodes: [conductor, rescue-api, provider-api, redis]
+        duration: 6000
+      - id: saga-step-2
+        title: "Offer-Accept-Reject Cycle"
+        narrative: >
+          **SendRescueOfferWorker** calls `RescueRequest.SendOffer(providerId, vehicleId)`,
+          transitioning to `AwaitingAcceptance` and raising **RescueOfferSentEvent**.
+          The offer is sent to the matched provider via Communications EP (push notification).
+          Two outcomes: (1) **Accept** -- `AcceptByProvider(providerId)` validates
+          `AwaitingProviderId == providerId`, copies `AwaitingProviderId/VehicleId` to
+          `RescueProviderId/VehicleId`, transitions to `Dispatched`, raises
+          **RescueAcceptedEvent** + **RescueDispatchedEvent**. (2) **Reject** --
+          `RejectByProvider(providerId, reason)` transitions back to `Matching`,
+          clears `AwaitingProviderId`, raises **RescueRejectedEvent**. Conductor
+          retries with next-ranked candidate. The cycle continues until acceptance
+          or all candidates exhausted (triggers escalation). SLA breach detection
+          runs periodically: `CheckResponseSlaBreach()` during matching phase,
+          `CheckEscalationSlaBreach()` during full lifecycle.
+        activeCalls: [send-offer, accept-offer, reject-offer]
+        revealNodes: [rescue-db]
+        revealCalls: [find-provider, query-providers, coverage-zone-check]
+        duration: 6000
+      - id: saga-step-3
+        title: "Trip Reassignment & Resolution"
+        narrative: >
+          **ReassignTripsWorker** (Step 4a, Redis-idempotent) moves each
+          `AffectedPassengerTripId` from the original VR to the rescue VR via
+          `RescueTripHttpClient.POST /v1/pt/{id}/reassign`. Assignment constraints
+          are validated via `ConstraintValidationHttpClient` (2 retries, circuit breaker).
+          **NotifyStakeholdersWorker** (Step 5, optional) publishes **RescueDispatchedEvent** --
+          Communications EP sends SMS to affected parents via Twilio. **ResolveRescueWorker**
+          (Step 6) calls `RescueRequest.Resolve(ResolutionOutcome.Reassigned)`, transitioning
+          to terminal `Resolved` state. Three resolution outcomes: `Reassigned` (provider replaced),
+          `CancelledTrip` (no replacement possible), `ParentPickup` (parent retrieves student).
+          The **RescueResolvedEvent** triggers SignalR broadcast to connected dispatchers.
+          {color:green|Happy path complete: student transported by replacement provider.}
+        activeCalls: [reassign-trips, reassign-http, validate-assignment, notify-stakeholders, comms-consume, resolve-rescue]
+        revealNodes: [trip-ops-api, assignment-api, comms-ep, asb]
+        revealCalls: [send-offer, accept-offer, reject-offer]
+        duration: 6000
+      - id: saga-step-4
+        title: "Escalation & Compensation"
+        narrative: >
+          When no provider is found, **EscalateManualDispatchWorker** (Step 4b)
+          creates a Conductor human task and walks the 5-tier escalation model:
+          `None` -> `Dispatcher` -> `Supervisor` -> `OpsManager` -> `Exhausted`.
+          The **RescueEscalationWorkflow** (separate Conductor definition) manages
+          tier progression with its own compensation. Dispatchers resolve via
+          `POST /v1/rescues/{id}/escalation/resolve`. If the saga fails at any point,
+          the **Rescue Operation Rollback Workflow** fires 3 compensation tasks:
+          (1) `RevertTripAssignmentWorker` returns PTs to original VR (5x retry),
+          (2) `CancelRescueRequestWorker` marks rescue cancelled with failure reason,
+          (3) `NotifyCompensationStakeholdersWorker` alerts dispatch and parents.
+          7 specialized scenario workflows exist: `DriverNoShowWorkflow`,
+          `VehicleBreakdownWorkflow`, `DriverEmergencyWorkflow` (includes
+          `AssessSafetyWorker`, `ContactEmergencyServicesWorker`). 28 total workers
+          across 6 Conductor workflow JSON definitions plus 3 compensation definitions.
+        activeCalls: [escalate-manual, compensation-revert]
+        revealNodes: []
+        revealCalls: [reassign-trips, reassign-http, validate-assignment, notify-stakeholders, comms-consume, resolve-rescue]
+        duration: 5000

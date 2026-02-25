@@ -1,0 +1,414 @@
+id: payment-platform
+title: "Real-Time Payment Platform"
+description: >-
+  End-to-end payment processing — from API ingestion through fraud orchestration,
+  ledger persistence, event-driven settlement, and webhook reconciliation.
+  Showcases all 9 service types, 4 call semantics, zones, tags, response edges,
+  status effects, and progressive reveal with rich narration.
+renderer: service-flow
+schemaVersion: "2.0"
+layout: sequence
+
+services:
+  - id: gateway
+    name: API Gateway
+    type: gateway
+    technology: Kong
+    status: healthy
+    version: "3.6"
+    tags:
+      protocol: REST
+      region: us-east-1
+      rate-limit: "10k/min"
+
+  - id: payments
+    name: Payment Service
+    type: api
+    technology: "Node.js 22"
+    status: healthy
+    instances: 3
+    version: "4.2"
+    tags:
+      protocol: gRPC
+      SLA: "99.99%"
+      team: payments
+
+  - id: idemp-cache
+    name: Idempotency Cache
+    type: cache
+    technology: Redis
+    status: healthy
+    tags:
+      ttl: "24h"
+      strategy: write-through
+
+  - id: fraud-engine
+    name: Fraud Orchestrator
+    type: workflow
+    technology: "Temporal"
+    status: healthy
+    tags:
+      team: risk
+      p99: "180ms"
+
+  - id: risk-model
+    name: Risk ML Engine
+    type: external
+    technology: "Stripe Radar"
+    tags:
+      vendor: Stripe
+      model: "v3.1"
+
+  - id: ledger
+    name: Ledger DB
+    type: database
+    technology: "PostgreSQL 16"
+    status: healthy
+    tags:
+      region: us-east-1
+      replicas: "2"
+
+  - id: event-mesh
+    name: Event Mesh
+    type: event-bus
+    technology: "Kafka Connect"
+    status: healthy
+    tags:
+      sinks: "4"
+      throughput: "25k/s"
+
+  - id: settlement
+    name: Settlement Worker
+    type: worker
+    technology: "Go 1.22"
+    status: healthy
+    tags:
+      schedule: "T+1"
+      team: finance
+
+  - id: webhook-ep
+    name: Webhook Processor
+    type: event-processor
+    technology: "Node.js 22"
+    status: degraded
+    tags:
+      team: integrations
+      backlog: "1.2k"
+
+queues:
+  - id: payment-events
+    name: payment-events
+    type: topic
+    broker: kafka
+    consumers: 4
+    tags:
+      partitions: "12"
+      retention: "7d"
+      tier: critical
+
+  - id: settlement-queue
+    name: settlement-jobs
+    type: queue
+    broker: rabbitmq
+    consumers: 2
+    tags:
+      priority: high
+
+  - id: webhook-stream
+    name: webhook-inbound
+    type: stream
+    broker: kafka
+    consumers: 1
+    tags:
+      source: Stripe
+
+zones:
+  - id: payment-core
+    label: "Payment Core"
+    members: [payments, idemp-cache, ledger]
+    color: "rgba(59, 130, 246, 0.06)"
+
+  - id: fraud-zone
+    label: "Fraud Detection"
+    members: [fraud-engine, risk-model]
+    color: "rgba(249, 115, 22, 0.06)"
+
+  - id: event-infra
+    label: "Event Infrastructure"
+    members: [payment-events, settlement-queue, webhook-stream, event-mesh]
+    color: "rgba(168, 85, 247, 0.06)"
+
+calls:
+  # ── Ingestion ──
+  - id: ingest
+    type: sync
+    from: gateway
+    to: payments
+    method: POST
+    path: /v1/payments
+    protocol: http
+    duration: 220
+    response:
+      status: 202
+      label: "Payment Accepted"
+
+  # ── Idempotency ──
+  - id: dedup-check
+    type: sync
+    from: payments
+    to: idemp-cache
+    method: GET
+    path: "Idempotency-Key: {key}"
+    duration: 1
+
+  # ── Fraud ──
+  - id: fraud-assess
+    type: sync
+    from: payments
+    to: fraud-engine
+    method: POST
+    path: /assess
+    protocol: grpc
+    duration: 45
+
+  - id: risk-score
+    type: sync
+    from: fraud-engine
+    to: risk-model
+    method: POST
+    path: /v1/radar/score
+    protocol: http
+    duration: 130
+    response:
+      status: 200
+      label: "score: 0.12 (low risk)"
+
+  # ── Persistence ──
+  - id: persist-payment
+    type: sync
+    from: payments
+    to: ledger
+    method: INSERT
+    path: "payments + outbox (single txn)"
+    duration: 8
+
+  # ── Event Publication ──
+  - id: emit-created
+    type: publish
+    from: payments
+    to: payment-events
+    messageType: PaymentCreatedEvent
+
+  # ── Settlement ──
+  - id: settle-subscribe
+    type: subscribe
+    from: payment-events
+    to: settlement
+    messageType: PaymentCreatedEvent
+    action: "Batch for T+1 payout"
+
+  - id: settle-enqueue
+    type: async
+    from: settlement
+    to: settlement-queue
+    messageType: SettlementJob
+    method: ENQUEUE
+    path: "SettlementJob(merchantId, amount)"
+
+  # ── Event Mesh ──
+  - id: mesh-fanout
+    type: subscribe
+    from: payment-events
+    to: event-mesh
+    messageType: PaymentCreatedEvent
+    action: "Route to 4 downstream sinks"
+
+  # ── Webhook Reconciliation ──
+  - id: webhook-consume
+    type: subscribe
+    from: webhook-stream
+    to: webhook-ep
+    messageType: "payment_intent.succeeded"
+    action: "Reconcile with ledger"
+
+  - id: webhook-confirm
+    type: sync
+    from: webhook-ep
+    to: payments
+    method: PATCH
+    path: "/v1/payments/{id}/confirm"
+    protocol: http
+    duration: 15
+    response:
+      status: 200
+      label: "Confirmed"
+
+steps:
+  - id: step-1
+    title: "Payment Ingestion"
+    narration:
+      speaker: Architect
+      message: >-
+        A merchant submits `POST /v1/payments` through **Kong**.
+        The gateway enforces {color:orange|rate limiting} (10k/min)
+        and routes to one of **3 Payment Service instances** behind
+        round-robin load balancing.
+    activeCalls:
+      - ingest
+    focusNodes:
+      - gateway
+      - payments
+    duration: 5000
+
+  - id: step-2
+    title: "Idempotency Guard"
+    narration:
+      speaker: Architect
+      message: >-
+        Before any business logic, the service checks the
+        {color:cyan|Redis idempotency cache} — a **1ms lookup**
+        against `Idempotency-Key`. Duplicate submissions get the
+        original response back. *No double charges, ever.*
+    activeCalls:
+      - dedup-check
+    revealCalls:
+      - ingest
+    focusNodes:
+      - payments
+      - idemp-cache
+    duration: 4000
+
+  - id: step-3
+    title: "Fraud Orchestration"
+    narration:
+      speaker: Architect
+      message: >-
+        The Payment Service invokes the {color:orange|Fraud Orchestrator}
+        — a **Temporal workflow** that fans out to multiple risk signals.
+        The orchestrator calls {color:gray|Stripe Radar's ML engine},
+        which returns a risk score. Score `0.12` = {color:green|low risk},
+        payment proceeds. Above `0.75` = {color:red|auto-decline}.
+    activeCalls:
+      - fraud-assess
+      - risk-score
+    revealCalls:
+      - ingest
+      - dedup-check
+    focusNodes:
+      - fraud-engine
+      - risk-model
+    duration: 6000
+
+  - id: step-4
+    title: "Atomic Commit"
+    narration:
+      speaker: Architect
+      message: >-
+        With fraud cleared, the payment record and a
+        **PaymentCreatedEvent** are written to {color:blue|PostgreSQL}
+        in a single atomic transaction — the *transactional outbox pattern*.
+        If the write fails, no event escapes. {color:green|Guaranteed consistency.}
+    activeCalls:
+      - persist-payment
+    revealCalls:
+      - ingest
+      - dedup-check
+      - fraud-assess
+      - risk-score
+    focusNodes:
+      - payments
+      - ledger
+    duration: 5000
+
+  - id: step-5
+    title: "Event Publication"
+    narration:
+      speaker: Architect
+      message: >-
+        **PaymentCreatedEvent** hits the {color:purple|Kafka topic} —
+        12 partitions, 7-day retention. This is the decoupling point:
+        the payment API's job is done. Everything downstream is
+        *eventually consistent* and independently scalable.
+    activeCalls:
+      - emit-created
+    revealCalls:
+      - ingest
+      - dedup-check
+      - fraud-assess
+      - risk-score
+      - persist-payment
+    focusNodes:
+      - payments
+      - payment-events
+    duration: 5000
+
+  - id: step-6
+    title: "Settlement Pipeline"
+    narration:
+      speaker: Architect
+      message: >-
+        The {color:purple|Settlement Worker} subscribes to payment events
+        and batches them for **T+1 merchant payout**. Each payment is
+        enqueued as a `SettlementJob` in {color:purple|RabbitMQ} with
+        priority routing — high-value merchants settle first.
+    activeCalls:
+      - settle-subscribe
+      - settle-enqueue
+    revealCalls:
+      - ingest
+      - persist-payment
+      - emit-created
+    focusNodes:
+      - settlement
+      - settlement-queue
+    duration: 5000
+
+  - id: step-7
+    title: "Event Mesh Fan-Out"
+    narration:
+      speaker: Architect
+      message: >-
+        The {color:orange|Event Mesh} — powered by Kafka Connect —
+        subscribes to the same topic and routes events to **4 downstream
+        sinks**: analytics warehouse, compliance audit log, merchant
+        dashboard, and the notification service. One event, zero
+        point-to-point integrations.
+    activeCalls:
+      - mesh-fanout
+    revealCalls:
+      - ingest
+      - persist-payment
+      - emit-created
+      - settle-subscribe
+      - settle-enqueue
+    focusNodes:
+      - event-mesh
+      - payment-events
+    duration: 5000
+
+  - id: step-8
+    title: "Webhook Reconciliation"
+    narration:
+      speaker: Architect
+      message: >-
+        Meanwhile, Stripe sends a `payment_intent.succeeded` webhook.
+        The {color:red|Webhook Processor} — currently {color:red|degraded}
+        with a 1.2k backlog — consumes from the inbound stream and
+        patches the payment status to `confirmed`. The pulsing node
+        signals the team is investigating.
+        *This is the complete payment lifecycle — from merchant request
+        to confirmed settlement.*
+    activeCalls:
+      - webhook-consume
+      - webhook-confirm
+    revealCalls:
+      - ingest
+      - persist-payment
+      - emit-created
+      - settle-subscribe
+      - settle-enqueue
+      - mesh-fanout
+    focusNodes:
+      - webhook-ep
+      - webhook-stream
+    duration: 6000

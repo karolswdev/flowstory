@@ -1,0 +1,503 @@
+id: pattern-aggregate-factory
+title: "Aggregate Factory — Controlled Construction & Encapsulation"
+renderer: composite
+schemaVersion: "2.0"
+description: >
+  Two perspectives on the Aggregate Factory pattern: how a request flows from
+  HTTP through the MediatR pipeline to a static Create() factory that enforces
+  valid initial state, and how aggregate mutation methods (Guard → Mutate → Event)
+  keep business logic testable in isolation from infrastructure.
+
+sections:
+  # ── Section 1: Controlled Construction ──────────────────────────────────
+  - renderer: service-flow
+    title: "Controlled Construction"
+    accentColor: "#3B82F6"
+    layout: sequence
+
+    services:
+      - id: client
+        name: "HTTP Client"
+        type: external
+        technology: "Trip HQ / MDD"
+        status: healthy
+      - id: controller
+        name: "API Controller"
+        type: api
+        technology: "[Authorize] REST"
+        status: healthy
+      - id: validation
+        name: "Validation Behavior"
+        type: worker
+        technology: "FluentValidation"
+        status: healthy
+      - id: tenant
+        name: "Tenant Scoping"
+        type: worker
+        technology: "TenantContextProvider"
+        status: healthy
+      - id: handler
+        name: "Command Handler"
+        type: worker
+        technology: "ICommandHandler<T>"
+        status: healthy
+      - id: aggregate
+        name: "Aggregate Root"
+        type: api
+        technology: "Domain Entity"
+        status: healthy
+      - id: db
+        name: "PostgreSQL"
+        type: database
+        technology: "EF Core DbContext"
+        status: healthy
+      - id: outbox
+        name: "outbox_messages"
+        type: database
+        technology: "Same Transaction"
+        status: healthy
+      - id: asb
+        name: "Azure Service Bus"
+        type: event-bus
+        technology: "ASB Premium"
+        status: healthy
+
+    zones:
+      - id: api-boundary
+        label: "API Boundary"
+        members: [client, controller]
+        color: "rgba(59, 130, 246, 0.04)"
+      - id: pipeline
+        label: "MediatR Pipeline"
+        members: [validation, tenant]
+        color: "rgba(59, 130, 246, 0.08)"
+      - id: application
+        label: "Application Layer"
+        members: [handler]
+        color: "rgba(34, 197, 94, 0.06)"
+      - id: domain
+        label: "Domain Layer"
+        members: [aggregate]
+        color: "rgba(34, 197, 94, 0.10)"
+      - id: infra
+        label: "Infrastructure"
+        members: [db, outbox, asb]
+        color: "rgba(168, 85, 247, 0.06)"
+
+    calls:
+      - id: http-request
+        type: sync
+        from: client
+        to: controller
+        method: POST
+        path: "/trip-operations/v1/sgr/trigger"
+        protocol: http
+        duration: 5
+        status: 200
+        description: "Authenticated request with JWT — tenant_id claim required"
+        response:
+          status: 201
+          label: "201 Created"
+      - id: create-command
+        type: sync
+        from: controller
+        to: validation
+        method: INVOKE
+        path: "MediatR.Send(new TriggerSgrCommand(...))"
+        duration: 1
+        description: "Controller creates a command object and dispatches via MediatR"
+      - id: validate-input
+        type: sync
+        from: validation
+        to: validation
+        method: VALIDATE
+        path: "TriggerSgrCommandValidator — targetDate required, must be future"
+        duration: 2
+        description: "FluentValidation rules — rejects malformed input with HTTP 400"
+      - id: scope-tenant
+        type: sync
+        from: validation
+        to: tenant
+        method: INVOKE
+        path: "TenantScopingBehavior — extract tenant_id from JWT, set on command"
+        duration: 1
+        description: "Ensures every command carries the correct TenantId"
+      - id: dispatch-handler
+        type: sync
+        from: tenant
+        to: handler
+        method: INVOKE
+        path: "TriggerSgrCommandHandler.Handle(command)"
+        duration: 1
+        description: "Handler receives validated, tenant-scoped command"
+      - id: call-factory
+        type: sync
+        from: handler
+        to: aggregate
+        method: INVOKE
+        path: "ScheduledGenerationRun.Create(tenantId, targetDate, createdBy)"
+        duration: 1
+        description: "Static factory — the only way to construct this aggregate"
+      - id: generate-id
+        type: sync
+        from: aggregate
+        to: aggregate
+        method: VALIDATE
+        path: "Guid.NewGuid() → private ctor → Status = Queued"
+        duration: 1
+        description: "Private constructor: generate identity, set valid initial state"
+      - id: raise-created
+        type: publish
+        from: aggregate
+        to: aggregate
+        messageType: "SgrCreatedEvent"
+        payload:
+          description: "RaiseDomainEvent(new SgrCreatedEvent(Id, TenantId, TargetDate))"
+      - id: persist-state
+        type: sync
+        from: handler
+        to: db
+        method: POST
+        path: "INSERT INTO scheduled_generation_runs (id, tenant_id, status, ...)"
+        duration: 15
+        description: "EF Core persists the new aggregate"
+      - id: persist-outbox
+        type: sync
+        from: handler
+        to: outbox
+        method: POST
+        path: "INSERT INTO outbox_messages (event_type, payload, created_at)"
+        duration: 5
+        description: "Domain event serialized into outbox — SAME transaction"
+      - id: commit
+        type: sync
+        from: db
+        to: outbox
+        method: INVOKE
+        path: "COMMIT — aggregate state + outbox event atomically"
+        duration: 10
+        description: "All-or-nothing: both succeed or both fail"
+      - id: relay-publish
+        type: publish
+        from: outbox
+        to: asb
+        messageType: "SgrCreatedEvent"
+        payload:
+          description: "Background outbox relay picks up and publishes to ASB topic"
+
+    steps:
+      - id: step-1
+        title: "HTTP Request Arrives"
+        narrative: >
+          An authenticated `POST /trip-operations/v1/sgr/trigger` arrives from the
+          Conductor workflow engine (or a dispatcher in Trip HQ). The request carries
+          a JWT with a `tenant_id` claim — the **TenantIsolationFilter** on the controller
+          rejects any request without one. The controller does not touch domain objects.
+          Its only job: create a **TriggerSgrCommand** and dispatch it via MediatR.
+        activeCalls: [http-request, create-command]
+        revealNodes: [client, controller]
+        duration: 5000
+
+      - id: step-2
+        title: "Pipeline Behaviors"
+        narrative: >
+          Before the handler executes, two **IPipelineBehavior** implementations fire
+          in sequence. **ValidationBehavior** runs the `TriggerSgrCommandValidator` —
+          FluentValidation rules check that `targetDate` is present and in the future.
+          Invalid input is rejected with HTTP 400 before any domain logic runs.
+          **TenantScopingBehavior** extracts the `tenant_id` from the JWT and sets it
+          on the command. The handler never needs to worry about tenant context — the
+          pipeline guarantees it.
+        activeCalls: [validate-input, scope-tenant]
+        revealNodes: [validation, tenant]
+        revealCalls: [http-request, create-command]
+        duration: 5000
+
+      - id: step-3
+        title: "Handler Receives Validated Command"
+        narrative: >
+          The **TriggerSgrCommandHandler** receives a command that is guaranteed valid
+          (passed FluentValidation) and tenant-scoped (TenantId set by pipeline). The
+          handler's job is simple: call the aggregate's static factory method. It does
+          not construct the aggregate with `new` — the constructor is `private`. The
+          only door in is the factory.
+        activeCalls: [dispatch-handler]
+        revealNodes: [handler]
+        revealCalls: [validate-input, scope-tenant]
+        duration: 4000
+
+      - id: step-4
+        title: "Static Factory — The Only Door In"
+        narrative: >
+          `ScheduledGenerationRun.Create(tenantId, targetDate, createdBy)` — a static
+          method on the aggregate root. Inside: **`Guid.NewGuid()`** generates the
+          aggregate's identity. The **private constructor** sets `Status = Queued`,
+          `CreatedAt = DateTime.UtcNow`, and validates that `targetDate` is not in the
+          past. The aggregate exits the factory in a **known valid state** — it has an
+          identity, a status, a tenant, and a creation timestamp. There is no way to
+          construct a `ScheduledGenerationRun` that is missing any of these.
+        activeCalls: [call-factory, generate-id]
+        revealNodes: [aggregate]
+        revealCalls: [dispatch-handler]
+        duration: 6000
+
+      - id: step-5
+        title: "Initial Domain Event"
+        narrative: >
+          Still inside the factory: `RaiseDomainEvent(new SgrCreatedEvent(Id, TenantId,
+          TargetDate))`. The event is queued on the aggregate's internal event collection —
+          it is not yet published. This is the aggregate's **birth announcement**: downstream
+          consumers will know that a new SGR was created, by whom, and for what date. Every
+          aggregate root across all 13 BCs raises a `Created` event in its factory. The event
+          is part of the contract — construction without an event is a bug.
+        activeCalls: [raise-created]
+        focusNodes: [aggregate]
+        revealCalls: [call-factory, generate-id]
+        duration: 5000
+
+      - id: step-6
+        title: "Atomic Commit"
+        narrative: >
+          Back in the handler: `SaveChangesAsync()`. EF Core writes TWO things in a
+          **single PostgreSQL transaction**: the aggregate's state to `scheduled_generation_runs`
+          and the serialized **SgrCreatedEvent** to `outbox_messages`. Same database. Same
+          `COMMIT`. If the transaction succeeds, both the aggregate and the event exist.
+          If it fails, neither exists. No orphaned state. No lost events.
+        activeCalls: [persist-state, persist-outbox, commit]
+        revealNodes: [db, outbox]
+        revealCalls: [raise-created]
+        duration: 6000
+
+      - id: step-7
+        title: "Event Reaches the Bus"
+        narrative: >
+          The background **outbox relay** polls `outbox_messages` every 500ms, picks up
+          the **SgrCreatedEvent**, and publishes it to the `trip-operations` ASB topic.
+          Downstream consumers — Assignment (batch matching), Monitoring (operational
+          tracking) — receive the event and react. The aggregate's lifecycle has begun:
+          it was constructed in a valid state, its birth was atomically committed, and the
+          event is guaranteed to reach the bus. {color:green|From factory to event bus —
+          every step is controlled, auditable, and testable.}
+        activeCalls: [relay-publish]
+        revealNodes: [asb]
+        revealCalls: [persist-state, persist-outbox, commit]
+        duration: 5000
+
+  # ── Section 2: Business Logic Encapsulation ─────────────────────────────
+  - renderer: service-flow
+    title: "Guard → Mutate → Event"
+    accentColor: "#22C55E"
+    layout: sequence
+
+    services:
+      - id: handler
+        name: "Command Handler"
+        type: worker
+        technology: "CompleteVrHandler"
+        status: healthy
+      - id: repo
+        name: "Repository"
+        type: database
+        technology: "IVehicleRunRepository"
+        status: healthy
+      - id: aggregate
+        name: "VehicleRun"
+        type: api
+        technology: "Aggregate Root"
+        status: healthy
+      - id: state-machine
+        name: "VrStateMachine"
+        type: worker
+        technology: "Dictionary<Status, List<Status>>"
+        status: healthy
+      - id: domain-event
+        name: "VrStateChangedEvent"
+        type: event-bus
+        technology: "Domain Event"
+        status: healthy
+      - id: db
+        name: "PostgreSQL"
+        type: database
+        technology: "EF Core + Outbox"
+        status: healthy
+      - id: test
+        name: "Unit Test"
+        type: external
+        technology: "xUnit + FluentAssertions"
+        status: healthy
+
+    zones:
+      - id: application
+        label: "Application Layer"
+        members: [handler, repo]
+        color: "rgba(34, 197, 94, 0.06)"
+      - id: domain
+        label: "Aggregate Boundary"
+        members: [aggregate, state-machine, domain-event]
+        color: "rgba(59, 130, 246, 0.08)"
+      - id: infra
+        label: "Infrastructure"
+        members: [db]
+        color: "rgba(168, 85, 247, 0.06)"
+      - id: testing
+        label: "Testing"
+        members: [test]
+        color: "rgba(245, 158, 11, 0.06)"
+
+    calls:
+      - id: load-aggregate
+        type: sync
+        from: handler
+        to: repo
+        method: GET
+        path: "GetByIdAsync(command.VehicleRunId)"
+        duration: 15
+        description: "Load full aggregate with EF Core change tracking"
+      - id: call-complete
+        type: sync
+        from: handler
+        to: aggregate
+        method: INVOKE
+        path: "vehicleRun.TransitionTo(VrStatus.PostService)"
+        duration: 1
+        description: "Handler calls public mutation method — the only way to change state"
+      - id: check-transition
+        type: sync
+        from: aggregate
+        to: state-machine
+        method: VALIDATE
+        path: "ValidateTransition(AtStop, PostService) — O(1) dictionary lookup"
+        duration: 1
+        description: "Guard: is AtStop → PostService a valid transition?"
+      - id: mutate-state
+        type: sync
+        from: state-machine
+        to: aggregate
+        method: INVOKE
+        path: "Status = PostService; UpdatedAt = now; CompletedAt = now"
+        duration: 1
+        description: "Private setters — external code cannot set Status directly"
+      - id: raise-event
+        type: publish
+        from: aggregate
+        to: domain-event
+        messageType: "VrStateChangedEvent"
+        payload:
+          description: "RaiseDomainEvent(new VrStateChangedEvent(Id, TenantId, AtStop, PostService))"
+      - id: save-changes
+        type: sync
+        from: handler
+        to: db
+        method: POST
+        path: "SaveChangesAsync() — state + outbox_messages atomic"
+        duration: 30
+        description: "Persist aggregate state and domain events atomically"
+      - id: test-construct
+        type: sync
+        from: test
+        to: aggregate
+        method: INVOKE
+        path: "VehicleRun.Create(tenantId, ...) — factory constructs test subject"
+        duration: 1
+        description: "Test constructs aggregate via factory — same path as production"
+      - id: test-assert
+        type: sync
+        from: test
+        to: domain-event
+        method: VALIDATE
+        path: "aggregate.DomainEvents.Should().ContainSingle<VrStateChangedEvent>()"
+        duration: 1
+        description: "Assert on state and events — no database, no bus, no HTTP"
+
+    steps:
+      - id: encap-step-1
+        title: "Load the Aggregate"
+        narrative: >
+          The **CompleteVrHandler** receives a `CompleteVehicleRunCommand` (already validated
+          and tenant-scoped by the pipeline). First step: load the **VehicleRun** aggregate
+          from the repository. EF Core loads the full aggregate with change tracking enabled —
+          the handler will mutate it and persist the changes at the end.
+        activeCalls: [load-aggregate]
+        revealNodes: [handler, repo]
+        duration: 4000
+
+      - id: encap-step-2
+        title: "Call the Public Mutation Method"
+        narrative: >
+          The handler calls `vehicleRun.TransitionTo(VrStatus.PostService)` — a **public
+          method** on the aggregate. This is the only way to change the VehicleRun's state.
+          The handler cannot set `Status` directly because the setter is `private`. It cannot
+          skip validation because the guard is inside the method. It asks the aggregate to
+          perform a transition, and the aggregate decides whether it's allowed.
+        activeCalls: [call-complete]
+        revealNodes: [aggregate]
+        revealCalls: [load-aggregate]
+        duration: 5000
+
+      - id: encap-step-3
+        title: "Guard — State Machine Validation"
+        narrative: >
+          Inside `TransitionTo()`, the aggregate delegates to **VrStateMachine.ValidateTransition()**
+          — an O(1) dictionary lookup. Is `AtStop → PostService` in the `ValidTransitions`
+          dictionary? Yes — this is the last stop completing. If the caller tried
+          `AtStop → Archived` (skipping 5 states), the dictionary lookup would fail and
+          throw a `DomainException`. The state machine is the **single source of truth**
+          for all valid transitions. 16 states, 28 transitions, ~100 lines of code.
+        activeCalls: [check-transition]
+        revealNodes: [state-machine]
+        revealCalls: [call-complete]
+        duration: 5000
+
+      - id: encap-step-4
+        title: "Mutate — Private Setters"
+        narrative: >
+          Guard passed. The aggregate mutates its own state: `Status = PostService`,
+          `UpdatedAt = DateTime.UtcNow`, `CompletedAt = DateTime.UtcNow`. These are
+          **private setters** — no code outside the aggregate can set them. The domain
+          model enforces its own invariants. The handler, the controller, the pipeline —
+          none of them can put the aggregate into an invalid state.
+        activeCalls: [mutate-state]
+        focusNodes: [aggregate, state-machine]
+        revealCalls: [check-transition]
+        duration: 4000
+
+      - id: encap-step-5
+        title: "Event — What Happened"
+        narrative: >
+          `RaiseDomainEvent(new VrStateChangedEvent(Id, TenantId, AtStop, PostService))`.
+          The event captures *what happened* — not an instruction, but a fact. The aggregate
+          records the previous and new status, the timestamp, and the identity. This event
+          will drive downstream reactions: Settlement (billing), Monitoring (on-time tracking),
+          Communications (parent notification). The event is the aggregate's **observable output**.
+        activeCalls: [raise-event]
+        revealNodes: [domain-event]
+        revealCalls: [mutate-state]
+        duration: 5000
+
+      - id: encap-step-6
+        title: "Persist Atomically"
+        narrative: >
+          Back in the handler: `SaveChangesAsync()`. The aggregate state and the domain
+          event commit atomically to PostgreSQL. The **Guard → Mutate → Event** cycle is
+          complete. The VehicleRun moved from `AtStop` to `PostService`, the transition was
+          validated, the state was mutated through private setters, and the event was persisted
+          alongside the state change. No step can be skipped. No step can be reordered.
+        activeCalls: [save-changes]
+        revealNodes: [db]
+        revealCalls: [raise-event]
+        duration: 5000
+
+      - id: encap-step-7
+        title: "The Aggregate as Unit of Test"
+        narrative: >
+          This pattern makes the aggregate the **unit-of-test boundary**. A unit test calls
+          `VehicleRun.Create(...)` (same factory as production), then calls `TransitionTo()`
+          and asserts on the resulting `Status` and `DomainEvents` collection. No database. No
+          message bus. No HTTP. No mocking infrastructure. Pure domain logic, pure unit tests.
+          {color:green|The factory guarantees valid construction. The guard guarantees valid
+          transitions. The private setters guarantee no external bypass. The event guarantees
+          observability. Every aggregate across all 13 BCs follows this pattern.}
+        activeCalls: [test-construct, test-assert]
+        revealNodes: [test]
+        revealCalls: [save-changes]
+        duration: 5000
